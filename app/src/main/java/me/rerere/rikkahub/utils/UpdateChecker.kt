@@ -168,6 +168,30 @@ data class UpdateInfo(
 )
 
 /**
+ * 是否应向用户展示更新卡片。
+ *
+ * 满足任一条件即显示更新：
+ * 1. 远端版本高于本地版本（常规升序推送，latest > current）；
+ * 2. 远端 release 发布时间晚于本地 APK 安装/更新时间（覆盖推送）。
+ *
+ * 条件 2 用于解决"版本号相同或过低导致无法推送更新"的问题：
+ * - 同版本重新构建（如修复 bug 后以相同版本号重发）也能送达已装该版本的用户；
+ * - 即使未来发布号低于某些设备已装版本，只要发布时间更新，同样能覆盖推送。
+ * 已装版本比远端新且远端发布时间更早（正常最新状态）时不会打扰用户。
+ */
+fun shouldShowUpdate(
+    latestVersion: String,
+    currentVersion: String,
+    latestPublishedAt: String,
+    localInstallTimeMillis: Long,
+): Boolean {
+    if (Version(latestVersion) > Version(currentVersion)) return true
+    val publishedAtMillis = runCatching { java.time.Instant.parse(latestPublishedAt).toEpochMilli() }.getOrNull()
+        ?: return false
+    return publishedAtMillis > localInstallTimeMillis
+}
+
+/**
  * 版本号值类，封装版本号字符串并提供比较功能
  *
  * 支持完整的 SemVer 规范：MAJOR.MINOR.PATCH[-prerelease][+build]
