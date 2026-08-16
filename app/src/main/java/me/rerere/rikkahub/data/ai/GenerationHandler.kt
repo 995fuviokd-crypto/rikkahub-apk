@@ -28,6 +28,7 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
@@ -216,7 +217,10 @@ class GenerationHandler(
             // 把首轮锚定延伸成贯穿会话的风格惯性；warmup 结束后放开到用户上限
             // 仅用户显式开启时生效：自动启用会把 DeepSeek reasoning 模型的输出预算
             // 砍到 1024 起步，推理 token 即超限，表现为生成卡住/截断
-            val effectiveMaxTokens = if (settings.smartStewardModeEnabled && assistant.smartAnchorCapLadder) {
+            // 因此对已启用推理的模型自动豁免阶梯：reasoning token 计入 max_completion_tokens，
+            // 过小的预算会截断思考链，表现为生成卡顿/不流畅；豁免后按用户配置的 maxTokens 走
+            val reasoningEnabled = model.abilities.contains(ModelAbility.REASONING) && assistant.reasoningLevel.isEnabled
+            val effectiveMaxTokens = if (settings.smartStewardModeEnabled && assistant.smartAnchorCapLadder && !reasoningEnabled) {
                 AnchorBudgetLadder.budgetFor(
                     userRound = messages.count { it.role == MessageRole.USER },
                     maxTokens = assistant.maxTokens,
