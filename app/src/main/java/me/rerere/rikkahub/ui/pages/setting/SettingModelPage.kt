@@ -150,13 +150,31 @@ private fun ModelSettingsPage(settings: Settings, vm: SettingVM, contentPadding:
             )
         }
         item {
-            ModelSettingItem(
-                title = stringResource(R.string.setting_model_page_ocr_model),
-                description = stringResource(R.string.setting_model_page_ocr_model_desc),
-                modelId = settings.ocrModelId,
-                providers = settings.providers,
-                onSelect = { vm.updateSettings(settings.copy(ocrModelId = it.id)) },
-            )
+            CardGroup(title = { Text(stringResource(R.string.setting_model_page_ocr_group)) }) {
+                item(
+                    headlineContent = { Text(stringResource(R.string.setting_model_page_enable_ocr)) },
+                    supportingContent = { Text(stringResource(R.string.setting_model_page_enable_ocr_desc)) },
+                    trailingContent = {
+                        Switch(
+                            checked = settings.ocrEnabled,
+                            onCheckedChange = {
+                                vm.updateSettings(settings.copy(ocrEnabled = it))
+                            }
+                        )
+                    },
+                )
+            }
+        }
+        if (settings.ocrEnabled) {
+            item {
+                ModelSettingItem(
+                    title = stringResource(R.string.setting_model_page_ocr_model),
+                    description = stringResource(R.string.setting_model_page_ocr_model_desc),
+                    modelId = settings.ocrModelId,
+                    providers = settings.providers,
+                    onSelect = { vm.updateSettings(settings.copy(ocrModelId = it.id)) },
+                )
+            }
         }
         item {
             ModelSettingItem(

@@ -783,6 +783,9 @@
   <string name="setting_model_page_steward_model">ステュワードモードモデル</string>
   <string name="setting_model_page_steward_model_desc">ステュワードモードでタスク完了判定と次の指示生成に使用するモデル。空の場合はチャットモデルに従います</string>
   <string name="setting_model_page_compress_prompt_vars">変数: {content}, {target_tokens}, {additional_context}</string>
+  <string name="setting_model_page_ocr_group">画像→テキスト変換（OCR）</string>
+  <string name="setting_model_page_enable_ocr">画像→テキスト変換を有効化</string>
+  <string name="setting_model_page_enable_ocr_desc">モデルが画像に対応していない場合、視覚モデルで画像をテキスト説明に自動変換します</string>
   <string name="setting_model_page_ocr_model">OCRモデル</string>
   <string name="setting_model_page_ocr_model_desc">画像の光学文字認識に使用されるモデル</string>
   <string name="setting_model_page_ocr_prompt_vars">変数: 画像データ: {images}</string>

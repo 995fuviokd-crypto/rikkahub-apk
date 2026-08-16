@@ -783,6 +783,9 @@
   <string name="setting_model_page_steward_model">Модель режима управляющего</string>
   <string name="setting_model_page_steward_model_desc">Модель для оценки завершения задач и генерации следующих шагов в режиме управляющего. Пусто — использовать модель чата</string>
   <string name="setting_model_page_compress_prompt_vars">Переменные: {content}, {target_tokens}, {additional_context}</string>
+  <string name="setting_model_page_ocr_group">Изображение→текст (OCR)</string>
+  <string name="setting_model_page_enable_ocr">Включить преобразование изображений в текст</string>
+  <string name="setting_model_page_enable_ocr_desc">Если модель не поддерживает изображения, автоматически преобразует их в текстовое описание через визуальную модель</string>
   <string name="setting_model_page_ocr_model">Модель OCR</string>
   <string name="setting_model_page_ocr_model_desc">Модель, используемая для оптического распознавания текста на изображениях</string>
   <string name="setting_model_page_ocr_prompt_vars">Переменные: Данные изображения: {images}</string>

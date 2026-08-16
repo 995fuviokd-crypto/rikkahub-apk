@@ -783,6 +783,9 @@
   <string name="setting_model_page_steward_model">스튜어드 모드 모델</string>
   <string name="setting_model_page_steward_model_desc">스튜어드 모드에서 작업 완료 판단과 다음 지시 생성에 사용하는 모델입니다. 비워 두면 채팅 모델을 따릅니다</string>
   <string name="setting_model_page_compress_prompt_vars">변수: {content}, {target_tokens}, {additional_context}</string>
+  <string name="setting_model_page_ocr_group">이미지→텍스트 변환(OCR)</string>
+  <string name="setting_model_page_enable_ocr">이미지→텍스트 변환 활성화</string>
+  <string name="setting_model_page_enable_ocr_desc">모델이 이미지를 지원하지 않으면 시각 모델로 이미지를 텍스트 설명으로 자동 변환합니다</string>
   <string name="setting_model_page_ocr_model">OCR 모델</string>
   <string name="setting_model_page_ocr_model_desc">이미지에서 광학 문자 인식에 사용되는 모델</string>
   <string name="setting_model_page_ocr_prompt_vars">변수: 이미지 데이터: {images}</string>

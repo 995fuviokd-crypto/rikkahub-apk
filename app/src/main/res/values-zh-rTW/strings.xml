@@ -783,6 +783,9 @@
   <string name="setting_model_page_steward_model">託管模式模型</string>
   <string name="setting_model_page_steward_model_desc">託管模式下用於判斷任務完成情況並生成下一步指令的模型。留空則跟隨對話模型</string>
   <string name="setting_model_page_compress_prompt_vars">變數：{content}、{target_tokens}、{additional_context}</string>
+  <string name="setting_model_page_ocr_group">圖片轉文字（OCR）</string>
+  <string name="setting_model_page_enable_ocr">啟用圖片轉文字</string>
+  <string name="setting_model_page_enable_ocr_desc">模型不支援圖片時，自動用視覺模型把圖片轉成文字描述</string>
   <string name="setting_model_page_ocr_model">OCR 模型</string>
   <string name="setting_model_page_ocr_model_desc">用於圖片光學字元辨識的模型</string>
   <string name="setting_model_page_ocr_prompt_vars">變數：圖片資料：{images}</string>

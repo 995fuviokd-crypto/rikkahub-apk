@@ -51,6 +51,10 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
         if (ctx.model.inputModalities.contains(Modality.IMAGE)) {
             return messages
         }
+        // 图片转文字开关: 关闭时跳过, 图片直接交给主模型
+        if (!get<SettingsStore>().settingsFlow.value.ocrEnabled) {
+            return messages
+        }
 
         val hasImages = messages.any { message ->
             message.parts.any { it is UIMessagePart.Image && it.url.startsWith("file:") }

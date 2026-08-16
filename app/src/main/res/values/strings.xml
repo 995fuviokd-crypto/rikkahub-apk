@@ -841,6 +841,9 @@
   <string name="setting_model_page_steward_model">Steward Mode Model</string>
   <string name="setting_model_page_steward_model_desc">Model used to judge task completion and generate next steps in steward mode. Leave empty to follow the chat model</string>
   <string name="setting_model_page_compress_prompt_vars">Variables: {content}, {target_tokens}, {additional_context}</string>
+  <string name="setting_model_page_ocr_group">Image to Text (OCR)</string>
+  <string name="setting_model_page_enable_ocr">Enable image to text</string>
+  <string name="setting_model_page_enable_ocr_desc">When the model does not support images, automatically convert images to text descriptions using a vision model</string>
   <string name="setting_model_page_ocr_model">OCR Model</string>
   <string name="setting_model_page_ocr_model_desc">Model used for optical character recognition on images</string>
   <string name="setting_model_page_ocr_prompt_vars">Variables: Image data: {images}</string>
