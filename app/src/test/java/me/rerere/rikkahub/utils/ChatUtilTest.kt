@@ -1,6 +1,5 @@
 package me.rerere.rikkahub.utils
 
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -12,7 +11,8 @@ class ChatUtilTest {
     }
 
     @Test
-    fun `still rejects unknown binary file types`() {
-        assertFalse(isAllowedFileType("archive.unknown", "application/octet-stream"))
+    fun `still allows other files since all types are accepted`() {
+        assertTrue(isAllowedFileType("archive.unknown", "application/octet-stream"))
+        assertTrue(isAllowedFileType("archive.unknown", "application/octet-stream"))
     }
 }
