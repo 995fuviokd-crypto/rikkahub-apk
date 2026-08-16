@@ -80,6 +80,13 @@ class ToolPlaybookTransformerTest {
         assertTrue(content.contains("workspace_edit_file"))
         assertTrue(content.contains("修改后必须验证"))
         assertTrue(content.contains("【资源与纪律】"))
+        assertTrue(content.contains("【思维风格】"))
+    }
+
+    @Test
+    fun `playbook should reinforce we need thinking anchor after promotion`() {
+        assertTrue(PLAYBOOK_CONTENT.contains(TOOL_PLAYBOOK_WE_NEED_LINE))
+        assertTrue(TOOL_PLAYBOOK_WE_NEED_LINE.contains("We need"))
     }
 
     @Test

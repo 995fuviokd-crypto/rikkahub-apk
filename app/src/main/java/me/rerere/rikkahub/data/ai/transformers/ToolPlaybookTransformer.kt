@@ -57,6 +57,10 @@ internal fun transformPlaybook(messages: List<UIMessage>): List<UIMessage> {
     return result
 }
 
+/** We need 思维锚定行（晋升后守则追加的保险层，与首轮引导保持一致） */
+internal const val TOOL_PLAYBOOK_WE_NEED_LINE =
+    "每轮思考仍以一句 \"We need…\" 开头点明共同目标，再进入具体步骤，与首轮引导保持一致。"
+
 internal const val PLAYBOOK_CONTENT =
     TOOL_PLAYBOOK_MARKER + "\n" +
         "【Android workspace 工具调用守则 · 本会话生效】\n\n" +
@@ -79,4 +83,6 @@ internal const val PLAYBOOK_CONTENT =
         "代码语法检查或生成流程通过后直接交付产物与运行方式并结束任务。\n\n" +
         "【资源与纪律】\n" +
         "- 避免未限定路径的全文件系统扫描或过深的目录遍历。\n" +
-        "- 文档、图片、表格、PDF 等任务优先用文档解析/搜索能力，不要凭记忆猜测内容。"
+        "- 文档、图片、表格、PDF 等任务优先用文档解析/搜索能力，不要凭记忆猜测内容。\n\n" +
+        "【思维风格】\n" +
+        "- $TOOL_PLAYBOOK_WE_NEED_LINE"
