@@ -194,7 +194,7 @@ class ResponseAPI(
                         if (!bodyRaw.isNullOrBlank()) {
                             val bodyElement = Json.parseToJsonElement(bodyRaw)
                             println(bodyElement)
-                            exception = bodyElement.parseErrorDetail()
+                            exception = bodyElement.parseErrorDetail(response?.code)
                             Log.i(TAG, "onFailure: $exception")
                         }
                     } catch (e: Throwable) {

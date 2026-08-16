@@ -45,6 +45,7 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.util.HttpException
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.canResumeToolExecution
 import me.rerere.ai.ui.finishPendingTools
@@ -1213,16 +1214,6 @@ class ChatService(
     }
 
     /** 判断是否为可重连的网络错误（连接断开、超时、DNS 失败等） */
-    private fun isRetriableNetworkError(error: Throwable?): Boolean {
-        if (error is CancellationException) return false
-        var cause: Throwable? = error
-        while (cause != null) {
-            if (cause is java.io.IOException) return true
-            cause = cause.cause
-        }
-        return false
-    }
-
     /** 重连前移除流式中断留下的不完整 assistant 消息，避免把半截回复当历史 */
     private suspend fun rollbackIncompleteAssistantMessage(conversationId: Uuid) {
         val conversation = getConversationFlow(conversationId).value
@@ -1636,4 +1627,55 @@ private fun List<UIMessage>.latestUserText(): String {
         }
     }
     return ""
+}
+
+/**
+ * 是否可重试错误。
+ *
+ * 触发重连的条件（任一命中）：
+ * 1. 异常链中存在 IOException（网络中断/超时等传输层错误）；
+ * 2. 异常链中存在携带 HTTP 状态码的 HttpException（statusCode 非空），
+ *    且状态码属于可重试集合；
+ * 3. 异常消息文本包含可识别的 HTTP 状态码（兜底：协议回退等未携带
+ *    statusCode 的异常，如 "Failed to get response: 503 ..."）。
+ */
+internal fun isRetriableNetworkError(error: Throwable?): Boolean {
+    if (error is CancellationException) return false
+    var cause: Throwable? = error
+    while (cause != null) {
+        if (cause is java.io.IOException) return true
+        val code = extractHttpStatusCode(cause)
+        if (code != null && code in RETRIABLE_HTTP_STATUS_CODES) return true
+        cause = cause.cause
+    }
+    return false
+}
+
+/** 可重试的 HTTP 状态码：5xx 服务端错误 + 429 限流 + 可恢复的 4xx */
+internal val RETRIABLE_HTTP_STATUS_CODES = setOf(
+    400, 401, 403, 404, 405, 408, 409, 425, 429,
+    500, 501, 502, 503, 504, 505, 507, 508, 529,
+)
+
+/**
+ * 从异常链节点提取 HTTP 状态码：
+ * 1. HttpException.statusCode 字段（优先，可靠）；
+ * 2. 消息文本匹配 "HTTP xxx" / "(xxx)" / "code xxx" 等模式（兜底）。
+ */
+internal fun extractHttpStatusCode(error: Throwable): Int? {
+    if (error is HttpException && error.statusCode != null) {
+        return error.statusCode
+    }
+    val message = error.message ?: return null
+    val regexes = listOf(
+        Regex("""HTTP\s*(\d{3})""", RegexOption.IGNORE_CASE),
+        Regex("""code\s*[=:]\s*(\d{3})""", RegexOption.IGNORE_CASE),
+        Regex("""[(\[](\d{3})\s*(Server\s*Error|Bad\s*Gateway|Too\s*Many\s*Requests)""", RegexOption.IGNORE_CASE),
+    )
+    for (regex in regexes) {
+        regex.find(message)?.let { match ->
+            match.groupValues[1].toIntOrNull()?.let { return it }
+        }
+    }
+    return null
 }
