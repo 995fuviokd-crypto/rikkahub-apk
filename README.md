@@ -2,6 +2,9 @@
   <img src="docs/icon.png" alt="App Icon" width="100" />
   <h1>RikkaHub</h1>
 
+> **Open-source mirror** — enhanced smart-steward-mode build source. APK
+> releases: [Releases](https://github.com/995fuviokd-crypto/rikkahub-apk/releases)
+
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/rikkahub/rikkahub)
 [![Ask DeepWiki](https://img.shields.io/badge/zread.ai-blue?style=flat&logo=readthedocs)](https://zread.ai/rikkahub/rikkahub)
 
