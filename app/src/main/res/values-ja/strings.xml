@@ -836,6 +836,7 @@
   <string name="setting_page_extensions_desc">プロンプトインジェクション、スキルなどを管理</string>
   <string name="setting_page_general_settings">一般設定</string>
   <string name="setting_page_interaction_notification_settings">インタラクションと通知</string>
+  <string name="setting_page_new_features">新機能</string>
   <string name="setting_page_mcp">MCP</string>
   <string name="setting_page_mcp_desc">MCPサーバーを設定</string>
   <string name="setting_page_message_display_settings">メッセージ表示</string>

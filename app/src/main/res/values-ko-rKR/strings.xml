@@ -836,6 +836,7 @@
   <string name="setting_page_extensions_desc">프롬프트 인젝션, 스킬 등을 관리합니다</string>
   <string name="setting_page_general_settings">일반 설정</string>
   <string name="setting_page_interaction_notification_settings">상호작용 &amp;amp; 알림</string>
+  <string name="setting_page_new_features">새로운 기능</string>
   <string name="setting_page_mcp">MCP</string>
   <string name="setting_page_mcp_desc">MCP 서버 구성</string>
   <string name="setting_page_message_display_settings">메시지 표시</string>

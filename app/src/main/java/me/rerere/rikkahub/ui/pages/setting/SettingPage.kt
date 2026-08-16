@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.AlertDialog
@@ -33,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +47,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.AiMagic
 import me.rerere.hugeicons.stroke.Alert01
+import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Book01
 import me.rerere.hugeicons.stroke.Book03
 import me.rerere.hugeicons.stroke.Bookshelf01
@@ -200,6 +204,10 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         headlineContent = { Text(stringResource(R.string.setting_page_extensions)) },
                     )
                 }
+            }
+
+            item("newFeatures") {
+                NewFeaturesCard(navController)
             }
 
             item("modelServices") {
@@ -450,6 +458,62 @@ private fun QQGroupBottomSheet(onDismiss: () -> Unit) {
                         context.joinQQGroup(group.key)
                         onDismiss()
                     }
+                )
+            }
+        }
+    }
+}
+
+private data class NewFeatureEntry(
+    val titleRes: Int,
+    val target: Screen,
+)
+
+@Composable
+private fun NewFeaturesCard(navController: Navigator) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val entries = remember {
+        listOf(
+            NewFeatureEntry(R.string.setting_display_page_smart_steward_mode_title, Screen.SettingPreferences),
+            NewFeatureEntry(R.string.setting_page_multi_route_concurrent_title, Screen.SettingPreferences),
+            NewFeatureEntry(R.string.setting_display_page_screen_resolution_override_title, Screen.SettingPreferences),
+            NewFeatureEntry(R.string.setting_page_background_keep_alive, Screen.SettingPreferences),
+            NewFeatureEntry(R.string.setting_page_ignore_battery_optimizations_title, Screen.SettingPreferences),
+            NewFeatureEntry(R.string.workspace_detail_android_local_access, Screen.Workspaces),
+            NewFeatureEntry(R.string.workspace_detail_all_files_access, Screen.Workspaces),
+            NewFeatureEntry(R.string.assistant_page_smart_mode_router, Screen.Assistant),
+            NewFeatureEntry(R.string.assistant_page_smart_tool_anchor, Screen.Assistant),
+            NewFeatureEntry(R.string.assistant_page_smart_cap_ladder, Screen.Assistant),
+            NewFeatureEntry(R.string.assistant_page_smart_tool_playbook, Screen.Assistant),
+        )
+    }
+    CardGroup(
+        modifier = Modifier.padding(horizontal = 8.dp),
+        title = {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.setting_page_new_features),
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+        },
+    ) {
+        if (expanded) {
+            entries.forEach { entry ->
+                item(
+                    onClick = { navController.navigate(entry.target) },
+                    headlineContent = { Text(stringResource(entry.titleRes)) },
                 )
             }
         }

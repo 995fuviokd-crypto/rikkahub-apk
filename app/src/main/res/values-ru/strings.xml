@@ -836,6 +836,7 @@
   <string name="setting_page_extensions_desc">Управление внедрением подсказок, навыками и другими возможностями</string>
   <string name="setting_page_general_settings">Общие настройки</string>
   <string name="setting_page_interaction_notification_settings">Взаимодействие и уведомления</string>
+  <string name="setting_page_new_features">Новые функции</string>
   <string name="setting_page_mcp">MCP</string>
   <string name="setting_page_mcp_desc">Настроить серверы MCP</string>
   <string name="setting_page_message_display_settings">Отображение сообщений</string>

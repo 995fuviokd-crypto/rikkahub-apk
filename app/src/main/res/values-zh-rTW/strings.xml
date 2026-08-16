@@ -836,6 +836,7 @@
   <string name="setting_page_extensions_desc">管理提示注入、技能等功能</string>
   <string name="setting_page_general_settings">通用設定</string>
   <string name="setting_page_interaction_notification_settings">互動與通知</string>
+  <string name="setting_page_new_features">新增功能</string>
   <string name="setting_page_mcp">MCP</string>
   <string name="setting_page_mcp_desc">配置MCP伺服器</string>
   <string name="setting_page_message_display_settings">訊息顯示</string>
