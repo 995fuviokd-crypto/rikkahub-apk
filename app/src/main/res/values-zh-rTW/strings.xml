@@ -118,6 +118,8 @@
   <string name="assistant_page_smart_cap_ladder_desc">warmup 輪次內每輪遞增輸出預算，讓模型反覆經歷「極簡思維 + 調工具」，把首輪雙錨定延伸成貫穿會話的風格慣性</string>
   <string name="assistant_page_smart_tool_playbook">工具守則注入</string>
   <string name="assistant_page_smart_tool_playbook_desc">首次工具呼叫後，每會話一次性注入 workspace 工具呼叫守則，包含關鍵節點即時回報（借鑒 dsh-win-fable-report）</string>
+  <string name="assistant_page_smart_jspace">J-Space 認知控制</string>
+  <string name="assistant_page_smart_jspace_desc">智慧管家模式下對所有模型注入 J-Space 推理時認知協議（三暫存器、稠密軌、門控、經驗驗證，借鑒 J-Space Cognition Suite V3.6）</string>
   <string name="assistant_page_message_template_desc">控制聊天訊息在發送給LLM之前的內容格式，通常不需要修改</string>
   <string name="assistant_page_message_template_missing_message">範本未包含 {{ message }}，使用者訊息將不會被傳送</string>
   <string name="assistant_page_name">助手名稱</string>

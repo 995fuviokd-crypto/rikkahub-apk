@@ -68,6 +68,10 @@ data class Assistant(
     // 晋升后工具守则（借鉴 dsh-win-fable-report：首个工具调用后一次性注入 workspace
     // 工具调用守则 + 关键节点及时汇报，每会话仅一次）
     val smartToolPlaybook: Boolean = false,             // 守则注入开关（默认关闭）
+    // J-Space 认知控制（借鉴 J-Space Cognition Suite V3.6：模型不可知的推理时认知控制层）
+    // 提炼三寄存器/Dense Track/门控/经验验证核心协议为紧凑引导，对全部模型生效，
+    // 默认开启：智能管家模式下所有模型获得统一的推理时认知控制
+    val smartJSpace: Boolean = true,                   // J-Space 开关（默认开启，支持所有模型）
 ) {
     /**
      * 生效的工作区集合：优先多选字段（workspaceIds），

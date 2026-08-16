@@ -118,6 +118,8 @@
   <string name="assistant_page_smart_cap_ladder_desc">warmup ラウンドの間、毎ターン出力予算を段階的に増やし、モデルに「極簡思考 + ツール利用」を反復させることで、初回の二重アンカーをセッション全体の習慣に拡張します</string>
   <string name="assistant_page_smart_tool_playbook">ツール守則注入</string>
   <string name="assistant_page_smart_tool_playbook_desc">最初のツール呼び出し後に、セッションごとに一度だけ workspace ツール使用守則を注入します。重要な節目での進捗報告を含みます（dsh-win-fable-report を参考）</string>
+  <string name="assistant_page_smart_jspace">J-Space 認知制御</string>
+  <string name="assistant_page_smart_jspace_desc">スマート管家モードで全モデルに J-Space 推論時認知プロトコル（三つのレジスタ、稠密トラック、ゲート、経験的検証）を注入します（J-Space Cognition Suite V3.6 を参考）</string>
   <string name="assistant_page_message_template_desc">チャットメッセージがLLMに送信される前のコンテンツ形式を制御します。通常は変更する必要がありません</string>
   <string name="assistant_page_message_template_missing_message">テンプレートに{{ message }}が含まれていないため、ユーザーのメッセージは送信されません</string>
   <string name="assistant_page_name">アシスタント名</string>

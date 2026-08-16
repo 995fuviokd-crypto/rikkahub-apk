@@ -398,6 +398,23 @@ private fun AssistantPromptContent(
                     )
                 }
             )
+            FormItem(
+                modifier = Modifier.padding(8.dp),
+                label = {
+                    Text(stringResource(R.string.assistant_page_smart_jspace))
+                },
+                description = {
+                    Text(stringResource(R.string.assistant_page_smart_jspace_desc))
+                },
+                tail = {
+                    Switch(
+                        checked = assistant.smartJSpace,
+                        onCheckedChange = {
+                            onUpdate(assistant.copy(smartJSpace = it))
+                        }
+                    )
+                }
+            )
         }
 
         Card(

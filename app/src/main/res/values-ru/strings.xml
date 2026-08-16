@@ -118,6 +118,8 @@
   <string name="assistant_page_smart_cap_ladder_desc">В течение warmup-раундов постепенно увеличивайте бюджет вывода на каждом ходу, чтобы модель многократно практиковала «минимальное мышление + работу с инструментами», превращая двойной якорь первого хода в привычку на всю сессию</string>
   <string name="assistant_page_smart_tool_playbook">Внедрение правил инструментов</string>
   <string name="assistant_page_smart_tool_playbook_desc">После первого вызова инструмента внедряйте свод правил использования инструментов workspace один раз за сессию, включая отчёты о ходе на ключевых этапах (по мотивам dsh-win-fable-report)</string>
+  <string name="assistant_page_smart_jspace">Когнитивный контроль J-Space</string>
+  <string name="assistant_page_smart_jspace_desc">В режиме стюарда внедряет протокол инференс-когнитивного контроля J-Space (три регистра, плотный трек, шлюз, эмпирическая проверка) для всех моделей (по мотивам J-Space Cognition Suite V3.6)</string>
   <string name="assistant_page_message_template_desc">Управляет форматом содержимого сообщений чата перед отправкой в LLM, обычно изменять не требуется</string>
   <string name="assistant_page_message_template_missing_message">Шаблон не содержит {{ message }}, сообщения пользователя не будут отправлены</string>
   <string name="assistant_page_name">Имя ассистента</string>

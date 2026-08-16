@@ -118,6 +118,8 @@
   <string name="assistant_page_smart_cap_ladder_desc">warmup 라운드 동안 매 턴 출력 예산을 점진적으로 늘려 모델이 "극간 사고 + 도구 사용"을 반복하도록 하여 첫 턴 이중 앵커를 세션 전체의 습관으로 확장합니다</string>
   <string name="assistant_page_smart_tool_playbook">도구 규칙 주입</string>
   <string name="assistant_page_smart_tool_playbook_desc">첫 번째 도구 호출 후 세션당 한 번씩 workspace 도구 사용 규칙을 주입하며, 주요 지점의 진행 보고를 포함합니다(dsh-win-fable-report 참고)</string>
+  <string name="assistant_page_smart_jspace">J-Space 인지 제어</string>
+  <string name="assistant_page_smart_jspace_desc">스튜어드 모드에서 모든 모델에 J-Space 추론 시 인지 프로토콜(삼중 레지스터, 조밀 트랙, 게이트, 경험 검증)을 주입합니다(J-Space Cognition Suite V3.6 참고)</string>
   <string name="assistant_page_message_template_desc">LLM에 전송되기 전 채팅 메시지 형식을 제어. 일반적으로 수정할 필요 없음</string>
   <string name="assistant_page_message_template_missing_message">템플릿에 {{ message }}가 없어 사용자 메시지가 전송되지 않습니다</string>
   <string name="assistant_page_name">어시스턴트 이름</string>

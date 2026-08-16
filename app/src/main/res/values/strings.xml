@@ -119,6 +119,8 @@
   <string name="assistant_page_smart_cap_ladder_desc">Within the warmup rounds, gradually raise the output budget each turn so the model repeatedly practices minimal thinking plus tool use, extending the first-turn double anchor into a session-wide habit</string>
   <string name="assistant_page_smart_tool_playbook">Tool Playbook Injection</string>
   <string name="assistant_page_smart_tool_playbook_desc">After the first tool call, inject a workspace tool-use playbook once per session, including progress reporting at key milestones (inspired by dsh-win-fable-report)</string>
+  <string name="assistant_page_smart_jspace">J-Space Cognition Control</string>
+  <string name="assistant_page_smart_jspace_desc">Inject the J-Space inference-time cognition protocol (three registers, dense track, gate, empirical verification) for all models in steward mode (inspired by J-Space Cognition Suite V3.6)</string>
   <string name="assistant_page_message_template_desc">Controls the content format of chat messages before being sent to the LLM, usually no need to modify</string>
   <string name="assistant_page_message_template_missing_message">Template does not contain {{ message }}, user messages will not be sent</string>
   <string name="assistant_page_name">Assistant Name</string>

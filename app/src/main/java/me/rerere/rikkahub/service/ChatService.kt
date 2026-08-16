@@ -72,6 +72,7 @@ import me.rerere.rikkahub.data.ai.transformers.PromptInjectionTransformer
 import me.rerere.rikkahub.data.ai.transformers.RegexOutputTransformer
 import me.rerere.rikkahub.data.ai.transformers.TaskModeRouterTransformer
 import me.rerere.rikkahub.data.ai.transformers.ToolPlaybookTransformer
+import me.rerere.rikkahub.data.ai.transformers.JSpaceTransformer
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
 import me.rerere.rikkahub.data.ai.transformers.ThinkTagTransformer
 import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
@@ -186,6 +187,7 @@ private val inputTransformers by lazy {
         PromptInjectionTransformer,
         TaskModeRouterTransformer,
         ToolPlaybookTransformer,
+        JSpaceTransformer,
         PlaceholderTransformer,
         DocumentAsPromptTransformer,
         OcrTransformer,
