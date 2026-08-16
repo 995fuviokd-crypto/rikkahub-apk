@@ -202,19 +202,18 @@ class FilesManager(
         }
 
     fun deleteChatFiles(uris: List<Uri>) {
-        val relativePaths = mutableSetOf<String>()
-        uris.filter { it.toString().startsWith("file:") }.forEach { uri ->
-            val file = uri.toFile()
-            getRelativePathInFilesDir(file)?.let { relativePaths.add(it) }
-            if (file.exists()) {
-                file.delete()
-            }
-        }
-        if (relativePaths.isNotEmpty()) {
-            appScope.launch(Dispatchers.IO) {
-                relativePaths.forEach { path ->
-                    repository.deleteByPath(path)
+        // 文件删除整体移入 IO 线程，避免主线程同步删除阻塞（删除为 fire-and-forget）
+        appScope.launch(Dispatchers.IO) {
+            val relativePaths = mutableSetOf<String>()
+            uris.filter { it.toString().startsWith("file:") }.forEach { uri ->
+                val file = uri.toFile()
+                getRelativePathInFilesDir(file)?.let { relativePaths.add(it) }
+                if (file.exists()) {
+                    file.delete()
                 }
+            }
+            relativePaths.forEach { path ->
+                repository.deleteByPath(path)
             }
         }
     }

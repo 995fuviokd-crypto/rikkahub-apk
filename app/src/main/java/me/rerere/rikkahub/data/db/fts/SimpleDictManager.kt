@@ -14,8 +14,9 @@ object SimpleDictManager {
     /**
      * 将 assets/simple_dict 解压到 files/simple_dict，返回词典目录。
      * 已是最新版本时直接返回，无需重复拷贝。
-     * 可在任意线程调用。
+     * 可在任意线程调用；synchronized 保证冷启动预加载与数据库 onOpen 并发时只执行一次解压。
      */
+    @Synchronized
     fun extractDict(context: Context): File {
         val destDir = File(context.filesDir, DICT_ASSET_DIR)
         val versionFile = File(destDir, VERSION_FILE)

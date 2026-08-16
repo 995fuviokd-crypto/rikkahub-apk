@@ -9,6 +9,7 @@ import androidx.paging.PagingConfig
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import androidx.paging.map
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import me.rerere.ai.provider.ImageEditParams
 import me.rerere.ai.provider.ImageGenerationParams
@@ -282,14 +284,14 @@ class ImgGenVM(
         }
     }
 
-    private fun saveImagePreview(
+    private suspend fun saveImagePreview(
         item: ImageGenerationItem,
         modelName: String,
         index: Int,
-    ): File {
+    ): File = withContext(Dispatchers.IO) {
         val timestamp = System.currentTimeMillis()
         val imageFile = File(getApplication<Application>().appTempFolder, "imggen_${timestamp}_${modelName}_$index.png")
-        return filesManager.createImageFileFromBase64(item.data, imageFile.absolutePath)
+        filesManager.createImageFileFromBase64(item.data, imageFile.absolutePath)
     }
 
     private suspend fun saveImageToStorage(
@@ -299,7 +301,7 @@ class ImgGenVM(
         index: Int,
         type: String = GenMediaEntity.TYPE_IMAGE_GENERATION,
         sourcePaths: String? = null,
-    ): File {
+    ): File = withContext(Dispatchers.IO) {
         val imagesDir = filesManager.getImagesDir()
 
         val timestamp = System.currentTimeMillis()
@@ -320,7 +322,7 @@ class ImgGenVM(
         )
         genMediaRepository.insertMedia(entity)
 
-        return createdFile
+        createdFile
     }
 
     fun deleteImage(image: GeneratedImage) {

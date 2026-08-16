@@ -305,6 +305,22 @@ class ConversationRepository(
         messageFtsManager.indexConversation(conversation)
     }
 
+    /**
+     * 流式生成中的增量持久化：只更新会话元数据并对节点做 upsert（REPLACE），
+     * 不执行全量删除重插，避免每 800ms 一次 O(全部消息) 的写放大。
+     * 仅适用于节点只增不删的流式场景；节点删除/回滚仍走 [updateConversation]。
+     */
+    suspend fun updateConversationIncremental(conversation: Conversation) {
+        database.withTransaction {
+            conversationDAO.update(
+                conversationToConversationEntity(conversation)
+            )
+            saveMessageNodes(conversation.id.toString(), conversation.messageNodes)
+        }
+        // FTS 只增量重建最后一条（流式变化）节点的索引
+        messageFtsManager.indexConversationIncremental(conversation)
+    }
+
     suspend fun deleteConversation(conversation: Conversation) {
         // 获取完整的 Conversation（包含 messageNodes）以正确清理文件
         val fullConversation = if (conversation.messageNodes.isEmpty()) {

@@ -176,6 +176,14 @@ class WorkspaceDetailVM(
         }
     }
 
+    fun setAndroidLocalAccess(enabled: Boolean) {
+        viewModelScope.launch {
+            val workspace = state.value.workspace ?: return@launch
+            repository.setAndroidLocalAccess(workspace.id, enabled)
+            loadWorkspace()
+        }
+    }
+
     fun installRootfs(url: String) {
         viewModelScope.launch {
             _installError.value = null

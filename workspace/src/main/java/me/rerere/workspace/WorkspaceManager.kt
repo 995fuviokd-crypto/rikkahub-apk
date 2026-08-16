@@ -106,12 +106,20 @@ class WorkspaceManager(
      * bind mount 的 source 本身就是 Android 侧的普通目录, 因此 /skills 这类挂载路径
      * 可以直接用文件 IO 访问, 无需经过 PRoot; 只是 Rootfs 目录里对应位置是个空挂载点,
      * 按 [WorkspaceStorageArea.LINUX] 解析必然落空。
+     *
+     * [includeAndroidLocal] 关闭时不再解析 Android 本地挂载目录（/skills、/tool_outputs、
+     * /upload 等），实现工作区与 Android 本地互通的隔离。
      */
-    fun resolveRootfsPath(root: String, path: String): RootfsLocation {
+    fun resolveRootfsPath(
+        root: String,
+        path: String,
+        includeAndroidLocal: Boolean = true,
+    ): RootfsLocation {
         val trimmed = path.trim().trimEnd('/').ifBlank { "/" }
         require(trimmed.startsWith("/")) { "Rootfs path must be absolute: $path" }
 
-        sortedBindMounts.forEach { mount ->
+        val mounts = if (includeAndroidLocal) sortedBindMounts else emptyList()
+        mounts.forEach { mount ->
             val target = mount.target.trimEnd('/')
             if (trimmed == target) return RootfsLocation(mount.source, "")
             if (trimmed.startsWith("$target/")) {
@@ -134,17 +142,22 @@ class WorkspaceManager(
         return RootfsLocation(linuxDir(root), trimmed.trimStart('/'))
     }
 
-    fun rootfsFileSize(root: String, path: String): Long =
-        resolveRootfsFile(root, path).also { it.requireReadableFile(path) }.length()
+    fun rootfsFileSize(root: String, path: String, includeAndroidLocal: Boolean = true): Long =
+        resolveRootfsFile(root, path, includeAndroidLocal).also { it.requireReadableFile(path) }.length()
 
-    fun exportRootfsFile(root: String, path: String, outputStream: OutputStream) {
-        val file = resolveRootfsFile(root, path)
+    fun exportRootfsFile(
+        root: String,
+        path: String,
+        outputStream: OutputStream,
+        includeAndroidLocal: Boolean = true,
+    ) {
+        val file = resolveRootfsFile(root, path, includeAndroidLocal)
         file.requireReadableFile(path)
         outputStream.use { out -> file.inputStream().use { it.copyTo(out) } }
     }
 
-    private fun resolveRootfsFile(root: String, path: String): File {
-        val location = resolveRootfsPath(root, path)
+    private fun resolveRootfsFile(root: String, path: String, includeAndroidLocal: Boolean = true): File {
+        val location = resolveRootfsPath(root, path, includeAndroidLocal)
         return fileSystem.resolve(location.rootDir, location.relativePath)
     }
 
@@ -183,12 +196,15 @@ class WorkspaceManager(
         cwd: String = "",
         timeoutMillis: Long = DEFAULT_COMMAND_TIMEOUT_MS,
         stdin: ByteArray? = null,
+        includeAndroidLocal: Boolean = true,
     ): WorkspaceCommandResult {
         require(command.isNotBlank()) { "Command is required" }
         val workingDir = fileSystem.resolve(filesDir(root), cwd)
         require(workingDir.exists()) { "Working directory does not exist: $cwd" }
         require(workingDir.isDirectory) { "Working path is not a directory: $cwd" }
 
+        // Android 本地互通关闭时, 不再把 /skills、/tool_outputs、/upload 等 Android 本地目录挂进 Rootfs
+        val effectiveBindMounts = if (includeAndroidLocal) bindMounts else emptyList()
         return shellRunner.execute(
             WorkspaceShellContext(
                 root = root,
@@ -200,7 +216,7 @@ class WorkspaceManager(
                 workingDir = workingDir,
                 timeoutMillis = timeoutMillis,
                 stdin = stdin,
-                bindMounts = bindMounts,
+                bindMounts = effectiveBindMounts,
             )
         )
     }

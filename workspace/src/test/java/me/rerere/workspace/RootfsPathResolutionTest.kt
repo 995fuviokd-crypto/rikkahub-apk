@@ -74,6 +74,53 @@ class RootfsPathResolutionTest {
     }
 
     @Test
+    fun androidLocalMountIsNotResolvedWhenInteropDisabled() {
+        manager = createManager()
+        File(skillsDir, "issue-1561").mkdirs()
+        File(skillsDir, "issue-1561/SKILL.md").writeText("hidden")
+
+        // 互通关闭后, /skills 不再是 Android 本地目录的解析目标, 回落到 Rootfs 内部
+        val location = manager.resolveRootfsPath(root, "/skills/issue-1561/SKILL.md", includeAndroidLocal = false)
+        assertEquals(manager.linuxDir(root), location.rootDir)
+        assertEquals("skills/issue-1561/SKILL.md", location.relativePath)
+    }
+
+    @Test
+    fun workspaceAreaStillResolvesWhenInteropDisabled() {
+        manager = createManager()
+        File(manager.filesDir(root), "notes.txt").writeText("hello")
+
+        val location = manager.resolveRootfsPath(root, "/workspace/notes.txt", includeAndroidLocal = false)
+        assertEquals(manager.filesDir(root), location.rootDir)
+        assertEquals("notes.txt", location.relativePath)
+    }
+
+    @Test
+    fun commandExecutionOmitsAndroidLocalMountsWhenInteropDisabled() {
+        var captured: List<WorkspaceBindMount>? = null
+        val recordingRunner = object : WorkspaceShellRunner {
+            override fun execute(context: WorkspaceShellContext): WorkspaceCommandResult {
+                captured = context.bindMounts
+                return WorkspaceCommandResult(exitCode = 0, stdout = "", stderr = "")
+            }
+        }
+        val manager = WorkspaceManager(
+            baseDir = tempFolder.newFolder("workspaces"),
+            bindMounts = listOf(
+                WorkspaceBindMount(source = tempFolder.newFolder("skills"), target = "/skills"),
+                WorkspaceBindMount(source = tempFolder.newFolder("upload"), target = "/upload"),
+            ),
+            shellRunner = recordingRunner,
+        ).also { it.ensureWorkspace(root) }
+
+        manager.executeCommand(root, "ls", includeAndroidLocal = false)
+        assertTrue(captured.orEmpty().isEmpty())
+
+        manager.executeCommand(root, "ls", includeAndroidLocal = true)
+        assertEquals(2, captured?.size ?: 0)
+    }
+
+    @Test
     fun unknownAbsolutePathFallsBackToRootfsInterior() {
         manager = createManager()
         File(manager.linuxDir(root), "etc").mkdirs()

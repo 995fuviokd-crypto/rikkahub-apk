@@ -4,10 +4,18 @@ import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Serializable
@@ -28,10 +36,12 @@ import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.ToolApprovalState
+import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.handleTextGenerationResult
 import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
+import me.rerere.rikkahub.data.ai.transformers.TaskModeRouterTransformer
 import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
 import me.rerere.rikkahub.data.files.FileFolders
@@ -54,6 +64,27 @@ import kotlin.uuid.Uuid
 private const val TAG = "GenerationHandler"
 private const val MAX_TOOL_OUTPUT_CHARS = 32 * 1024
 private const val TOOL_OUTPUT_PREVIEW_CHARS = 4 * 1024
+
+// 流式 SSE delta 合并发射的时间窗口（毫秒）：高频 token 按此节流，
+// 只把最新状态发射给 UI，减少每 token 一次的全量 transform 与重组
+private const val STREAM_EMIT_INTERVAL_MS = 32L
+
+// 首轮工具锚定的默认核心工具集：轻量、安全、高频的能力工具。
+// 首轮只暴露这些（外加用户显式白名单），首次工具调用后自动恢复全部工具，
+// 既保持"极简锚定"降低首轮 schema 开销，又保证 AI 首轮就知道
+// 联网搜索(search_web/scrape_web)、Linux 执行(workspace_shell)、时间/设备信息与用户澄清。
+// 另含手机操控 open_app/set_volume：参数简单、无需无障碍服务即可执行（仅启动 Activity/调音量），
+// 让 AI 首轮即可按用户指令打开应用或调节音量；未开启无障碍工具集时自动跳过。
+private val CORE_ANCHOR_TOOL_NAMES = setOf(
+    "workspace_shell",
+    "search_web",
+    "scrape_web",
+    "get_time_info",
+    "get_device_info",
+    "ask_user",
+    "open_app",
+    "set_volume",
+)
 
 @Serializable
 sealed interface GenerationChunk {
@@ -83,11 +114,40 @@ class GenerationHandler(
         conversationModeInjectionIds: Set<Uuid> = emptySet(),
         conversationLorebookIds: Set<Uuid> = emptySet(),
         workspaceCwd: String? = null,
+        conversationId: Uuid? = null,
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
 
+        // 多线路并发：自动探测提供同名 model 的其他 provider 线路（排除主线路与 providerOverwrite）
+        // 仅对纯文本流式生成的首轮生效；工具调用循环内多线路会导致消息状态分叉，故工具场景只用主线路
+        val backupRoutes: List<Pair<Provider<ProviderSetting>, ProviderSetting>> =
+            if (settings.multiRouteConcurrent && model.providerOverwrite == null) {
+                buildList {
+                    settings.providers.forEach { setting ->
+                        if (setting.id == provider.id) return@forEach
+                        val hasSameModel = setting.models.any { it.modelId == model.modelId && it.type == model.type }
+                        if (hasSameModel) {
+                            try {
+                                add(providerManager.getProviderByType(setting) to setting)
+                            } catch (e: Throwable) {
+                                Log.w(TAG, "multi-route: skip provider ${setting.id}", e)
+                            }
+                        }
+                    }
+                }
+            } else {
+                emptyList()
+            }
+        if (backupRoutes.isNotEmpty()) {
+            Log.i(TAG, "multi-route: ${backupRoutes.size} backup route(s) for ${model.modelId}")
+        }
+
         var messages: List<UIMessage> = messages
+
+        // 流式视觉转换缓存：历史消息的 visualTransform 结果在生成期间保持稳定，
+        // 只缓存已转换的历史部分，每次只对最后一条流式变化的消息重新转换
+        var lastVisualized: List<UIMessage> = emptyList()
 
         for (stepIndex in 0 until maxSteps) {
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
@@ -100,13 +160,21 @@ class GenerationHandler(
                     } else {
                         assistant.id.toString()
                     }
+                    val memoryConversationId = conversationId?.toString()
                     buildMemoryTools(
                         json = json,
-                        onCreation = { content ->
-                            memoryRepo.addMemory(memoryAssistantId, content)
+                        onCreation = { target, content, summary ->
+                            memoryRepo.storeMemory(
+                                assistantId = memoryAssistantId,
+                                content = content,
+                                target = target,
+                                summary = summary,
+                                source = "tool",
+                                conversationId = memoryConversationId,
+                            )
                         },
-                        onUpdate = { id, content ->
-                            memoryRepo.updateContent(id, content)
+                        onUpdate = { id, content, summary ->
+                            memoryRepo.updateMemory(id, content, summary = summary)
                         },
                         onDelete = { id ->
                             memoryRepo.deleteMemory(id)
@@ -114,6 +182,50 @@ class GenerationHandler(
                     ).let(this::addAll)
                 }
                 addAll(tools)
+            }
+
+            // 首轮工具锚定：启用时首轮请求只保留核心工具，首次工具调用后恢复全部
+            // （借鉴 dsh-anchored-standard：首轮窄工具面锚定训练对齐，工具目录扩大后能力不损）
+            // 极简模式默认开启（smartToolAnchor 默认 true）；DeepSeek 家族额外自动启用
+            val autoAnchor = TaskModeRouterTransformer.isDeepSeekModel(model.modelId)
+            val coreNames = assistant.anchorCoreToolNames.filter { it.isNotBlank() }
+            val effectiveTools = if (settings.smartStewardModeEnabled && (assistant.smartToolAnchor || autoAnchor)) {
+                val hasToolCalls = messages.any { it.getTools().isNotEmpty() }
+                if (hasToolCalls || toolsInternal.isEmpty()) {
+                    toolsInternal
+                } else {
+                    // 首轮核心工具选择优先级：
+                    // 1. 用户显式白名单（anchorCoreToolNames）
+                    // 2. 默认核心工具集（联网搜索 + Linux 执行 + 时间/设备/澄清），
+                    //    保证 AI 首轮就知道搜索工具，而不是只暴露单一工具
+                    // 3. 兜底保留第一个工具
+                    val anchored = when {
+                        coreNames.isNotEmpty() -> toolsInternal.filter { it.name in coreNames }
+                        else -> toolsInternal
+                            .filter { it.name in CORE_ANCHOR_TOOL_NAMES }
+                            .ifEmpty { toolsInternal.take(1) }
+                    }
+                    if (anchored.isEmpty()) toolsInternal.take(1) else anchored
+                }
+            } else {
+                toolsInternal
+            }
+
+            // 双约束首轮锚定之"输出预算绳"：warmup 轮次内逐轮递增输出预算，
+            // 配合 smartToolAnchor 的工具 schema 绳，让模型反复经历"极简思维 + 调工具"，
+            // 把首轮锚定延伸成贯穿会话的风格惯性；warmup 结束后放开到用户上限
+            // 仅用户显式开启时生效：自动启用会把 DeepSeek reasoning 模型的输出预算
+            // 砍到 1024 起步，推理 token 即超限，表现为生成卡住/截断
+            val effectiveMaxTokens = if (settings.smartStewardModeEnabled && assistant.smartAnchorCapLadder) {
+                AnchorBudgetLadder.budgetFor(
+                    userRound = messages.count { it.role == MessageRole.USER },
+                    maxTokens = assistant.maxTokens,
+                    base = settings.anchorBudgetBase,
+                    step = settings.anchorBudgetStep,
+                    warmupRounds = settings.anchorWarmupRounds,
+                )
+            } else {
+                assistant.maxTokens
             }
 
             // Check if we have tool calls ready to continue after user interaction.
@@ -130,30 +242,31 @@ class GenerationHandler(
                     settings = settings,
                     messages = messages,
                     onUpdateMessages = {
-                        messages = it.transforms(
+                        messages = it
+                        // 流式视觉转换优化：outputTransformers 的 transform 均为恒等实现，
+                        // 无需对全历史重跑；只对最后一条流式变化的消息做 visualTransform，
+                        // 历史部分复用已缓存的转换结果，避免每 token 对全历史正则扫描
+                        val transformedLast = listOf(it.last()).visualTransforms(
                             transformers = outputTransformers,
                             context = context,
                             model = model,
                             assistant = assistant,
                             settings = settings
-                        )
-                        emit(
-                            GenerationChunk.Messages(
-                                messages.visualTransforms(
-                                    transformers = outputTransformers,
-                                    context = context,
-                                    model = model,
-                                    assistant = assistant,
-                                    settings = settings
-                                )
-                            )
-                        )
+                        ).last()
+                        val head = if (lastVisualized.size >= it.size - 1) {
+                            lastVisualized.take(it.size - 1)
+                        } else {
+                            it.dropLast(1)
+                        }
+                        lastVisualized = head + transformedLast
+                        emit(GenerationChunk.Messages(lastVisualized))
                     },
                     transformers = inputTransformers,
                     model = model,
                     providerImpl = providerImpl,
                     provider = provider,
-                    tools = toolsInternal,
+                    tools = effectiveTools,
+                    maxTokens = effectiveMaxTokens,
                     memories = memories ?: emptyList(),
                     stream = assistant.streamOutput,
                     processingStatus = processingStatus,
@@ -161,6 +274,14 @@ class GenerationHandler(
                     conversationModeInjectionIds = conversationModeInjectionIds,
                     conversationLorebookIds = conversationLorebookIds,
                     workspaceCwd = workspaceCwd,
+                    // 多线路并发仅用于无工具首轮：工具调用会让不同线路产生分叉的工具参数，
+                    // 状态无法合并；已有工具调用历史（hasToolCalls）或首轮就带工具时只用主线路
+                    backupRoutes = if (assistant.streamOutput &&
+                        settings.multiRouteConcurrent &&
+                        !messages.any { it.getTools().isNotEmpty() } &&
+                        messages.count { it.role == MessageRole.USER } <= 1 &&
+                        effectiveTools.isEmpty()
+                    ) backupRoutes else emptyList(),
                 )
                 messages = messages.visualTransforms(
                     transformers = outputTransformers,
@@ -191,7 +312,7 @@ class GenerationHandler(
                 // Check for tools that need approval
                 var hasPendingApproval = false
                 val updatedTools = tools.map { tool ->
-                    val toolDef = toolsInternal.find { it.name == tool.toolName }
+                    val toolDef = effectiveTools.find { it.name == tool.toolName }
                     when {
                         // Tool needs approval and state is Auto -> set to Pending
                         toolDef?.needsApproval(tool.inputAsJson()) == true &&
@@ -276,7 +397,7 @@ class GenerationHandler(
                     else -> {
                         // Auto or Approved - execute the tool
                         runCatching {
-                            val toolDef = toolsInternal.find { toolDef -> toolDef.name == tool.toolName }
+                            val toolDef = effectiveTools.find { toolDef -> toolDef.name == tool.toolName }
                                 ?: error("Tool ${tool.toolName} not found")
                             val args = runCatching {
                                 json.parseToJsonElement(tool.input.ifBlank { "{}" })
@@ -285,7 +406,7 @@ class GenerationHandler(
                             }
                             Log.i(TAG, "generateText: executing tool ${toolDef.name} with args: $args")
                             val result = toolDef.execute(args)
-                            val hasShellAccess = toolsInternal.any { it.name == "workspace_shell" }
+                            val hasShellAccess = effectiveTools.any { it.name == "workspace_shell" }
                             executedTools += tool.copy(
                                 output = maybeTruncateToolOutput(tool.toolCallId, result, hasShellAccess)
                             )
@@ -343,6 +464,20 @@ class GenerationHandler(
 
     }.flowOn(Dispatchers.IO)
 
+    /**
+     * 多线路竞速：并发收集多条流，首个产出元素的流接管，其余线路立即取消。
+     *
+     * - 竞速阶段：所有线路同时流式，谁先产出首个元素（首 token）谁接管；
+     *   连接慢/失败/超时的线路在首 token 等待期被自然淘汰，健康线路不受影响（故障转移）；
+     * - 赢家接管后取消其他线路，释放资源并停止备用线路的 token 消耗；
+     * - 赢家产生的后续元素持续透传；
+     * - 所有线路都未产出元素（全部失败）时，抛出最后记录的线路异常。
+     *
+     * 适用于多线路并发场景，缩短首 token 等待时间，并在首 token 阶段完成线路容错。
+     */
+    private fun <T> raceStreams(flows: List<Flow<T>>): Flow<T> =
+        multiRouteRace(flows)
+
     private suspend fun generateInternal(
         assistant: Assistant,
         settings: Settings,
@@ -353,6 +488,7 @@ class GenerationHandler(
         providerImpl: Provider<ProviderSetting>,
         provider: ProviderSetting,
         tools: List<Tool>,
+        maxTokens: Int?,
         memories: List<AssistantMemory>,
         stream: Boolean,
         processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
@@ -360,6 +496,7 @@ class GenerationHandler(
         conversationModeInjectionIds: Set<Uuid> = emptySet(),
         conversationLorebookIds: Set<Uuid> = emptySet(),
         workspaceCwd: String? = null,
+        backupRoutes: List<Pair<Provider<ProviderSetting>, ProviderSetting>> = emptyList(),
     ) {
         val internalMessages = buildList {
             val system = buildString {
@@ -403,7 +540,7 @@ class GenerationHandler(
             model = model,
             temperature = assistant.temperature,
             topP = assistant.topP,
-            maxTokens = assistant.maxTokens,
+            maxTokens = maxTokens,
             tools = tools,
             reasoningLevel = assistant.reasoningLevel,
             customHeaders = buildList {
@@ -416,14 +553,53 @@ class GenerationHandler(
             }
         )
         if (stream) {
-            val streamChunkHandler = StreamChunkHandler(model)
-            providerImpl.streamText(
-                providerSetting = provider,
-                messages = internalMessages,
-                params = params
-            ).collect {
-                messages = streamChunkHandler.handle(messages, it)
-                onUpdateMessages(messages)
+            if (backupRoutes.isEmpty()) {
+                // 单线路：直接流式
+                val streamChunkHandler = StreamChunkHandler(model)
+                var latestMessages: List<UIMessage> = messages
+                var lastEmitTime = 0L
+                providerImpl.streamText(
+                    providerSetting = provider,
+                    messages = internalMessages,
+                    params = params
+                ).collect { chunk ->
+                    latestMessages = streamChunkHandler.handle(latestMessages, chunk)
+                    val now = System.currentTimeMillis()
+                    if (now - lastEmitTime >= STREAM_EMIT_INTERVAL_MS) {
+                        lastEmitTime = now
+                        onUpdateMessages(latestMessages)
+                    }
+                }
+                onUpdateMessages(latestMessages)
+            } else {
+                // 多线路并发：主线路 + 备用线路各自独立流式（独立 handler 与消息状态），
+                // 竞速首个产出的线路并接管，缩短首 token 等待时间；输家线路被取消。
+                // 每条线路先把 chunk 合并进自己的消息状态并节流，raceStreams 竞速"状态流"，
+                // 竞速胜出的完整消息列表直接交给 UI，无需区分 chunk 来源
+                val routeStateFlows = buildList {
+                    fun routeStateFlow(routeStream: Flow<StreamChunk>): Flow<List<UIMessage>> = flow {
+                        val handler = StreamChunkHandler(model)
+                        var latest: List<UIMessage> = messages
+                        var lastEmitTime = 0L
+                        routeStream.collect { chunk ->
+                            latest = handler.handle(latest, chunk)
+                            val now = System.currentTimeMillis()
+                            if (now - lastEmitTime >= STREAM_EMIT_INTERVAL_MS) {
+                                lastEmitTime = now
+                                emit(latest)
+                            }
+                        }
+                        // 流结束发射最终状态
+                        emit(latest)
+                    }
+                    add(routeStateFlow(providerImpl.streamText(providerSetting = provider, messages = internalMessages, params = params)))
+                    backupRoutes.forEach { (backupImpl, backupSetting) ->
+                        add(routeStateFlow(backupImpl.streamText(providerSetting = backupSetting, messages = internalMessages, params = params)))
+                    }
+                }
+                raceStreams(routeStateFlows).collect { latestMessages ->
+                    onUpdateMessages(latestMessages)
+                }
             }
         } else {
             val result = providerImpl.generateText(
@@ -542,4 +718,69 @@ class GenerationHandler(
             }
         }
     }.flowOn(Dispatchers.IO)
+}
+
+/**
+ * 多线路竞速（内部函数，供 [GenerationHandler] 与单元测试使用）。
+ *
+ * 并发收集多条流，首个产出元素的流接管，其余线路立即取消：
+ * - 连接慢/失败/超时的线路在首 token 等待期被自然淘汰，健康线路不受影响（故障转移）；
+ * - 赢家接管后取消其他线路，释放资源并停止备用线路的 token 消耗；
+ * - 赢家产生的后续元素持续透传；
+ * - 所有线路都未产出元素（全部失败）时，抛出最后记录的线路异常。
+ */
+internal fun <T> multiRouteRace(flows: List<Flow<T>>): Flow<T> = channelFlow {
+    if (flows.isEmpty()) return@channelFlow
+    if (flows.size == 1) {
+        flows[0].collect { send(it) }
+        return@channelFlow
+    }
+
+    coroutineScope {
+        // -1 表示竞速未决；>=0 表示已由第 index 条线路接管
+        val winnerIndex = AtomicInteger(-1)
+        val winnerJob = AtomicReference<Job?>(null)
+        var lastError: Throwable? = null
+
+        val jobs = flows.mapIndexed { index, flow ->
+            launch {
+                try {
+                    flow.collect { element ->
+                        when (winnerIndex.get()) {
+                            index -> send(element)
+                            -1 -> if (winnerIndex.compareAndSet(-1, index)) {
+                                winnerJob.set(coroutineContext[Job])
+                                send(element)
+                            }
+                            // 已有赢家：本线路是输家，丢弃元素
+                        }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    if (winnerIndex.get() == index) {
+                        // 赢家中途失败：向上传播
+                        throw e
+                    } else {
+                        lastError = e
+                    }
+                }
+            }
+        }
+
+        // 等待赢家出现（任一线路产出首元素）或全部线路结束
+        while (winnerIndex.get() < 0 && jobs.any { it.isActive }) {
+            yield()
+        }
+        // 赢家接管后取消其余线路，停止备用线路继续生成
+        winnerJob.get()?.let { win ->
+            jobs.forEach { job -> if (job !== win) job.cancel() }
+        }
+        jobs.joinAll()
+
+        if (winnerIndex.get() < 0) {
+            lastError?.let { throw it }
+                ?: throw IllegalStateException("All routes completed without producing output")
+        }
+    }
 }

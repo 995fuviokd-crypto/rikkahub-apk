@@ -11,6 +11,19 @@ class HttpException(
     message: String
 ) : RuntimeException(message)
 
+/**
+ * 检测响应体是否为 HTML 错误页（部分 API 网关在拒绝非法请求参数时返回 HTML 而非 JSON）。
+ */
+fun String.isHtmlBody(): Boolean {
+    val trimmed = trim()
+    if (trimmed.isEmpty()) return false
+    val lower = trimmed.lowercase()
+    if (lower.startsWith("<!doctype")) return true
+    if (lower.startsWith("<html")) return true
+    if (trimmed.startsWith("<")) return true
+    return "<!doctype html>" in lower
+}
+
 fun JsonElement.parseErrorDetail(): HttpException {
     return when (this) {
         is JsonObject -> {

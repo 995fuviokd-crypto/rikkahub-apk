@@ -4,6 +4,7 @@ import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -20,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
@@ -214,23 +217,33 @@ fun ModelSelector(
             }
         }
     } else {
-        IconButton(
+        Surface(
             onClick = {
                 state.open()
             },
+            modifier = Modifier.size(30.dp),
+            shape = CircleShape,
+            tonalElevation = 0.dp,
+            color = Color.Transparent,
         ) {
-            if (model != null) {
-                AutoAIIcon(
-                    modifier = Modifier.size(36.dp),
-                    name = model.modelId,
-                    color = Color.Transparent
-                )
-            } else {
-                Icon(
-                    imageVector = HugeIcons.Brain02,
-                    contentDescription = stringResource(R.string.setting_model_page_chat_model),
-                    modifier = Modifier.size(20.dp)
-                )
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                if (model != null) {
+                    AutoAIIcon(
+                        modifier = Modifier.size(24.dp),
+                        name = model.modelId,
+                        color = Color.Transparent,
+                        imagePadding = 0.dp
+                    )
+                } else {
+                    Icon(
+                        imageVector = HugeIcons.Brain02,
+                        contentDescription = stringResource(R.string.setting_model_page_chat_model),
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             }
         }
     }

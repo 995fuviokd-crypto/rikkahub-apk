@@ -167,6 +167,36 @@ private fun ModelSettingsPage(settings: Settings, vm: SettingVM, contentPadding:
                 onSelect = { vm.updateSettings(settings.copy(compressModelId = it.id)) },
             )
         }
+        item {
+            ModelSettingItem(
+                title = stringResource(R.string.setting_model_page_memory_model),
+                description = stringResource(R.string.setting_model_page_memory_model_desc),
+                modelId = settings.memoryModelId,
+                providers = settings.providers,
+                onSelect = { vm.updateSettings(settings.copy(memoryModelId = it.id)) },
+                onClear = { vm.updateSettings(settings.copy(memoryModelId = null)) },
+            )
+        }
+        item {
+            ModelSettingItem(
+                title = stringResource(R.string.setting_model_page_self_hosted_model),
+                description = stringResource(R.string.setting_model_page_self_hosted_model_desc),
+                modelId = settings.selfHostedModelId,
+                providers = settings.providers,
+                onSelect = { vm.updateSettings(settings.copy(selfHostedModelId = it.id)) },
+                onClear = { vm.updateSettings(settings.copy(selfHostedModelId = null)) },
+            )
+        }
+        item {
+            ModelSettingItem(
+                title = stringResource(R.string.setting_model_page_steward_model),
+                description = stringResource(R.string.setting_model_page_steward_model_desc),
+                modelId = settings.stewardModelId,
+                providers = settings.providers,
+                onSelect = { vm.updateSettings(settings.copy(stewardModelId = it.id)) },
+                onClear = { vm.updateSettings(settings.copy(stewardModelId = null)) },
+            )
+        }
     }
 }
 

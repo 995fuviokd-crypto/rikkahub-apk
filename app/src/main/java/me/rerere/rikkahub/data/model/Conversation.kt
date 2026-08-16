@@ -58,6 +58,7 @@ data class Conversation(
 
     fun updateCurrentMessages(messages: List<UIMessage>): Conversation {
         val newNodes = this.messageNodes.toMutableList()
+        var changed = false
 
         messages.forEachIndexed { index, message ->
             val node = newNodes
@@ -66,7 +67,10 @@ data class Conversation(
             val newMessages = node.messages.toMutableList()
             var newMessageIndex = node.selectIndex
             if (newMessages.any { it.id == message.id }) {
-                newMessages[newMessages.indexOfFirst { it.id == message.id }] = message
+                val existingIndex = newMessages.indexOfFirst { it.id == message.id }
+                if (newMessages[existingIndex] != message) {
+                    newMessages[existingIndex] = message
+                }
             } else {
                 newMessages.add(message)
                 newMessageIndex = newMessages.lastIndex
@@ -80,14 +84,19 @@ data class Conversation(
             // 更新newNodes
             if (index > newNodes.lastIndex) {
                 newNodes.add(newNode)
-            } else {
+                changed = true
+            } else if (newNode != node) {
                 newNodes[index] = newNode
+                changed = true
             }
         }
 
-        return this.copy(
-            messageNodes = newNodes
-        )
+        // 内容无任何变化时返回 this，保证 StateFlow 的相等性判断能跳过下游重组
+        return if (changed) {
+            this.copy(messageNodes = newNodes)
+        } else {
+            this
+        }
     }
 
     companion object {

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -29,6 +30,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.dokar.sonner.ToastType
+import me.rerere.ai.provider.ApiEndpointResolver
 import me.rerere.ai.provider.ClaudePromptCacheTtl
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.R
@@ -187,7 +189,50 @@ private fun String.normalizePath(): String {
 
 private fun String.isValidBaseUrl(): Boolean = this.toHttpUrlOrNull() != null
 
-private const val OPENAI_OFFICIAL_HOST = "api.openai.com"
+/**
+ * 在 API Base URL 输入框下方以小字半透明样式展示推导出的实际请求地址。
+ * 若 Base URL 以 @ 结尾（显式完整地址），则只展示该地址并提示已禁用自动补充。
+ */
+@Composable
+private fun ResolvedApiEndpointHint(
+    baseUrlInput: String,
+    endpoints: List<String>,
+) {
+    if (baseUrlInput.isBlank()) return
+    val color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.setting_provider_page_api_base_url_resolved),
+            style = MaterialTheme.typography.bodySmall,
+            color = color,
+        )
+        if (ApiEndpointResolver.isExplicitBaseUrl(baseUrlInput)) {
+            Text(
+                text = ApiEndpointResolver.resolveBaseUrl(baseUrlInput),
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
+                color = color,
+            )
+            Text(
+                text = stringResource(R.string.setting_provider_page_api_base_url_explicit_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = color,
+            )
+        } else {
+            endpoints.forEach { endpoint ->
+                Text(
+                    text = endpoint,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono),
+                    color = color,
+                )
+            }
+        }
+    }
+}private const val OPENAI_OFFICIAL_HOST = "api.openai.com"
 private const val GOOGLE_OFFICIAL_HOST = "generativelanguage.googleapis.com"
 private const val CLAUDE_OFFICIAL_HOST = "api.anthropic.com"
 private const val V1_SUFFIX = "/v1"
@@ -235,6 +280,17 @@ private fun ProviderConfigureOpenAI(
         label = { Text(stringResource(R.string.setting_provider_page_api_base_url)) },
         modifier = Modifier.fillMaxWidth(),
         isError = provider.baseUrl.isNotBlank() && !provider.baseUrl.isValidBaseUrl(),
+    )
+
+    ResolvedApiEndpointHint(
+        baseUrlInput = provider.baseUrl,
+        endpoints = buildList {
+            val chatPath = if (provider.useResponseApi) "/responses" else provider.chatCompletionsPath
+            add(ApiEndpointResolver.resolveEndpoint(provider.baseUrl, chatPath))
+            add(ApiEndpointResolver.resolveEndpoint(provider.baseUrl, "/models"))
+            add(ApiEndpointResolver.resolveEndpoint(provider.baseUrl, "/embeddings"))
+            add(ApiEndpointResolver.resolveEndpoint(provider.baseUrl, "/images/generations"))
+        },
     )
 
     if (!provider.useResponseApi) {
@@ -326,6 +382,14 @@ private fun ProviderConfigureClaude(
         label = { Text(stringResource(R.string.setting_provider_page_api_base_url)) },
         modifier = Modifier.fillMaxWidth(),
         isError = provider.baseUrl.isNotBlank() && !provider.baseUrl.isValidBaseUrl(),
+    )
+
+    ResolvedApiEndpointHint(
+        baseUrlInput = provider.baseUrl,
+        endpoints = buildList {
+            add(ApiEndpointResolver.resolveEndpoint(provider.baseUrl, "/messages"))
+            add(ApiEndpointResolver.resolveEndpoint(provider.baseUrl, "/models"))
+        },
     )
 
     Row(
@@ -440,11 +504,19 @@ private fun ProviderConfigureGoogle(
             label = { Text(stringResource(R.string.setting_provider_page_api_base_url)) },
             modifier = Modifier.fillMaxWidth(),
             isError = provider.baseUrl.isNotBlank() && (
-                !provider.baseUrl.isValidBaseUrl() || !provider.baseUrl.endsWith("/v1beta")
+                !provider.baseUrl.isValidBaseUrl() ||
+                    (!provider.baseUrl.endsWith("/v1beta") && !provider.baseUrl.endsWith("@"))
                 ),
             supportingText = if (!provider.baseUrl.endsWith("/v1beta")) {
                 { Text("The base URL usually ends with `/v1beta`") }
             } else null,
+        )
+
+        ResolvedApiEndpointHint(
+            baseUrlInput = provider.baseUrl,
+            endpoints = listOf(
+                ApiEndpointResolver.resolveEndpoint(provider.baseUrl, "/models"),
+            ),
         )
     }
 

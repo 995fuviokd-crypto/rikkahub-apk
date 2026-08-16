@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonObject
@@ -14,6 +16,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import me.rerere.ai.provider.ApiEndpointResolver
 import me.rerere.ai.provider.EmbeddingGenerationParams
 import me.rerere.ai.provider.EmbeddingGenerationResult
 import me.rerere.ai.provider.ImageEditParams
@@ -59,7 +62,7 @@ class OpenAIProvider(
         withContext(Dispatchers.IO) {
             val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
             val request = Request.Builder()
-                .url("${providerSetting.baseUrl}/models")
+                .url(ApiEndpointResolver.resolveEndpoint(providerSetting.baseUrl, "/models"))
                 .addHeader("Authorization", "Bearer $key")
                 .get()
                 .build()
@@ -89,7 +92,7 @@ class OpenAIProvider(
         val url = if (providerSetting.balanceOption.apiPath.startsWith("http")) {
             providerSetting.balanceOption.apiPath
         } else {
-            "${providerSetting.baseUrl}${providerSetting.balanceOption.apiPath}"
+            ApiEndpointResolver.resolveEndpoint(providerSetting.baseUrl, providerSetting.balanceOption.apiPath)
         }
         val request = Request.Builder()
             .url(url)
@@ -116,36 +119,48 @@ class OpenAIProvider(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): Flow<StreamChunk> = if (providerSetting.useResponseApi) {
-        responseAPI.streamText(
+    ): Flow<StreamChunk> {
+        val primary = if (providerSetting.useResponseApi) responseAPI else chatCompletionsAPI
+        val fallback = if (providerSetting.useResponseApi) chatCompletionsAPI else responseAPI
+        return primary.streamText(
             providerSetting = providerSetting,
             messages = messages,
             params = params
-        )
-    } else {
-        chatCompletionsAPI.streamText(
-            providerSetting = providerSetting,
-            messages = messages,
-            params = params
-        )
+        ).catch { e ->
+            // 网关不支持当前协议（/responses 或 /chat/completions 端点返回 HTML 404）时回退另一协议
+            if (e is ProtocolUnavailableException) {
+                emitAll(fallback.streamText(
+                    providerSetting = providerSetting,
+                    messages = messages,
+                    params = params
+                ))
+            } else {
+                throw e
+            }
+        }
     }
 
     override suspend fun generateText(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): TextGenerationResult = if (providerSetting.useResponseApi) {
-        responseAPI.generateText(
-            providerSetting = providerSetting,
-            messages = messages,
-            params = params
-        )
-    } else {
-        chatCompletionsAPI.generateText(
-            providerSetting = providerSetting,
-            messages = messages,
-            params = params
-        )
+    ): TextGenerationResult {
+        val primary = if (providerSetting.useResponseApi) responseAPI else chatCompletionsAPI
+        val fallback = if (providerSetting.useResponseApi) chatCompletionsAPI else responseAPI
+        return try {
+            primary.generateText(
+                providerSetting = providerSetting,
+                messages = messages,
+                params = params
+            )
+        } catch (e: ProtocolUnavailableException) {
+            Log.w(TAG, "generateText: primary protocol unavailable (${e.message}), falling back to secondary")
+            fallback.generateText(
+                providerSetting = providerSetting,
+                messages = messages,
+                params = params
+            )
+        }
     }
 
     override suspend fun generateEmbedding(
@@ -170,7 +185,7 @@ class OpenAIProvider(
         )
 
         val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/embeddings")
+            .url(ApiEndpointResolver.resolveEndpoint(providerSetting.baseUrl, "/embeddings"))
             .headers(params.customHeaders.toHeaders())
             .addHeader("Authorization", "Bearer $key")
             .addHeader("Content-Type", "application/json")
@@ -228,7 +243,7 @@ class OpenAIProvider(
         Log.i(TAG, "generateImage: $requestBody")
 
         val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/images/generations")
+            .url(ApiEndpointResolver.resolveEndpoint(providerSetting.baseUrl, "/images/generations"))
             .headers(params.customHeaders.toHeaders())
             .addHeader("Authorization", "Bearer $key")
             .addHeader("Content-Type", "application/json")
@@ -293,7 +308,7 @@ class OpenAIProvider(
         }
 
         val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/images/edits")
+            .url(ApiEndpointResolver.resolveEndpoint(providerSetting.baseUrl, "/images/edits"))
             .headers(params.customHeaders.toHeaders())
             .addHeader("Authorization", "Bearer $key")
             .post(bodyBuilder.build())

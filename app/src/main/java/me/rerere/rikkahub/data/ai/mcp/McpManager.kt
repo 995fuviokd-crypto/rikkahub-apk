@@ -11,6 +11,7 @@ import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.types.ImageContent
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -43,45 +44,57 @@ class McpManager(
     private val filesManager: FilesManager,
     appEventBus: AppEventBus,
 ) {
-    private val okHttpClient = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.MINUTES)
-        .writeTimeout(120, TimeUnit.SECONDS)
-        .followSslRedirects(true)
-        .followRedirects(true)
-        .build()
+    // OkHttp/Ktor client 惰性构建：McpManager 在冷启动主线程依赖链中（ChatService→GenerationHandler），
+    // 首次真正发请求时才初始化线程池，避免首帧卡顿
+    private val okHttpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.MINUTES)
+            .writeTimeout(120, TimeUnit.SECONDS)
+            .followSslRedirects(true)
+            .followRedirects(true)
+            .build()
+    }
 
-    private val httpClient = HttpClient(OkHttp) {
-        engine {
-            preconfigured = okHttpClient
+    private val httpClient: HttpClient by lazy {
+        HttpClient(OkHttp) {
+            engine {
+                preconfigured = okHttpClient
+            }
+            install(ContentNegotiation) {
+                json(Json {
+                    prettyPrint = true
+                    isLenient = true
+                })
+            }
+            install(SSE)
         }
-        install(ContentNegotiation) {
-            json(Json {
-                prettyPrint = true
-                isLenient = true
-            })
-        }
-        install(SSE)
     }
 
     private val statusStore = McpStatusStore()
-    private val oauthCoordinator = McpOAuthCoordinator(
-        settingsStore = settingsStore,
-        appScope = appScope,
-        appEventBus = appEventBus,
-        oauthClient = McpOAuthClient(okHttpClient),
-        updateStatus = statusStore::update,
-    )
-    private val sessionRegistry = McpSessionRegistry(
-        settingsStore = settingsStore,
-        appScope = appScope,
-        httpClient = httpClient,
-        oauthCoordinator = oauthCoordinator,
-        statusStore = statusStore,
-    )
+    private val oauthCoordinator: McpOAuthCoordinator by lazy {
+        McpOAuthCoordinator(
+            settingsStore = settingsStore,
+            appScope = appScope,
+            appEventBus = appEventBus,
+            oauthClient = McpOAuthClient(okHttpClient),
+            updateStatus = statusStore::update,
+        )
+    }
+    private val sessionRegistry: McpSessionRegistry by lazy {
+        McpSessionRegistry(
+            settingsStore = settingsStore,
+            appScope = appScope,
+            httpClient = httpClient,
+            oauthCoordinator = oauthCoordinator,
+            statusStore = statusStore,
+        )
+    }
 
     init {
-        appScope.launch {
+        // 后台线程收集并 reconcile：settingsFlow 首次发射会触发 MCP session 连接
+        // （首次构建 Ktor HttpClient），移到 Default 避免与首帧渲染竞争
+        appScope.launch(Dispatchers.Default) {
             settingsStore.settingsFlow
                 .map { settings -> settings.mcpServers }
                 .distinctUntilChanged()
@@ -91,6 +104,16 @@ class McpManager(
 
     val syncingStatus: StateFlow<Map<Uuid, McpStatus>>
         get() = statusStore.status
+
+    /**
+     * 预加载网络栈：触发 OkHttp/Ktor client 的惰性构建，
+     * 使首次 MCP 连接时无需再初始化线程池。应用启动后台调用。
+     */
+    @Suppress("UNUSED_EXPRESSION")
+    fun preload() {
+        okHttpClient
+        httpClient
+    }
 
     fun getClient(config: McpServerConfig): Client? = sessionRegistry.getClient(config.id)
 

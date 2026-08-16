@@ -75,7 +75,7 @@ class StreamChunkHandler(private val model: Model? = null) {
             messages
         }
         val updatedMessage = append(targetMessages.last(), chunk)
-        return targetMessages.dropLast(1) + updatedMessage
+        return targetMessages.toMutableList().also { it[it.size - 1] = updatedMessage }
     }
 
     private fun append(message: UIMessage, chunk: StreamChunk): UIMessage = with(message) {
@@ -157,16 +157,20 @@ class StreamChunkHandler(private val model: Model? = null) {
                 ))
             }
 
-            is StreamChunk.ToolCallDelta -> copy(parts = parts.map { part ->
+            is StreamChunk.ToolCallDelta -> {
                 // 工具调用可以并行生成，通过 toolCallId 而不是 part 位置识别目标。
-                if (part is UIMessagePart.Tool && part.toolCallId == chunk.id) {
-                    part.copy(
+                // 仅复制列表一次，避免每 token 对全部 parts 做 map 复制
+                val index = parts.indexOfFirst { it is UIMessagePart.Tool && it.toolCallId == chunk.id }
+                if (index < 0) this
+                else copy(parts = parts.toMutableList().apply {
+                    val part = get(index) as UIMessagePart.Tool
+                    set(index, part.copy(
                         toolName = part.toolName + chunk.toolNameDelta,
                         input = part.input + chunk.inputDelta,
                         metadata = chunk.metadata ?: part.metadata,
-                    )
-                } else part
-            })
+                    ))
+                })
+            }
 
             is StreamChunk.ToolCallEnd -> this
             is StreamChunk.ServerToolStart -> {
@@ -300,9 +304,13 @@ class StreamChunkHandler(private val model: Model? = null) {
     private fun UIMessage.updateServerTool(
         id: String,
         transform: (UIMessagePart.ServerTool) -> UIMessagePart.ServerTool,
-    ): UIMessage = copy(parts = parts.map { part ->
-        if (part is UIMessagePart.ServerTool && part.toolCallId == id) transform(part) else part
-    })
+    ): UIMessage {
+        val index = parts.indexOfFirst { it is UIMessagePart.ServerTool && it.toolCallId == id }
+        if (index < 0) return this
+        return copy(parts = parts.toMutableList().apply {
+            set(index, transform(get(index) as UIMessagePart.ServerTool))
+        })
+    }
 }
 
 private fun parseServerToolJson(value: String) = runCatching {

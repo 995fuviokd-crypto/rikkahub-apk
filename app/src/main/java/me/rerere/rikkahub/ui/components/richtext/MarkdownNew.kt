@@ -253,8 +253,8 @@ private fun HtmlBlockElement(
                         contentDescription = alt.takeIf { it.isNotEmpty() },
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .widthIn(min = 120.dp)
-                            .heightIn(min = 120.dp),
+                            .widthIn(min = 120.dp, max = 480.dp)
+                            .heightIn(min = 120.dp, max = 480.dp),
                     )
                 }
             }
@@ -758,8 +758,8 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                             contentDescription = alt.takeIf { it.isNotEmpty() },
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .widthIn(min = 120.dp)
-                                .heightIn(min = 120.dp),
+                                .widthIn(min = 120.dp, max = 480.dp)
+                                .heightIn(min = 120.dp, max = 480.dp),
                         )
                     }
                 }

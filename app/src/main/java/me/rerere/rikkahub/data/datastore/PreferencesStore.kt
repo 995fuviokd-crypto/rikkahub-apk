@@ -12,8 +12,10 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import io.pebbletemplates.pebble.PebbleEngine
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.serialization.SerialName
@@ -24,9 +26,11 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.AppScope
+import me.rerere.rikkahub.data.ai.AnchorBudgetLadder
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.DEFAULT_STEWARD_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
@@ -99,6 +103,15 @@ class SettingsStore(
         val OCR_PROMPT = stringPreferencesKey("ocr_prompt")
         val COMPRESS_MODEL = stringPreferencesKey("compress_model")
         val COMPRESS_PROMPT = stringPreferencesKey("compress_prompt")
+        val MEMORY_MODEL = stringPreferencesKey("memory_model")
+        val SELF_HOSTED_MODEL = stringPreferencesKey("self_hosted_model")
+        val AUTO_COMPRESS_ENABLED = booleanPreferencesKey("auto_compress_enabled")
+        val AUTO_COMPRESS_THRESHOLD_TOKENS = intPreferencesKey("auto_compress_threshold_tokens")
+        val AUTO_COMPRESS_KEEP_RECENT = intPreferencesKey("auto_compress_keep_recent")
+        val AUTO_RECONNECT_ENABLED = booleanPreferencesKey("auto_reconnect_enabled")
+        val AUTO_RECONNECT_MAX_RETRIES = intPreferencesKey("auto_reconnect_max_retries")
+        // 多线路并发：请求自动探测同名模型的多条 provider 线路，并发竞速 + 故障转移
+        val MULTI_ROUTE_CONCURRENT = booleanPreferencesKey("multi_route_concurrent")
 
         // 提供商
         val PROVIDERS = stringPreferencesKey("providers")
@@ -151,6 +164,20 @@ class SettingsStore(
 
         // 赞助提醒
         val SPONSOR_ALERT_DISMISSED_AT = intPreferencesKey("sponsor_alert_dismissed_at")
+
+        // 智能管家模式 + 屏幕分辨率覆盖
+        val SMART_STEWARD_MODE_ENABLED = booleanPreferencesKey("smart_steward_mode_enabled")
+        val STEWARD_MODEL = stringPreferencesKey("steward_model")
+        val STEWARD_PROMPT = stringPreferencesKey("steward_prompt")
+        val ANCHOR_BUDGET_BASE = intPreferencesKey("anchor_budget_base")
+        val ANCHOR_BUDGET_STEP = intPreferencesKey("anchor_budget_step")
+        val ANCHOR_WARMUP_ROUNDS = intPreferencesKey("anchor_warmup_rounds")
+        val SCREEN_RESOLUTION_OVERRIDE_ENABLED = booleanPreferencesKey("screen_resolution_override_enabled")
+        val SCREEN_RESOLUTION_OVERRIDE_WIDTH = intPreferencesKey("screen_resolution_override_width")
+        val SCREEN_RESOLUTION_OVERRIDE_HEIGHT = intPreferencesKey("screen_resolution_override_height")
+
+        // 后台保活常驻通知：进应用即在前台服务消息栏显示"正在运行中"
+        val KEEP_ALIVE_ENABLED = booleanPreferencesKey("keep_alive_enabled")
     }
 
     private val dataStore = context.settingsStore
@@ -185,6 +212,14 @@ class SettingsStore(
                 ocrPrompt = preferences[OCR_PROMPT] ?: DEFAULT_OCR_PROMPT,
                 compressModelId = preferences[COMPRESS_MODEL]?.let { Uuid.parse(it) } ?: DEFAULT_AUTO_MODEL_ID,
                 compressPrompt = preferences[COMPRESS_PROMPT] ?: DEFAULT_COMPRESS_PROMPT,
+                memoryModelId = preferences[MEMORY_MODEL]?.let { Uuid.parse(it) },
+                selfHostedModelId = preferences[SELF_HOSTED_MODEL]?.let { Uuid.parse(it) },
+                autoCompressEnabled = preferences[AUTO_COMPRESS_ENABLED] ?: false,
+                autoCompressThresholdTokens = preferences[AUTO_COMPRESS_THRESHOLD_TOKENS] ?: 32000,
+                autoCompressKeepRecent = preferences[AUTO_COMPRESS_KEEP_RECENT] ?: 32,
+                autoReconnectEnabled = preferences[AUTO_RECONNECT_ENABLED] ?: false,
+                autoReconnectMaxRetries = preferences[AUTO_RECONNECT_MAX_RETRIES] ?: 3,
+                multiRouteConcurrent = preferences[MULTI_ROUTE_CONCURRENT] ?: false,
                 assistantId = preferences[SELECT_ASSISTANT]?.let { Uuid.parse(it) }
                     ?: DEFAULT_ASSISTANT_ID,
                 assistantTags = preferences[ASSISTANT_TAGS]?.let {
@@ -244,6 +279,18 @@ class SettingsStore(
                 } ?: BackupReminderConfig(),
                 launchCount = preferences[LAUNCH_COUNT] ?: 0,
                 sponsorAlertDismissedAt = preferences[SPONSOR_ALERT_DISMISSED_AT] ?: 0,
+                // 极简锚定默认开启：键缺失时回退 true（老用户升级后同样默认生效）
+                smartStewardModeEnabled = preferences[SMART_STEWARD_MODE_ENABLED] != false,
+                stewardModelId = preferences[STEWARD_MODEL]?.let { Uuid.parse(it) },
+                stewardPrompt = preferences[STEWARD_PROMPT] ?: DEFAULT_STEWARD_PROMPT,
+                anchorBudgetBase = preferences[ANCHOR_BUDGET_BASE] ?: AnchorBudgetLadder.DEFAULT_BASE,
+                anchorBudgetStep = preferences[ANCHOR_BUDGET_STEP] ?: AnchorBudgetLadder.DEFAULT_STEP,
+                anchorWarmupRounds = preferences[ANCHOR_WARMUP_ROUNDS] ?: AnchorBudgetLadder.DEFAULT_WARMUP_ROUNDS,
+                screenResolutionOverrideEnabled = preferences[SCREEN_RESOLUTION_OVERRIDE_ENABLED] == true,
+                screenResolutionOverrideWidth = preferences[SCREEN_RESOLUTION_OVERRIDE_WIDTH] ?: 0,
+                screenResolutionOverrideHeight = preferences[SCREEN_RESOLUTION_OVERRIDE_HEIGHT] ?: 0,
+                // 后台保活常驻默认开启
+                keepAliveEnabled = preferences[KEEP_ALIVE_ENABLED] != false,
             )
         }
         .map {
@@ -337,9 +384,13 @@ class SettingsStore(
                 quickMessages = settings.quickMessages.distinctBy { it.id },
             )
         }
+        // 全量 JSON 解码链与 PebbleEngine 首次构建移出主线程：DataStore 首次发射时
+        // settings 包含 providers/assistants/tts 等大 JSON，解码 + templateCache 失效
+        // 在 Default 线程执行，避免冷启动首帧在 Main 线程做全量 JSON 解析
         .onEach {
             get<PebbleEngine>().templateCache.invalidateAll()
         }
+        .flowOn(Dispatchers.Default)
 
     val settingsFlow = settingsFlowRaw
         .distinctUntilChanged()
@@ -378,6 +429,18 @@ class SettingsStore(
             preferences[OCR_PROMPT] = settings.ocrPrompt
             preferences[COMPRESS_MODEL] = settings.compressModelId.toString()
             preferences[COMPRESS_PROMPT] = settings.compressPrompt
+            settings.memoryModelId?.let {
+                preferences[MEMORY_MODEL] = it.toString()
+            } ?: preferences.remove(MEMORY_MODEL)
+            settings.selfHostedModelId?.let {
+                preferences[SELF_HOSTED_MODEL] = it.toString()
+            } ?: preferences.remove(SELF_HOSTED_MODEL)
+            preferences[AUTO_COMPRESS_ENABLED] = settings.autoCompressEnabled
+            preferences[AUTO_COMPRESS_THRESHOLD_TOKENS] = settings.autoCompressThresholdTokens
+            preferences[AUTO_COMPRESS_KEEP_RECENT] = settings.autoCompressKeepRecent
+            preferences[AUTO_RECONNECT_ENABLED] = settings.autoReconnectEnabled
+            preferences[AUTO_RECONNECT_MAX_RETRIES] = settings.autoReconnectMaxRetries
+            preferences[MULTI_ROUTE_CONCURRENT] = settings.multiRouteConcurrent
 
             preferences[PROVIDERS] = JsonInstant.encodeToString(settings.providers)
 
@@ -412,6 +475,18 @@ class SettingsStore(
             preferences[BACKUP_REMINDER_CONFIG] = JsonInstant.encodeToString(settings.backupReminderConfig)
             preferences[LAUNCH_COUNT] = settings.launchCount
             preferences[SPONSOR_ALERT_DISMISSED_AT] = settings.sponsorAlertDismissedAt
+            preferences[SMART_STEWARD_MODE_ENABLED] = settings.smartStewardModeEnabled
+            settings.stewardModelId?.let {
+                preferences[STEWARD_MODEL] = it.toString()
+            } ?: preferences.remove(STEWARD_MODEL)
+            preferences[STEWARD_PROMPT] = settings.stewardPrompt
+            preferences[ANCHOR_BUDGET_BASE] = settings.anchorBudgetBase
+            preferences[ANCHOR_BUDGET_STEP] = settings.anchorBudgetStep
+            preferences[ANCHOR_WARMUP_ROUNDS] = settings.anchorWarmupRounds
+            preferences[SCREEN_RESOLUTION_OVERRIDE_ENABLED] = settings.screenResolutionOverrideEnabled
+            preferences[SCREEN_RESOLUTION_OVERRIDE_WIDTH] = settings.screenResolutionOverrideWidth
+            preferences[SCREEN_RESOLUTION_OVERRIDE_HEIGHT] = settings.screenResolutionOverrideHeight
+            preferences[KEEP_ALIVE_ENABLED] = settings.keepAliveEnabled
         }
     }
 
@@ -556,6 +631,41 @@ data class Settings(
     val backupReminderConfig: BackupReminderConfig = BackupReminderConfig(),
     val launchCount: Int = 0,
     val sponsorAlertDismissedAt: Int = 0,
+    // scope-recall 记忆引擎配置
+    val memoryRecallLimit: Int = 8,
+    val memoryRetrievalMode: String = "hybrid",
+    val memoryMinScore: Float = 0.05f,
+    val memoryJournalEnabled: Boolean = false,
+    // 记忆系统专用模型（摘要/嵌入等）；null 表示随对话默认模型
+    val memoryModelId: Uuid? = null,
+    // 自托管模型；null 表示未选择
+    val selfHostedModelId: Uuid? = null,
+    // 自动压缩：上下文 token 估算达到阈值时自动压缩并继续生成
+    val autoCompressEnabled: Boolean = false,
+    val autoCompressThresholdTokens: Int = 32000,
+    val autoCompressKeepRecent: Int = 32,
+    // 自动重连：生成过程中遇到网络断开时自动重试直到收到响应
+    val autoReconnectEnabled: Boolean = false,
+    val autoReconnectMaxRetries: Int = 3,
+    // 多线路并发：请求自动探测同名模型的多条 provider 线路，并发竞速 + 故障转移
+    val multiRouteConcurrent: Boolean = false,
+    // 智能管家模式：任务感知思维模式路由 + 首轮工具锚定的全局总开关
+    // 默认开启：结合 dsh-anchored-standard 的 dual-anchor 思路，
+    // 极简锚定（首轮窄工具面 + 预算阶梯）默认生效，DeepSeek 通过 Linux 发挥原生性能
+    val smartStewardModeEnabled: Boolean = true,
+    // 托管模式专用模型与提示词；模型为空时回退到当前对话模型
+    val stewardModelId: Uuid? = null,
+    val stewardPrompt: String = DEFAULT_STEWARD_PROMPT,
+    // 锚定预算阶梯参数（warmup 轮次内逐轮递增的输出预算）
+    val anchorBudgetBase: Int = AnchorBudgetLadder.DEFAULT_BASE,
+    val anchorBudgetStep: Int = AnchorBudgetLadder.DEFAULT_STEP,
+    val anchorWarmupRounds: Int = AnchorBudgetLadder.DEFAULT_WARMUP_ROUNDS,
+    // 屏幕分辨率覆盖：伪造 RikkaHub 读取到的设备屏幕宽高（px），0 表示不启用
+    val screenResolutionOverrideEnabled: Boolean = false,
+    val screenResolutionOverrideWidth: Int = 0,
+    val screenResolutionOverrideHeight: Int = 0,
+    // 后台保活常驻通知：进应用即在消息栏常驻显示"正在运行中"
+    val keepAliveEnabled: Boolean = true,
 ) {
     companion object {
         // 构造一个用于初始化的settings, 但它不能用于保存，防止使用初始值存储

@@ -11,13 +11,16 @@ internal fun buildMemoryPrompt(memories: List<AssistantMemory>) =
         appendLine()
         append("**Memories**")
         appendLine()
-        append("These are memories stored via the memory_tool that you can reference in future conversations.")
+        append("These are relevant memories recalled for the current query via the memory system (scope-recall). You may reference them when answering. They persist across conversations and are automatically recalled when relevant.")
         appendLine()
         val json = buildJsonArray {
             memories.forEach { memory ->
                 add(buildJsonObject {
                     put("id", memory.id)
+                    put("target", memory.target)
                     put("content", memory.content)
+                    memory.summary?.let { put("summary", it) }
+                    put("score", memory.score)
                 })
             }
         }

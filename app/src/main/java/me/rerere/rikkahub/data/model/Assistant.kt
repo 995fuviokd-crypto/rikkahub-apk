@@ -8,6 +8,7 @@ import me.rerere.ai.provider.CustomHeader
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
+import me.rerere.rikkahub.data.memory.MemoryScope
 import me.rerere.rikkahub.utils.SimpleCache
 import java.util.concurrent.TimeUnit
 import kotlin.uuid.Uuid
@@ -28,6 +29,7 @@ data class Assistant(
     val streamOutput: Boolean = true,
     val enableMemory: Boolean = false,
     val useGlobalMemory: Boolean = false, // 使用全局共享记忆而非助手隔离记忆
+    val enableMemoryVectorEmbedding: Boolean = false, // 记忆召回启用向量嵌入
     val enableRecentChatsReference: Boolean = false,
     val messageTemplate: String = "{{ message }}",
     val presetMessages: List<UIMessage> = emptyList(),
@@ -38,9 +40,10 @@ data class Assistant(
     val customHeaders: List<CustomHeader> = emptyList(),
     val customBodies: List<CustomBody> = emptyList(),
     val mcpServers: Set<Uuid> = emptySet(),
-    val localTools: List<LocalToolOption> = listOf(LocalToolOption.TimeInfo),
-    val enableWebSearch: Boolean = false, // 网络搜索开关(每个助手独立)
-    val workspaceId: Uuid? = null,
+    val localTools: List<LocalToolOption> = listOf(LocalToolOption.TimeInfo, LocalToolOption.DeviceInfo),
+    val enableWebSearch: Boolean = true, // 网络搜索开关(每个助手独立)，默认开启(Bing 免 key 本地搜索)
+    val workspaceId: Uuid? = null,       // 兼容旧版单工作区绑定(镜像主工作区, 即 workspaceIds 的第一个)
+    val workspaceIds: Set<Uuid> = emptySet(), // 多工作区绑定(优先), 第一个为主工作区; 附加工作区工具带 _2/_3 后缀
     val background: String? = null, // 聊天页背景图地址(本地文件 URI 或网络 URL), 为 null 时无背景
     val backgroundOpacity: Float = 1.0f, // 背景图不透明度(0~1)
     val useGradientBackground: Boolean = false, // 开启后聊天页使用动态渐变背景
@@ -50,7 +53,53 @@ data class Assistant(
     val enableTimeReminder: Boolean = false,            // 时间间隔提醒注入
     val allowConversationSystemPrompt: Boolean = false, // 允许对话单独重写 system prompt
     val allowConversationPromptInjection: Boolean = false, // 允许对话单独绑定提示词注入
-)
+
+    // 任务感知思维模式路由（借鉴 dsh-router-standard：spec 规划型 / react 执行型 / weak 弱引导）
+    val smartModeRouter: Boolean = false,               // 路由开关（默认关闭）
+    val routerModeOverride: RouterMode = RouterMode.AUTO, // 路由模式覆盖（AUTO = 按任务自动分类）
+    // 首轮工具锚定（借鉴 dsh-anchored-standard：首轮只暴露核心工具，首次工具调用后恢复全部）
+    // 默认开启：极简锚定默认生效，DeepSeek 家族默认保留 workspace_shell（Linux 执行能力）
+    val smartToolAnchor: Boolean = true,               // 锚定开关（默认开启）
+    val anchorCoreToolNames: List<String> = emptyList(), // 首轮保留的核心工具名（空 = 自动取第一个）
+    // 锚定预算阶梯（与首轮工具锚定合成"双约束首轮锚定"：输出预算绳 + 工具 schema 绳）
+    // warmup 轮次内逐轮递增输出预算，让模型反复经历"极简思维 + 调工具"，延伸成会话风格惯性
+    // 默认开启：与 smartToolAnchor 组成完整的双约束首轮锚定，开箱即用
+    val smartAnchorCapLadder: Boolean = true,           // 预算阶梯开关（默认开启）
+    // 晋升后工具守则（借鉴 dsh-win-fable-report：首个工具调用后一次性注入 workspace
+    // 工具调用守则 + 关键节点及时汇报，每会话仅一次）
+    val smartToolPlaybook: Boolean = false,             // 守则注入开关（默认关闭）
+) {
+    /**
+     * 生效的工作区集合：优先多选字段（workspaceIds），
+     * 回退兼容旧版单工作区字段（workspaceId）。
+     * 第一个为主工作区，其余为附加工作区。
+     */
+    val effectiveWorkspaceIds: Set<Uuid>
+        get() = if (workspaceIds.isNotEmpty()) workspaceIds else workspaceId?.let { setOf(it) }.orEmpty()
+}
+
+/**
+ * 任务感知思维模式路由模式
+ *
+ * - AUTO：根据任务文本自动分类为 spec / react / weak
+ * - SPEC：强制规划型（先分析方案再执行）
+ * - REACT：强制执行型（直接动手）
+ * - WEAK：弱引导（把分类交给模型自己）
+ */
+@Serializable
+enum class RouterMode {
+    @SerialName("auto")
+    AUTO,
+
+    @SerialName("spec")
+    SPEC,
+
+    @SerialName("react")
+    REACT,
+
+    @SerialName("weak")
+    WEAK,
+}
 
 @Serializable
 data class QuickMessage(
@@ -63,6 +112,13 @@ data class QuickMessage(
 data class AssistantMemory(
     val id: Int,
     val content: String = "",
+    val target: String = MemoryTarget.MEMORY.name,
+    val summary: String? = null,
+    val source: String = "manual",
+    val scopeKey: String = MemoryScope.DURABLE,
+    val conversationId: String? = null,
+    val updatedAt: Long = 0L,
+    val score: Float = 0f,
 )
 
 @Serializable

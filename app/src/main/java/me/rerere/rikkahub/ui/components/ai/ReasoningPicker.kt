@@ -78,7 +78,10 @@ fun ReasoningButton(
         modifier = modifier,
     ) {
         Row(
-            modifier = Modifier.padding(vertical = 8.dp, horizontal = 8.dp),
+            modifier = Modifier.padding(
+                vertical = if (onlyIcon) 3.dp else 8.dp,
+                horizontal = if (onlyIcon) 3.dp else 8.dp
+            ),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {

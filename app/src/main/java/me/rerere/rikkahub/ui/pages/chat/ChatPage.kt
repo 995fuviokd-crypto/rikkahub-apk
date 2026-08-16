@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
@@ -16,6 +17,7 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalNavigationDrawer
@@ -35,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -53,8 +56,10 @@ import androidx.core.net.toUri
 import com.dokar.sonner.ToastType
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
@@ -91,6 +96,7 @@ import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.utils.ImageUtils
 import me.rerere.rikkahub.utils.base64Decode
 import me.rerere.rikkahub.utils.isAllowedFileType
+import me.rerere.rikkahub.utils.TokenEstimate
 import me.rerere.rikkahub.utils.navigateToChatPage
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -423,6 +429,14 @@ private fun ChatPageContent(
                     onMoreClick = {
                         showFilesSheet = true
                     },
+                    stewardModeState = vm.stewardModeState.collectAsStateWithLifecycle().value,
+                    stewardMaxLoops = vm.stewardMaxLoops.collectAsStateWithLifecycle().value,
+                    onToggleStewardMode = {
+                        vm.toggleStewardMode()
+                    },
+                    onStewardMaxLoopsChange = {
+                        vm.setStewardMaxLoops(it)
+                    },
                 )
             },
             containerColor = Color.Transparent,
@@ -530,11 +544,13 @@ private fun ChatFilesPickerSheet(
     val toaster = LocalToaster.current
     val filesManager: FilesManager = koinInject()
     var showInjectionSheet by remember { mutableStateOf(false) }
-    var showCompressDialog by remember { mutableStateOf(false) }
+    var showAutoCompressDialog by remember { mutableStateOf(false) }
+    var showAutoReconnectDialog by remember { mutableStateOf(false) }
 
     fun dismissAll() {
         showInjectionSheet = false
-        showCompressDialog = false
+        showAutoCompressDialog = false
+        showAutoReconnectDialog = false
         onDismiss()
     }
 
@@ -688,9 +704,6 @@ private fun ChatFilesPickerSheet(
             state = inputState,
             assistant = assistant,
             mcpManager = vm.mcpManager,
-            onCompressContext = { additionalPrompt, targetTokens, keepRecentMessages ->
-                vm.handleCompressContext(additionalPrompt, targetTokens, keepRecentMessages)
-            },
             onUpdateAssistant = {
                 vm.updateSettings(
                     setting.copy(
@@ -710,8 +723,27 @@ private fun ChatFilesPickerSheet(
             },
             showInjectionSheet = showInjectionSheet,
             onShowInjectionSheetChange = { showInjectionSheet = it },
-            showCompressDialog = showCompressDialog,
-            onShowCompressDialogChange = { showCompressDialog = it },
+            showAutoCompressDialog = showAutoCompressDialog,
+            onShowAutoCompressDialogChange = { showAutoCompressDialog = it },
+            onAutoCompressSettings = { enabled, thresholdTokens, keepRecent ->
+                vm.updateSettings(
+                    setting.copy(
+                        autoCompressEnabled = enabled,
+                        autoCompressThresholdTokens = thresholdTokens,
+                        autoCompressKeepRecent = keepRecent,
+                    )
+                )
+            },
+            showAutoReconnectDialog = showAutoReconnectDialog,
+            onShowAutoReconnectDialogChange = { showAutoReconnectDialog = it },
+            onAutoReconnectSettings = { enabled, maxRetries ->
+                vm.updateSettings(
+                    setting.copy(
+                        autoReconnectEnabled = enabled,
+                        autoReconnectMaxRetries = maxRetries,
+                    )
+                )
+            },
             onDismiss = { dismissAll() },
             onTakePic = onLaunchCamera,
             onPickImage = { imagePickerLauncher.launch("image/*") },
@@ -784,6 +816,40 @@ private fun TopBar(
                                 fontSize = 8.sp,
                             )
                         )
+                    }
+                    if (settings.autoCompressEnabled) {
+                        val threshold = settings.autoCompressThresholdTokens
+                        // 估算放到后台协程，避免流式输出时每次消息变化都在 UI 线程全量遍历
+                        val conversationTokens by produceState(
+                            initialValue = 0,
+                            conversation.messageNodes,
+                        ) {
+                            value = withContext(Dispatchers.Default) {
+                                TokenEstimate.estimateConversationTokens(conversation)
+                            }
+                        }
+                        val progress = if (threshold > 0) {
+                            (conversationTokens.toFloat() / threshold).coerceIn(0f, 1f)
+                        } else {
+                            0f
+                        }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 2.dp)
+                        ) {
+                            LinearProgressIndicator(
+                                progress = { progress },
+                                modifier = Modifier.fillMaxWidth(0.6f),
+                            )
+                            Text(
+                                text = "$conversationTokens / $threshold",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 8.sp,
+                                ),
+                                color = LocalContentColor.current.copy(if (progress >= 1f) 1f else 0.65f),
+                            )
+                        }
                     }
                 }
             }

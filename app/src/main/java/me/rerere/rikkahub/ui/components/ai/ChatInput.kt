@@ -107,6 +107,8 @@ import me.rerere.rikkahub.ui.components.ui.KeepScreenOn
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionRecordAudio
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
+import me.rerere.rikkahub.ui.pages.chat.StewardModeController
+import me.rerere.rikkahub.ui.pages.chat.StewardModeState
 import me.rerere.rikkahub.ui.context.LocalASRState
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -132,6 +134,10 @@ fun ChatInput(
     onCancelClick: () -> Unit,
     onSendClick: () -> Unit,
     onLongSendClick: () -> Unit,
+    stewardModeState: StewardModeState? = null,
+    stewardMaxLoops: Int = StewardModeController.DEFAULT_MAX_LOOPS,
+    onToggleStewardMode: () -> Unit = {},
+    onStewardMaxLoopsChange: (Int) -> Unit = {},
 ) {
     val toaster = LocalToaster.current
     val assistant = settings.getCurrentAssistant()
@@ -296,6 +302,17 @@ fun ChatInput(
                                         onUpdateAssistant(assistant.copy(reasoningLevel = it))
                                     },
                                     onlyIcon = true,
+                                )
+                            }
+
+                            // 智能托管模式
+                            if (stewardModeState != null) {
+                                StewardModeButton(
+                                    enabled = stewardModeState.enabled,
+                                    status = stewardModeState.status,
+                                    maxLoops = stewardMaxLoops,
+                                    onMaxLoopsChange = onStewardMaxLoopsChange,
+                                    onToggle = onToggleStewardMode,
                                 )
                             }
 

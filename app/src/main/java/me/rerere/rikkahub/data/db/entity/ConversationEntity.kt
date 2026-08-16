@@ -2,9 +2,16 @@ package me.rerere.rikkahub.data.db.entity
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity
+@Entity(
+    indices = [
+        Index("assistant_id"),
+        Index("folder_id"),
+        Index(value = ["is_pinned", "update_at"])
+    ]
+)
 data class ConversationEntity(
     @PrimaryKey
     val id: String,

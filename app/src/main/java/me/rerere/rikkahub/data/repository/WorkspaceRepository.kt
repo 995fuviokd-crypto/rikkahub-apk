@@ -109,6 +109,13 @@ class WorkspaceRepository(
         return true
     }
 
+    /** 切换「Android 本地读写工作区与本地互通」开关（默认开启） */
+    suspend fun setAndroidLocalAccess(id: String, enabled: Boolean): Boolean {
+        val workspace = dao.getById(id) ?: return false
+        dao.updateAndroidLocalAccess(id, enabled, System.currentTimeMillis())
+        return true
+    }
+
     suspend fun installRootfs(
         id: String,
         url: String,
@@ -235,7 +242,7 @@ class WorkspaceRepository(
     ): Long = withContext(Dispatchers.IO) {
         val workspace = dao.getById(id) ?: error("Workspace not found: $id")
         manager.ensureWorkspace(workspace.root)
-        manager.rootfsFileSize(workspace.root, path)
+        manager.rootfsFileSize(workspace.root, path, workspace.androidLocalAccess)
     }
 
     /** 按 Rootfs 内绝对路径导出文件内容, 支持 /workspace、bind mount 与 Rootfs 内部路径 */
@@ -246,7 +253,7 @@ class WorkspaceRepository(
     ) = withContext(Dispatchers.IO) {
         val workspace = dao.getById(id) ?: error("Workspace not found: $id")
         manager.ensureWorkspace(workspace.root)
-        manager.exportRootfsFile(workspace.root, path, outputStream)
+        manager.exportRootfsFile(workspace.root, path, outputStream, workspace.androidLocalAccess)
     }
 
     suspend fun deleteFile(
@@ -284,7 +291,14 @@ class WorkspaceRepository(
         // runInterruptible 让协程取消转化为线程中断，从而打断阻塞的 Process.waitFor 并杀掉进程
         return runInterruptible(Dispatchers.IO) {
             manager.ensureWorkspace(workspace.root)
-            manager.executeCommand(workspace.root, command, cwd, timeoutMillis, stdin)
+            manager.executeCommand(
+                workspace.root,
+                command,
+                cwd,
+                timeoutMillis,
+                stdin,
+                includeAndroidLocal = workspace.androidLocalAccess,
+            )
         }
     }
 
@@ -302,8 +316,13 @@ class WorkspaceRepository(
         settingsStore.update { settings ->
             settings.copy(
                 assistants = settings.assistants.map { assistant ->
-                    if (assistant.workspaceId?.toString() == workspaceId) {
-                        assistant.copy(workspaceId = null)
+                    val newWorkspaceIds = assistant.workspaceIds.filter { it.toString() != workspaceId }
+                    val workspaceIdStillBound = assistant.workspaceId?.toString() != workspaceId
+                    if (newWorkspaceIds.size != assistant.workspaceIds.size || !workspaceIdStillBound) {
+                        assistant.copy(
+                            workspaceIds = newWorkspaceIds.toSet(),
+                            workspaceId = if (workspaceIdStillBound) assistant.workspaceId else newWorkspaceIds.firstOrNull(),
+                        )
                     } else {
                         assistant
                     }

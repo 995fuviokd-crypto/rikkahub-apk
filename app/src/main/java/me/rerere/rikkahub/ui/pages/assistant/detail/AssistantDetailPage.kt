@@ -5,6 +5,7 @@ import me.rerere.hugeicons.stroke.BookOpen01
 import me.rerere.hugeicons.stroke.Brain02
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Code
+import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Message02
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Puzzle
@@ -140,6 +141,13 @@ fun AssistantDetailPage(id: String) {
                         leadingContent = { Icon(HugeIcons.BookOpen01, null) },
                         supportingContent = { Text(stringResource(R.string.assistant_detail_local_tools_desc)) },
                         headlineContent = { Text(stringResource(R.string.assistant_page_tab_local_tools)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.AssistantWorkspace(id)) },
+                        leadingContent = { Icon(HugeIcons.Folder01, null) },
+                        supportingContent = { Text(stringResource(R.string.assistant_detail_workspace_desc)) },
+                        headlineContent = { Text(stringResource(R.string.assistant_page_workspace)) },
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
                     )
                 }

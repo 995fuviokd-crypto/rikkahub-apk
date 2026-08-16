@@ -24,12 +24,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import me.rerere.common.android.appTempFolder
 import com.whl.quickjs.android.QuickJSLoader
+import okhttp3.OkHttpClient
 import me.rerere.rikkahub.di.appModule
 import me.rerere.rikkahub.di.dataSourceModule
 import me.rerere.rikkahub.di.repositoryModule
 import me.rerere.rikkahub.di.viewModelModule
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.db.fts.SimpleDictManager
+import me.rerere.rikkahub.data.ai.mcp.McpManager
+import me.rerere.rikkahub.service.ChatService
+import me.rerere.rikkahub.service.KeepAliveService
 import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.utils.CrashHandler
 import me.rerere.rikkahub.utils.DatabaseUtil
@@ -46,6 +51,7 @@ private const val TAG = "RikkaHubApp"
 const val CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID = "chat_completed"
 const val CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID = "chat_live_update"
 const val WEB_SERVER_NOTIFICATION_CHANNEL_ID = "web_server"
+const val KEEP_ALIVE_NOTIFICATION_CHANNEL_ID = "keep_alive"
 
 class RikkaHubApp : Application() {
     override fun onCreate() {
@@ -64,8 +70,41 @@ class RikkaHubApp : Application() {
         // install crash handler
         CrashHandler.install(this)
 
-        // Init QuickJS native library
-        QuickJSLoader.init()
+        // Init QuickJS native library：loadLibrary 含 APK 解压 so 的磁盘 I/O，
+        // 放后台线程避免冷启动主线程卡顿；JS 工具都在 IO 线程执行，初始化完成后即可用
+        get<AppScope>().launch(Dispatchers.IO) {
+            runCatching { QuickJSLoader.init() }.onFailure {
+                Log.e(TAG, "QuickJS init failed", it)
+            }
+        }
+
+        // 预加载冷启动期必用资源（后台执行，首帧后即就绪）：
+        // - jieba 词典解压：14MB assets 首次解压较重，提前做避免数据库 onOpen 时竞争首帧
+        // - MCP 网络栈：Ktor HttpClient 构建提前完成，首次 MCP 连接无需再初始化
+        get<AppScope>().launch(Dispatchers.Default) {
+            runCatching { SimpleDictManager.extractDict(this@RikkaHubApp) }.onFailure {
+                Log.e(TAG, "preload jieba dict failed", it)
+            }
+            runCatching { get<McpManager>().preload() }.onFailure {
+                Log.e(TAG, "preload McpManager failed", it)
+            }
+        }
+
+        // 预热聊天服务依赖链：ChatService 单例首次解析会级联构建
+        // ChatService → ConversationRepository → AppDatabase(Room)、ProviderManager、
+        // TemplateTransformer、LocalTools 等；在后台提前完成，避免用户进入聊天页时
+        // 主线程 Koin 解析触发 Room 构建与各类初始化造成的卡顿（Koin 单例解析线程安全）
+        get<AppScope>().launch(Dispatchers.Default) {
+            runCatching {
+                get<ChatService>()
+                get<SettingsStore>()
+                // 预热 Coil ImageLoader 依赖的 HTTP 客户端，避免首帧 setContent 时
+                // 同步构建 OkHttpClient（连接池初始化）造成的首帧延迟
+                get<OkHttpClient>()
+            }.onFailure {
+                Log.e(TAG, "preload chat service chain failed", it)
+            }
+        }
 
         // delete temp files
         deleteTempFiles()
@@ -85,6 +124,9 @@ class RikkaHubApp : Application() {
         // Start WebServer if enabled in settings
         startWebServerIfEnabled()
 
+        // 后台保活: 进应用即在前台消息栏常驻显示"正在运行中"
+        startKeepAliveIfEnabled()
+
         // Increment launch count
         incrementLaunchCount()
 
@@ -92,7 +134,7 @@ class RikkaHubApp : Application() {
     }
 
     private fun incrementLaunchCount() {
-        get<AppScope>().launch {
+        get<AppScope>().launch(Dispatchers.Default) {
             runCatching {
                 val store = get<SettingsStore>()
                 val current = store.settingsFlowRaw.first()
@@ -155,7 +197,7 @@ class RikkaHubApp : Application() {
     }
 
     private fun startWebServerIfEnabled() {
-        get<AppScope>().launch {
+        get<AppScope>().launch(Dispatchers.Default) {
             runCatching {
                 delay(500)
                 val settings = get<SettingsStore>().settingsFlowRaw.first()
@@ -192,6 +234,31 @@ class RikkaHubApp : Application() {
         }
     }
 
+    private fun startKeepAliveIfEnabled() {
+        get<AppScope>().launch(Dispatchers.Default) {
+            runCatching {
+                delay(300)
+                val settings = get<SettingsStore>().settingsFlowRaw.first()
+                if (!settings.keepAliveEnabled) return@launch
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    ContextCompat.checkSelfPermission(
+                        this@RikkaHubApp,
+                        android.Manifest.permission.POST_NOTIFICATIONS
+                    ) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    Log.w(TAG, "startKeepAliveIfEnabled: notification permission not granted, skipping")
+                    return@launch
+                }
+                val intent = Intent(this@RikkaHubApp, KeepAliveService::class.java).apply {
+                    action = KeepAliveService.ACTION_START
+                }
+                startForegroundService(intent)
+            }.onFailure {
+                Log.e(TAG, "startKeepAliveIfEnabled failed", it)
+            }
+        }
+    }
+
     private fun createNotificationChannel() {
         val notificationManager = NotificationManagerCompat.from(this)
         val chatCompletedChannel = NotificationChannelCompat
@@ -221,12 +288,21 @@ class RikkaHubApp : Application() {
             .setShowBadge(false)
             .build()
         notificationManager.createNotificationChannel(webServerChannel)
+
+        val keepAliveChannel = NotificationChannelCompat
+            .Builder(KEEP_ALIVE_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_LOW)
+            .setName(getString(R.string.notification_channel_keep_alive))
+            .setVibrationEnabled(false)
+            .setShowBadge(false)
+            .build()
+        notificationManager.createNotificationChannel(keepAliveChannel)
     }
 
     override fun onTerminate() {
         super.onTerminate()
         get<AppScope>().cancel()
         stopService(Intent(this, WebServerService::class.java))
+        stopService(Intent(this, KeepAliveService::class.java))
     }
 }
 

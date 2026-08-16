@@ -112,7 +112,9 @@ private fun rememberReasoningState(reasoning: UIMessagePart.Reasoning): Pair<Rea
         if (loading) {
             while (isActive) {
                 state.duration = (reasoning.finishedAt ?: Clock.System.now()) - reasoning.createdAt
-                delay(50)
+                // 计时文本精度为 0.1s，200ms 更新完全满足显示需求，
+                // 同时把推理期间的定时重组频率降低 4 倍
+                delay(200)
             }
         }
     }

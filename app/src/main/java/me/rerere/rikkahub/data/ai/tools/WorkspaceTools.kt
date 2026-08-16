@@ -30,13 +30,20 @@ val WorkspaceToolDefaultApprovals: Map<String, Boolean> = mapOf(
     "workspace_shell" to true,
 )
 
-fun resolveWorkspaceToolApproval(name: String, overrides: Map<String, Boolean>): Boolean =
-    overrides[name] ?: WorkspaceToolDefaultApprovals[name] ?: false
+private val WorkspaceToolSuffixRegex = Regex("_\\d+$")
+
+fun resolveWorkspaceToolApproval(name: String, overrides: Map<String, Boolean>): Boolean {
+    overrides[name]?.let { return it }
+    // 附加工作区工具带 _2/_3 后缀, 剥离后按基础工具名匹配默认与覆盖配置
+    val baseName = WorkspaceToolSuffixRegex.replace(name, "")
+    return overrides[baseName] ?: WorkspaceToolDefaultApprovals[baseName] ?: false
+}
 
 suspend fun createWorkspaceTools(
     workspaceId: String?,
     workspaceRepository: WorkspaceRepository,
     cwd: String? = null,
+    nameSuffix: String = "",
 ): List<Tool> {
     if (workspaceId.isNullOrBlank()) return emptyList()
     val approvalOverrides = workspaceRepository.getById(workspaceId)?.toolApprovalOverrides().orEmpty()
@@ -45,10 +52,10 @@ suspend fun createWorkspaceTools(
     val shellCwd = cwd?.removePrefix("/workspace/")?.removePrefix("/workspace")
 
     return listOf(
-        createReadFileTool(workspaceId, ::needsApproval, workspaceRepository),
-        createWriteFileTool(workspaceId, ::needsApproval, workspaceRepository),
-        createEditFileTool(workspaceId, ::needsApproval, workspaceRepository),
-        createShellTool(workspaceId, ::needsApproval, workspaceRepository, shellCwd),
+        createReadFileTool(workspaceId, ::needsApproval, workspaceRepository, nameSuffix),
+        createWriteFileTool(workspaceId, ::needsApproval, workspaceRepository, nameSuffix),
+        createEditFileTool(workspaceId, ::needsApproval, workspaceRepository, nameSuffix),
+        createShellTool(workspaceId, ::needsApproval, workspaceRepository, shellCwd, nameSuffix),
     )
 }
 
@@ -63,11 +70,13 @@ private fun createReadFileTool(
     workspaceId: String,
     needsApproval: (String) -> Boolean,
     workspaceRepository: WorkspaceRepository,
+    nameSuffix: String = "",
 ) = Tool(
-    name = "workspace_read_file",
+    name = "workspace_read_file$nameSuffix",
     description = """
         Read a file using the assistant's bound workspace Rootfs. Paths must be absolute inside Rootfs.
         Use /workspace for the workspace files area.
+        Phone storage is mounted at /sdcard when granted.
         Supports UTF-8 text files and image files (png, jpg, jpeg, gif, webp, bmp, svg, heic, heif, avif, ico).
     """.trimIndent().replace("\n", " "),
     parameters = {
@@ -101,11 +110,13 @@ private fun createWriteFileTool(
     workspaceId: String,
     needsApproval: (String) -> Boolean,
     workspaceRepository: WorkspaceRepository,
+    nameSuffix: String = "",
 ) = Tool(
-    name = "workspace_write_file",
+    name = "workspace_write_file$nameSuffix",
     description = """
         Write a UTF-8 text file using the assistant's bound workspace Rootfs. Paths must be absolute inside Rootfs.
         Use /workspace for the workspace files area.
+        Phone storage is mounted at /sdcard when granted.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -138,11 +149,13 @@ private fun createEditFileTool(
     workspaceId: String,
     needsApproval: (String) -> Boolean,
     workspaceRepository: WorkspaceRepository,
+    nameSuffix: String = "",
 ) = Tool(
-    name = "workspace_edit_file",
+    name = "workspace_edit_file$nameSuffix",
     description = """
         Edit a UTF-8 text file using the assistant's bound workspace Rootfs. Paths must be absolute inside Rootfs.
         Use /workspace for the workspace files area.
+        Phone storage is mounted at /sdcard when granted.
         Provide old_text and new_text. By default old_text must occur exactly once; set replace_all=true to replace every occurrence.
         If no exact match is found, whitespace-tolerant line matching is attempted automatically.
     """.trimIndent().replace("\n", " "),
@@ -205,10 +218,12 @@ private fun createShellTool(
     needsApproval: (String) -> Boolean,
     workspaceRepository: WorkspaceRepository,
     defaultCwd: String? = null,
+    nameSuffix: String = "",
 ) = Tool(
-    name = "workspace_shell",
+    name = "workspace_shell$nameSuffix",
     description = buildString {
         append("Run a shell command in the assistant's bound workspace Rootfs. The workspace files area is mounted at /workspace. ")
+        append("Phone storage is mounted at /sdcard when granted. ")
         append("Use cwd for a path relative to the workspace files root. ")
         if (!defaultCwd.isNullOrBlank()) {
             append("Defaults to '$defaultCwd'. ")

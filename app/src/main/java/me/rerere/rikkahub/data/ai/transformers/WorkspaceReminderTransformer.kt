@@ -20,12 +20,22 @@ class WorkspaceReminderTransformer(
         ctx: TransformerContext,
         messages: List<UIMessage>,
     ): List<UIMessage> {
-        val workspaceId = ctx.assistant.workspaceId?.toString() ?: return messages
-        val workspace = workspaceRepository.getById(workspaceId) ?: return messages
         // 与 ChatService.createWorkspaceToolsIfReady 保持一致: 仅在 shell 就绪时注入
-        if (workspace.shellStatus != WorkspaceShellStatus.READY.name) return messages
+        val readyWorkspaces = ctx.assistant.effectiveWorkspaceIds
+            .mapNotNull { id ->
+                val ws = workspaceRepository.getById(id.toString()) ?: return@mapNotNull null
+                if (ws.shellStatus != WorkspaceShellStatus.READY.name) null else ws
+            }
+        if (readyWorkspaces.isEmpty()) return messages
 
-        val prompt = buildWorkspacePrompt(workspace, ctx.workspaceCwd)
+        val prompt = buildString {
+            readyWorkspaces.forEachIndexed { index, workspace ->
+                // 主工作区（第一个）工具无后缀；附加工作区对应带 _2/_3 后缀的工具
+                val suffix = if (index == 0) "" else "_${index + 1}"
+                append(buildWorkspacePrompt(workspace, ctx.workspaceCwd, suffix))
+                appendLine()
+            }
+        }.trimEnd()
 
         // 追加到第一条 system 消息; 若不存在则插入一条
         val systemIndex = messages.indexOfFirst { it.role == MessageRole.SYSTEM }
@@ -39,20 +49,29 @@ class WorkspaceReminderTransformer(
     }
 }
 
-private fun buildWorkspacePrompt(workspace: WorkspaceEntity, cwd: String? = null): String = buildString {
+private fun buildWorkspacePrompt(
+    workspace: WorkspaceEntity,
+    cwd: String? = null,
+    toolSuffix: String = "",
+): String = buildString {
     appendLine("<workspace>")
     appendLine("You have access to a persistent Linux workspace named \"${workspace.name}\", running in a sandboxed proot rootfs environment.")
     appendLine("- The workspace files area is mounted at `/workspace`. Use it as your working directory; files written there persist across turns of this conversation.")
     appendLine("- All paths passed to workspace tools must be absolute and inside the Rootfs (for example `/workspace/notes.md`).")
     appendLine("- Available tools:")
-    appendLine("  - `workspace_read_file`: read file contents.")
-    appendLine("  - `workspace_write_file` / `workspace_edit_file`: create files, or make precise edits to existing files.")
-    appendLine("  - `workspace_shell`: run shell commands (the files area is mounted at /workspace).")
-    appendLine("- Prefer `workspace_shell` for tasks that standard Unix tools handle well, and prefer `workspace_edit_file` for targeted edits over rewriting whole files.")
+    appendLine("  - `workspace_read_file$toolSuffix`: read file contents.")
+    appendLine("  - `workspace_write_file$toolSuffix` / `workspace_edit_file$toolSuffix`: create files, or make precise edits to existing files.")
+    appendLine("  - `workspace_shell$toolSuffix`: run shell commands (the files area is mounted at /workspace).")
+    appendLine("- Prefer `workspace_shell$toolSuffix` for tasks that standard Unix tools handle well, and prefer `workspace_edit_file$toolSuffix` for targeted edits over rewriting whole files.")
     appendLine("- The skills directory is mounted at `/skills`. Each skill is a subdirectory `/skills/<skill-name>/` containing a `SKILL.md` (with `name` and `description` frontmatter) plus any supporting files. Read a skill's `SKILL.md` before using it, and follow its instructions.")
     appendLine("- Files the user uploaded are mounted at `/upload`. Treat `/upload` as READ-ONLY: read uploaded files from `/upload/<file-name>`, but never modify, overwrite, or delete anything there. If you need to change an uploaded file, copy it into `/workspace` first and edit the copy.")
-    if (!cwd.isNullOrBlank()) {
+    if (!cwd.isNullOrBlank() && toolSuffix.isEmpty()) {
         appendLine("- Current working directory: `$cwd`. Use this as the default context for file operations and shell commands.")
+    }
+    if (toolSuffix.isEmpty()) {
+        appendLine("- This is your primary workspace. Prefer using it unless the task specifically requires another bound workspace.")
+    } else {
+        appendLine("- This is an additional bound workspace. Use `workspace_*$toolSuffix` tools to operate on it; tools without the suffix operate on the primary workspace.")
     }
     append("</workspace>")
 }

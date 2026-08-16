@@ -60,7 +60,7 @@ class WebServerManager(
             return
         }
 
-        appScope.launch {
+        appScope.launch(Dispatchers.IO) {
             // 仅本机模式绑定回环地址
             val host = if (localhostOnly) HOST_LOOPBACK else HOST_ALL_INTERFACES
             val baseState = WebServerState(
@@ -114,7 +114,7 @@ class WebServerManager(
     fun stop() {
         _state.value =
             _state.value.copy(isRunning = false, isLoading = true, hostname = null, address = null, error = null)
-        appScope.launch {
+        appScope.launch(Dispatchers.IO) {
             try {
                 Log.i(TAG, "Stopping web server")
                 server?.stop(1000, 2000)

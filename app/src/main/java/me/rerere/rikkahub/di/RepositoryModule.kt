@@ -28,7 +28,7 @@ val repositoryModule = module {
     }
 
     single {
-        MemoryRepository(get())
+        MemoryRepository(get(), get())
     }
 
     single {
@@ -63,6 +63,13 @@ val repositoryModule = module {
                 WorkspaceBindMount(
                     source = File(context.filesDir, FileFolders.UPLOAD).apply { mkdirs() },
                     target = "/upload",
+                ),
+                // 手机全部文件: 授权 MANAGE_EXTERNAL_STORAGE 后可见并挂载为 /sdcard,
+                // 使 Linux 工作区 AI 能读写手机外部存储(DCIM/Download/Documents 等)。
+                // 未授权时 Android 会隐藏该目录, File.exists() 为 false, 挂载自动跳过。
+                WorkspaceBindMount(
+                    source = android.os.Environment.getExternalStorageDirectory(),
+                    target = "/sdcard",
                 ),
             ),
         )

@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.pages.chat
 
 import android.app.Application
 import android.content.Context
+import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -82,6 +84,22 @@ class ChatVM(
         .getConversationJobs()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
+    // 智能托管模式
+    val stewardModeController = StewardModeController(
+        judgeCompletion = { anchorInstruction, lastAssistantReport ->
+            chatService.judgeStewardCompletion(_conversationId, anchorInstruction, lastAssistantReport)
+        },
+        sendMessage = { content ->
+            chatService.sendMessage(
+                _conversationId,
+                listOf(UIMessagePart.Text(content)),
+                answer = true,
+            )
+        },
+    )
+    val stewardModeState: StateFlow<StewardModeState> = stewardModeController.state
+    val stewardMaxLoops: StateFlow<Int> = stewardModeController.maxLoops
+
     init {
         // 添加对话引用
         chatService.addConversationReference(_conversationId)
@@ -89,6 +107,18 @@ class ChatVM(
         // 初始化对话
         viewModelScope.launch {
             chatService.initializeConversation(_conversationId)
+        }
+
+        // 智能托管模式：监控 AI 从忙碌变为空闲，触发完成度判断
+        viewModelScope.launch {
+            var wasActive = false
+            conversationJob.collect { job ->
+                val active = job?.isActive == true
+                if (wasActive && !active) {
+                    stewardModeController.onAiIdle(conversation.value)
+                }
+                wasActive = active
+            }
         }
 
         // 记住对话ID, 方便下次启动恢复
@@ -195,26 +225,43 @@ class ChatVM(
         chatService.sendMessage(_conversationId, content, answer)
     }
 
+    // ---- 智能托管模式 ----
+
+    fun toggleStewardMode() {
+        val current = stewardModeState.value
+        if (current.enabled) {
+            stewardModeController.disable()
+            return
+        }
+        val instruction = conversation.value.lastUserInstruction()
+        if (instruction.isNullOrBlank()) {
+            Toast.makeText(
+                context,
+                context.getString(R.string.steward_mode_no_instruction),
+                Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
+        stewardModeController.enable(instruction)
+        // 开启时若 AI 处于空闲状态，立即触发一次完成度判断
+        val job = conversationJob.value
+        if (job == null || job.isCompleted) {
+            viewModelScope.launch {
+                stewardModeController.onAiIdle(conversation.value)
+            }
+        }
+    }
+
+    fun setStewardMaxLoops(value: Int) {
+        stewardModeController.setMaxLoops(value)
+    }
+
     fun handleMessageEdit(parts: List<UIMessagePart>, messageId: Uuid) {
         if (parts.isEmptyInputMessage()) return
         analytics.logEvent("ai_edit_message", null)
 
         viewModelScope.launch {
             chatService.editMessage(_conversationId, messageId, parts)
-        }
-    }
-
-    fun handleCompressContext(additionalPrompt: String, targetTokens: Int, keepRecentMessages: Int): Job {
-        return viewModelScope.launch {
-            chatService.compressConversation(
-                _conversationId,
-                conversation.value,
-                additionalPrompt,
-                targetTokens,
-                keepRecentMessages
-            ).onFailure {
-                chatService.addError(it, title = context.getString(R.string.error_title_compress_conversation))
-            }
         }
     }
 
@@ -365,4 +412,15 @@ class ChatVM(
         }
     }
 
+}
+
+/**
+ * 取会话最后一条用户指令文本，作为托管模式的锚定指令。
+ */
+private fun Conversation.lastUserInstruction(): String? {
+    return currentMessages
+        .lastOrNull { it.role == MessageRole.USER }
+        ?.toText()
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
 }

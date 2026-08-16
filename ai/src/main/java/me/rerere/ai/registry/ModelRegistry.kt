@@ -700,4 +700,21 @@ object ModelRegistry {
     private fun ModelDefinitionBuilder.toolReasoningAbility() {
         ability(ModelAbility.TOOL, ModelAbility.REASONING)
     }
+
+    /**
+     * OpenAI 新式推理模型：Chat Completions 只接受 max_completion_tokens（o 系列 / gpt-5 系列），
+     * 旧式 max_tokens 会被官方 API 拒绝。
+     */
+    fun isOpenAIRefreshedReasoningModel(modelId: String): Boolean {
+        return OPENAI_O_MODELS.match(modelId) ||
+            GPT_5.match(modelId) ||
+            GPT_5_1.match(modelId) ||
+            GPT_5_2.match(modelId) ||
+            GPT_5_3.match(modelId) ||
+            GPT_5_4.match(modelId) ||
+            GPT_5_4_MINI.match(modelId) ||
+            GPT_5_4_NANO.match(modelId) ||
+            GPT_5_5.match(modelId) ||
+            GPT_5_6.match(modelId)
+    }
 }

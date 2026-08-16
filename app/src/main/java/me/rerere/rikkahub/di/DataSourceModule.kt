@@ -30,10 +30,14 @@ import me.rerere.rikkahub.data.db.migrations.Migration_11_12
 import me.rerere.rikkahub.data.db.migrations.Migration_13_14
 import me.rerere.rikkahub.data.db.migrations.Migration_14_15
 import me.rerere.rikkahub.data.db.migrations.Migration_15_16
+import me.rerere.rikkahub.data.db.migrations.Migration_24_25
+import me.rerere.rikkahub.data.db.migrations.Migration_25_26
+import me.rerere.rikkahub.data.db.migrations.Migration_26_27
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.sync.webdav.WebDavSync
 import me.rerere.search.SearchService
 import me.rerere.rikkahub.data.sync.S3Sync
+import okhttp3.ConnectionPool
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -52,9 +56,13 @@ val dataSourceModule = module {
         val context: Context = get()
         Room.databaseBuilder(context, AppDatabase::class.java, "rikka_hub")
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
-            .addMigrations(Migration_6_7, Migration_11_12, Migration_13_14, Migration_14_15, Migration_15_16)
+            .addMigrations(Migration_6_7, Migration_11_12, Migration_13_14, Migration_14_15, Migration_15_16, Migration_24_25, Migration_25_26, Migration_26_27)
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
+                    // WAL 模式下 NORMAL 安全，减少每次提交的 fsync 开销
+                    db.execSQL("PRAGMA synchronous = NORMAL")
+                    // 扩大读缓存（32MB），降低 FTS/记忆检索的磁盘 IO 次数
+                    db.execSQL("PRAGMA cache_size = -32000")
                     val dictDir = SimpleDictManager.extractDict(context)
                     val cursor = db.query("SELECT jieba_dict(?)", arrayOf(dictDir.absolutePath))
                     cursor.use {
@@ -78,6 +86,21 @@ val dataSourceModule = module {
                             conversation_id UNINDEXED,
                             title UNINDEXED,
                             update_at UNINDEXED,
+                            tokenize = 'simple'
+                        )
+                        """.trimIndent()
+                    )
+                    db.execSQL(
+                        """
+                        CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+                            content,
+                            summary,
+                            memory_id UNINDEXED,
+                            assistant_id UNINDEXED,
+                            target UNINDEXED,
+                            scope_key UNINDEXED,
+                            conversation_id UNINDEXED,
+                            updated_at UNINDEXED,
                             tokenize = 'simple'
                         )
                         """.trimIndent()
@@ -171,6 +194,7 @@ val dataSourceModule = module {
             .followSslRedirects(true)
             .followRedirects(true)
             .retryOnConnectionFailure(true)
+            .connectionPool(ConnectionPool(20, 5, TimeUnit.MINUTES))
             .addInterceptor { chain ->
                 val originalRequest = chain.request()
                 val requestBuilder = originalRequest.newBuilder()

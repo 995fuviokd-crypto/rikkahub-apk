@@ -38,10 +38,11 @@ import me.rerere.rikkahub.ui.pages.extensions.workspace.toShellStatusLabel
 internal fun WorkspaceSelectSheet(
     assistant: Assistant,
     workspaces: List<WorkspaceEntity>,
-    onSelect: (String?) -> Unit,
+    onSelect: (Set<String>) -> Unit,
     onManage: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val selectedIds = assistant.effectiveWorkspaceIds.map { it.toString() }.toMutableSet()
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberBottomSheetState(
@@ -71,15 +72,24 @@ internal fun WorkspaceSelectSheet(
                 // 不绑定
                 WorkspaceSelectRow(
                     title = stringResource(R.string.workspace_no_binding),
-                    selected = assistant.workspaceId == null,
-                    onClick = { onSelect(null) },
+                    selected = selectedIds.isEmpty(),
+                    onClick = { onSelect(emptySet()) },
                 )
                 workspaces.forEach { workspace ->
+                    val isSelected = workspace.id in selectedIds
                     WorkspaceSelectRow(
                         title = workspace.name,
                         status = workspace.shellStatus.toShellStatusLabel(),
-                        selected = workspace.id == assistant.workspaceId?.toString(),
-                        onClick = { onSelect(workspace.id) },
+                        selected = isSelected,
+                        onClick = {
+                            val newSet = selectedIds.toMutableSet()
+                            if (isSelected) {
+                                newSet.remove(workspace.id)
+                            } else {
+                                newSet.add(workspace.id)
+                            }
+                            onSelect(newSet)
+                        },
                     )
                 }
             }

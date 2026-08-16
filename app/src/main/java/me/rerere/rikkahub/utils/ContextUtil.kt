@@ -139,6 +139,109 @@ fun Context.getActivity(): Activity? {
     return null
 }
 
+/**
+ * Whether the app has been granted "All files access"
+ * (android.permission.MANAGE_EXTERNAL_STORAGE), which lets the workspace
+ * Linux environment read and write all files on the phone via /sdcard.
+ */
+fun Context.hasAllFilesAccessPermission(): Boolean {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        Environment.isExternalStorageManager()
+    } else {
+        ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+}
+
+/**
+ * Whether the RikkaHub accessibility service is enabled in system settings.
+ * The service powers the accessibility tools (click / tap / navigate on screen).
+ */
+fun Context.hasAccessibilityServiceEnabled(): Boolean {
+    val am = getSystemService(Context.ACCESSIBILITY_SERVICE) as android.view.accessibility.AccessibilityManager
+    if (!am.isEnabled) return false
+    val enabledServices = android.provider.Settings.Secure.getString(
+        contentResolver,
+        android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+    ) ?: return false
+    return enabledServices.split(':').any { it.contains(accessibilityServiceName) }
+}
+
+/** Open the system accessibility settings page so the user can enable the service. */
+fun Context.openAccessibilitySettings() {
+    runCatching {
+        startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+    }.onFailure {
+        Log.e(TAG, "openAccessibilitySettings failed", it)
+    }
+}
+
+/** Whether the app is exempted from battery optimizations (doze). */
+fun Context.hasIgnoreBatteryOptimizationsPermission(): Boolean {
+    val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+    return pm.isIgnoringBatteryOptimizations(packageName)
+}
+
+/** Open the system battery optimization settings for this app. */
+fun Context.openBatteryOptimizationSettings() {
+    runCatching {
+        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+            data = Uri.parse("package:$packageName")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
+    }.onFailure {
+        Log.e(TAG, "openBatteryOptimizationSettings failed", it)
+        runCatching {
+            startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        }.onFailure {
+            Log.e(TAG, "openBatteryOptimizationSettings(global) failed", it)
+        }
+    }
+}
+
+private val Context.accessibilityServiceName: String
+    get() = "$packageName/me.rerere.rikkahub.service.accessibility.RikkaAccessibilityService"
+
+/**
+ * Open the system "All files access" settings page (Android 11+), or request
+ * the legacy external storage runtime permission on older versions.
+ */
+fun Context.openAllFilesAccessSettings() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        runCatching {
+            startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                data = Uri.parse("package:$packageName")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        }.onFailure {
+            Log.e(TAG, "openAllFilesAccessSettings failed", it)
+            runCatching {
+                startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+            }.onFailure {
+                Log.e(TAG, "openAllFilesAccessSettings(global) failed", it)
+            }
+        }
+    } else {
+        getActivity()?.let { activity ->
+            ActivityCompat.requestPermissions(
+                activity,
+                arrayOf(
+                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                ),
+                2
+            )
+        }
+    }
+}
+
 fun Context.getComponentActivity(): ComponentActivity? {
     var context = this
     while (context is ContextWrapper) {

@@ -50,9 +50,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.Job
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Brain01
 import me.rerere.hugeicons.stroke.Camera01
 import me.rerere.hugeicons.stroke.Codesandbox
 import me.rerere.hugeicons.stroke.ComputerTerminal01
@@ -61,7 +61,7 @@ import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.MusicNote03
 import me.rerere.hugeicons.stroke.Package
-import me.rerere.hugeicons.stroke.Package01
+import me.rerere.hugeicons.stroke.RefreshDot
 import me.rerere.hugeicons.stroke.Settings02
 import me.rerere.hugeicons.stroke.Video01
 import me.rerere.rikkahub.R
@@ -91,13 +91,16 @@ internal fun FilesPicker(
     assistant: Assistant,
     state: ChatInputState,
     mcpManager: McpManager,
-    onCompressContext: (additionalPrompt: String, targetTokens: Int, keepRecentMessages: Int) -> Job,
     onUpdateAssistant: (Assistant) -> Unit,
     onUpdateConversation: (Conversation) -> Unit,
     showInjectionSheet: Boolean,
     onShowInjectionSheetChange: (Boolean) -> Unit,
-    showCompressDialog: Boolean,
-    onShowCompressDialogChange: (Boolean) -> Unit,
+    showAutoCompressDialog: Boolean,
+    onShowAutoCompressDialogChange: (Boolean) -> Unit,
+    onAutoCompressSettings: (enabled: Boolean, thresholdTokens: Int, keepRecent: Int) -> Unit,
+    showAutoReconnectDialog: Boolean,
+    onShowAutoReconnectDialogChange: (Boolean) -> Unit,
+    onAutoReconnectSettings: (enabled: Boolean, maxRetries: Int) -> Unit,
     onDismiss: () -> Unit,
     onTakePic: () -> Unit,
     onPickImage: () -> Unit,
@@ -209,25 +212,31 @@ internal fun FilesPicker(
                 },
         )
 
-        // Compress History Button
+        // Auto Compress Button
         ListItem(
             leadingContent = {
                 Icon(
-                    imageVector = HugeIcons.Package01,
-                    contentDescription = stringResource(R.string.chat_page_compress_context),
+                    imageVector = HugeIcons.Brain01,
+                    contentDescription = stringResource(R.string.chat_page_auto_compress_title),
                 )
             },
             headlineContent = {
-                Text(stringResource(R.string.chat_page_compress_context))
+                Text(stringResource(R.string.chat_page_auto_compress_title))
             },
-            trailingContent = {
-                if (conversation.messageNodes.isNotEmpty()) {
-                    Text(
-                        text = stringResource(R.string.chat_page_message_count, conversation.messageNodes.size),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            supportingContent = {
+                Text(
+                    text = if (settings.autoCompressEnabled) {
+                        stringResource(
+                            R.string.chat_page_auto_compress_status_on,
+                            settings.autoCompressThresholdTokens,
+                            settings.autoCompressKeepRecent
+                        )
+                    } else {
+                        stringResource(R.string.chat_page_auto_compress_status_off)
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             },
             colors = ListItemDefaults.colors(
                 containerColor = MaterialTheme.colorScheme.surfaceContainer
@@ -235,7 +244,39 @@ internal fun FilesPicker(
             modifier = Modifier
                 .clip(MaterialTheme.shapes.large)
                 .clickable {
-                    onShowCompressDialogChange(true)
+                    onShowAutoCompressDialogChange(true)
+                },
+        )
+
+        // Auto Reconnect Button
+        ListItem(
+            leadingContent = {
+                Icon(
+                    imageVector = HugeIcons.RefreshDot,
+                    contentDescription = stringResource(R.string.chat_page_auto_reconnect_title),
+                )
+            },
+            headlineContent = {
+                Text(stringResource(R.string.chat_page_auto_reconnect_title))
+            },
+            supportingContent = {
+                Text(
+                    text = if (settings.autoReconnectEnabled) {
+                        stringResource(R.string.chat_page_auto_reconnect_status_on, settings.autoReconnectMaxRetries)
+                    } else {
+                        stringResource(R.string.chat_page_auto_reconnect_status_off)
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            colors = ListItemDefaults.colors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer
+            ),
+            modifier = Modifier
+                .clip(MaterialTheme.shapes.large)
+                .clickable {
+                    onShowAutoReconnectDialogChange(true)
                 },
         )
 
@@ -288,14 +329,31 @@ internal fun FilesPicker(
         )
     }
 
-    // Compress Context Dialog
-    if (showCompressDialog) {
-        CompressContextDialog(onDismiss = {
-            onShowCompressDialogChange(false)
-            onDismiss()
-        }, onConfirm = { additionalPrompt, targetTokens, keepRecentMessages ->
-            onCompressContext(additionalPrompt, targetTokens, keepRecentMessages)
-        })
+    // Auto Compress Dialog
+    if (showAutoCompressDialog) {
+        AutoCompressDialog(
+            initialEnabled = settings.autoCompressEnabled,
+            initialThresholdTokens = settings.autoCompressThresholdTokens,
+            initialKeepRecent = settings.autoCompressKeepRecent,
+            onDismiss = { onShowAutoCompressDialogChange(false) },
+            onConfirm = { enabled, thresholdTokens, keepRecent ->
+                onAutoCompressSettings(enabled, thresholdTokens, keepRecent)
+                onShowAutoCompressDialogChange(false)
+            }
+        )
+    }
+
+    // Auto Reconnect Dialog
+    if (showAutoReconnectDialog) {
+        AutoReconnectDialog(
+            initialEnabled = settings.autoReconnectEnabled,
+            initialMaxRetries = settings.autoReconnectMaxRetries,
+            onDismiss = { onShowAutoReconnectDialogChange(false) },
+            onConfirm = { enabled, maxRetries ->
+                onAutoReconnectSettings(enabled, maxRetries)
+                onShowAutoReconnectDialogChange(false)
+            }
+        )
     }
 }
 
@@ -366,10 +424,18 @@ private fun WorkspacePickerListItem(
         WorkspaceSelectSheet(
             assistant = assistant,
             workspaces = workspaces,
-            onSelect = { workspaceId ->
-                val newId = workspaceId?.let { Uuid.parse(it) }
-                if (newId != assistant.workspaceId) {
-                    onUpdateAssistant(assistant.copy(workspaceId = newId))
+            onSelect = { selectedIds ->
+                // 集合保持选择顺序: 第一个为主工作区
+                val newIds = selectedIds.mapNotNull { id ->
+                    runCatching { Uuid.parse(id) }.getOrNull()
+                }
+                if (newIds.toSet() != assistant.effectiveWorkspaceIds) {
+                    onUpdateAssistant(
+                        assistant.copy(
+                            workspaceIds = newIds.toSet(),
+                            workspaceId = newIds.firstOrNull(),
+                        )
+                    )
                     if (conversation.workspaceCwd != null) {
                         onUpdateConversation(conversation.copy(workspaceCwd = null))
                     }

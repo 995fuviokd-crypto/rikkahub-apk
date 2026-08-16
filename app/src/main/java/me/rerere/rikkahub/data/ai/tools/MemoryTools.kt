@@ -14,13 +14,14 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.model.MemoryTarget
 import me.rerere.rikkahub.utils.toLocalString
 import java.time.LocalDate
 
 fun buildMemoryTools(
     json: Json,
-    onCreation: suspend (String) -> AssistantMemory,
-    onUpdate: suspend (Int, String) -> AssistantMemory,
+    onCreation: suspend (target: String, content: String, summary: String?) -> AssistantMemory,
+    onUpdate: suspend (id: Int, content: String, summary: String?) -> AssistantMemory,
     onDelete: suspend (Int) -> Unit
 ): List<Tool> = listOf(
     Tool(
@@ -31,7 +32,17 @@ fun buildMemoryTools(
             - No relevant record: `create` + `content`
             - Existing relevant record: `edit` + `id` + `content`
             - Outdated/irrelevant record: `delete` + `id`
-            Memories will automatically appear in the <memories> tag in later conversations.
+
+            `target` controls the memory scope (default "memory"):
+            - "user": durable facts about the user (preferences, style, personal info)
+            - "memory": general durable memories shared across conversations
+            - "project": durable facts about a project/work
+            - "ops": durable operational facts (devices, environment, procedures)
+            - "general": temporary scratch local to this conversation only, not shared
+
+            `summary` is an optional concise summary of the content (recommended for long content).
+
+            Recalled memories will be injected into the system prompt as a **Memories** JSON list in later conversations.
             Do not store sensitive information (e.g., ethnicity, religion, sexual orientation, political views, sex life, criminal records).
             You may store: preferred name, preferences, plans, work-related notes, chat style preferences, first chat time, etc.
             Do not show memory content directly in the conversation unless the user explicitly asks.
@@ -39,8 +50,8 @@ fun buildMemoryTools(
             Similar memories should be merged; prefer updating existing records.
 
             Examples:
-            {"action":"create","content":"User prefers brief replies and is more active on weekends."}
-            {"action":"edit","id":12,"content":"User’s preferred name updated to “A-Xing”, prefers Chinese replies."}
+            {"action":"create","content":"User prefers brief replies and is more active on weekends.","target":"user"}
+            {"action":"edit","id":12,"content":"User's preferred name updated to "A-Xing", prefers Chinese replies.","summary":"User name and language preference"}
             {"action":"delete","id":7}
         """.trimIndent(),
         parameters = {
@@ -62,9 +73,23 @@ fun buildMemoryTools(
                         put("type", "integer")
                         put("description", "The id of the memory record (required for edit/delete)")
                     })
+                    put("target", buildJsonObject {
+                        put("type", "string")
+                        put(
+                            "enum",
+                            buildJsonArray {
+                                MemoryTarget.entries.forEach { add(it.name.lowercase()) }
+                            }
+                        )
+                        put("description", "Memory scope target (default: memory)")
+                    })
                     put("content", buildJsonObject {
                         put("type", "string")
                         put("description", "The content of the memory record (required for create/edit)")
+                    })
+                    put("summary", buildJsonObject {
+                        put("type", "string")
+                        put("description", "Optional concise summary of the memory content")
                     })
                 },
                 required = listOf("action")
@@ -73,16 +98,18 @@ fun buildMemoryTools(
         execute = {
             val params = it.jsonObject
             val action = params["action"]?.jsonPrimitive?.contentOrNull ?: error("action is required")
+            val target = params["target"]?.jsonPrimitive?.contentOrNull ?: MemoryTarget.MEMORY.name.lowercase()
+            val summary = params["summary"]?.jsonPrimitive?.contentOrNull
             val payload = when (action) {
                 "create" -> {
                     val content = params["content"]?.jsonPrimitive?.contentOrNull ?: error("content is required")
-                    json.encodeToJsonElement(AssistantMemory.serializer(), onCreation(content))
+                    json.encodeToJsonElement(AssistantMemory.serializer(), onCreation(target, content, summary))
                 }
 
                 "edit" -> {
                     val id = params["id"]?.jsonPrimitive?.intOrNull ?: error("id is required")
                     val content = params["content"]?.jsonPrimitive?.contentOrNull ?: error("content is required")
-                    json.encodeToJsonElement(AssistantMemory.serializer(), onUpdate(id, content))
+                    json.encodeToJsonElement(AssistantMemory.serializer(), onUpdate(id, content, summary))
                 }
 
                 "delete" -> {

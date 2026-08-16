@@ -29,6 +29,7 @@ import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.provider.ApiEndpointResolver
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
@@ -49,6 +50,7 @@ import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.KeyRoulette
 import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.encodeBase64
+import me.rerere.ai.util.isHtmlBody
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.parseErrorDetail
@@ -80,50 +82,64 @@ class ChatCompletionsAPI(
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): TextGenerationResult = withContext(Dispatchers.IO) {
-        val requestBody =
-            buildChatCompletionRequest(
-                messages = messages,
-                params = params,
-                providerSetting = providerSetting
-            )
+        var degradeLevel = 0
+        while (true) {
+            val requestBody =
+                buildChatCompletionRequest(
+                    messages = messages,
+                    params = params,
+                    providerSetting = providerSetting,
+                    degradeLevel = degradeLevel
+                )
 
-        val request = Request.Builder()
-            .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
-            .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
-            .configureReferHeaders(providerSetting.baseUrl)
-            .build()
+            val request = Request.Builder()
+                .url(ApiEndpointResolver.resolveEndpoint(providerSetting.baseUrl, providerSetting.chatCompletionsPath))
+                .headers(params.customHeaders.toHeaders())
+                .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+                .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
+                .configureReferHeaders(providerSetting.baseUrl)
+                .build()
 
-        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+            Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
 
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            throw Exception("Failed to get response: ${response.code} ${response.body?.string()}")
+            val response = client.newCall(request).await()
+            if (response.isSuccessful) {
+                val bodyStr = response.body?.string() ?: ""
+                val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
+
+                // 从 JsonObject 中提取必要的信息
+                val id = bodyJson["id"]?.jsonPrimitive?.contentOrNull ?: ""
+                val model = bodyJson["model"]?.jsonPrimitive?.contentOrNull ?: ""
+                val choice = bodyJson["choices"]?.jsonArray?.get(0)?.jsonObject ?: error("choices is null")
+
+                val message = choice["message"]?.jsonObject ?: throw Exception("message is null")
+                val finishReason = choice["finish_reason"]
+                    ?.jsonPrimitive
+                    ?.content
+                    ?: "unknown"
+                val usage = parseTokenUsage(bodyJson["usage"] as? JsonObject)
+
+                return@withContext TextGenerationResult(
+                    id = id,
+                    model = model,
+                    message = parseMessage(message),
+                    finishReason = finishReason,
+                    usage = usage
+                )
+            }
+
+            val bodyRaw = response.body?.string().orEmpty()
+            if (isProtocolUnavailableError(response.code, bodyRaw)) {
+                throw ProtocolUnavailableException("Chat Completions endpoint not supported (HTTP ${response.code})")
+            }
+            if (degradeLevel < MAX_REQUEST_DEGRADE_LEVEL && isParamIncompatibilityError(response.code, bodyRaw)) {
+                Log.w(TAG, "generateText: request rejected (${response.code}), degrading params to level ${degradeLevel + 1}")
+                degradeLevel++
+                continue
+            }
+            throw buildRequestError(response.code, bodyRaw)
         }
-
-        val bodyStr = response.body?.string() ?: ""
-        val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-
-        // 从 JsonObject 中提取必要的信息
-        val id = bodyJson["id"]?.jsonPrimitive?.contentOrNull ?: ""
-        val model = bodyJson["model"]?.jsonPrimitive?.contentOrNull ?: ""
-        val choice = bodyJson["choices"]?.jsonArray?.get(0)?.jsonObject ?: error("choices is null")
-
-        val message = choice["message"]?.jsonObject ?: throw Exception("message is null")
-        val finishReason = choice["finish_reason"]
-            ?.jsonPrimitive
-            ?.content
-            ?: "unknown"
-        val usage = parseTokenUsage(bodyJson["usage"] as? JsonObject)
-
-        TextGenerationResult(
-            id = id,
-            model = model,
-            message = parseMessage(message),
-            finishReason = finishReason,
-            usage = usage
-        )
+        error("unreachable")
     }
 
     override suspend fun streamText(
@@ -131,28 +147,10 @@ class ChatCompletionsAPI(
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): Flow<StreamChunk> = callbackFlow {
-        val requestBody = buildChatCompletionRequest(
-            messages = messages,
-            params = params,
-            providerSetting = providerSetting,
-            stream = true,
-        )
-
-        val request = Request.Builder()
-            .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
-            .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
-            .addHeader("Content-Type", "application/json")
-            .configureReferHeaders(providerSetting.baseUrl)
-            .build()
-
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
-
-        // just for debugging response body
-        // println(client.newCall(request).await().body?.string())
-
-        val decoder = ChatCompletionsStreamDecoder()
+        var degradeLevel = 0
+        var generation = 0
+        var eventSource: EventSource? = null
+        var decoder = ChatCompletionsStreamDecoder()
 
         fun sendChunks(chunks: Iterable<StreamChunk>) {
             chunks.forEach { chunk ->
@@ -162,57 +160,98 @@ class ChatCompletionsAPI(
             }
         }
 
-        val listener = object : EventSourceListener() {
-            override fun onEvent(
-                eventSource: EventSource,
-                id: String?,
-                type: String?,
-                data: String
-            ) {
-                Log.d(TAG, "onEvent: $data")
-                try {
-                    val result = decoder.accept(SseEvent(id = id, event = type, data = data))
-                    sendChunks(result.chunks)
-                    if (result.completed) close()
-                } catch (e: Throwable) {
-                    close(e)
-                }
-            }
+        fun startEventSource() {
+            val myGeneration = generation
+            val requestBody = buildChatCompletionRequest(
+                messages = messages,
+                params = params,
+                providerSetting = providerSetting,
+                stream = true,
+                degradeLevel = degradeLevel,
+            )
 
-            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                var exception = t
+            val request = Request.Builder()
+                .url(ApiEndpointResolver.resolveEndpoint(providerSetting.baseUrl, providerSetting.chatCompletionsPath))
+                .headers(params.customHeaders.toHeaders())
+                .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+                .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
+                .addHeader("Content-Type", "application/json")
+                .configureReferHeaders(providerSetting.baseUrl)
+                .build()
 
-                t?.printStackTrace()
-                println("[onFailure] 发生错误: ${t?.javaClass?.name} ${t?.message} / $response")
+            Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
 
-                val bodyRaw = response?.body?.stringSafe()
-                try {
-                    if (!bodyRaw.isNullOrBlank()) {
-                        val bodyElement = Json.parseToJsonElement(bodyRaw)
-                        println(bodyElement)
-                        exception = bodyElement.parseErrorDetail()
-                        Log.i(TAG, "onFailure: $exception")
+            val listener = object : EventSourceListener() {
+                override fun onEvent(
+                    eventSource: EventSource,
+                    id: String?,
+                    type: String?,
+                    data: String
+                ) {
+                    if (myGeneration != generation) return
+                    Log.d(TAG, "onEvent: $data")
+                    try {
+                        val result = decoder.accept(SseEvent(id = id, event = type, data = data))
+                        sendChunks(result.chunks)
+                        if (result.completed) close()
+                    } catch (e: Throwable) {
+                        close(e)
                     }
-                } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
-                    exception = e
-                } finally {
-                    close(exception)
+                }
+
+                override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
+                    if (myGeneration != generation) return
+                    var exception = t
+
+                    t?.printStackTrace()
+                    println("[onFailure] 发生错误: ${t?.javaClass?.name} ${t?.message} / $response")
+
+                    val bodyRaw = response?.body?.stringSafe()
+                    try {
+                        if (!bodyRaw.isNullOrBlank()) {
+                            val bodyElement = Json.parseToJsonElement(bodyRaw)
+                            println(bodyElement)
+                            exception = bodyElement.parseErrorDetail()
+                            Log.i(TAG, "onFailure: $exception")
+                        }
+                    } catch (e: Throwable) {
+                        Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
+                        e.printStackTrace()
+                        exception = e
+                    }
+
+                    val code = response?.code ?: -1
+                    if (isProtocolUnavailableError(code, bodyRaw.orEmpty())) {
+                        close(ProtocolUnavailableException("Chat Completions endpoint not supported (HTTP $code)"))
+                    } else if (degradeLevel < MAX_REQUEST_DEGRADE_LEVEL && isParamIncompatibilityError(code, bodyRaw.orEmpty())) {
+                        Log.w(TAG, "streamText: request rejected ($code), degrading params to level ${degradeLevel + 1}")
+                        degradeLevel++
+                        generation++
+                        decoder = ChatCompletionsStreamDecoder()
+                        startEventSource()
+                    } else {
+                        if (code >= 400 && bodyRaw.orEmpty().isHtmlBody()) {
+                            exception = buildRequestError(code, bodyRaw.orEmpty())
+                        }
+                        close(exception)
+                    }
+                }
+
+                override fun onClosed(eventSource: EventSource) {
+                    if (myGeneration != generation) return
+                    sendChunks(decoder.onClosed())
+                    close()
                 }
             }
 
-            override fun onClosed(eventSource: EventSource) {
-                sendChunks(decoder.onClosed())
-                close()
-            }
+            eventSource = EventSources.createFactory(client).newEventSource(request, listener)
         }
 
-        val eventSource = EventSources.createFactory(client).newEventSource(request, listener)
+        startEventSource()
 
         awaitClose {
             println("[awaitClose] 关闭eventSource ")
-            eventSource.cancel()
+            eventSource?.cancel()
         }
         // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
     }.buffer(Channel.UNLIMITED)
@@ -222,9 +261,11 @@ class ChatCompletionsAPI(
         params: TextGenerationParams,
         providerSetting: ProviderSetting.OpenAI,
         stream: Boolean = false,
+        degradeLevel: Int = 0,
     ): JsonObject {
         val host = providerSetting.baseUrl.toHttpUrl().host
         val isOpenRouter = host == "openrouter.ai"
+        val useMaxCompletionTokens = shouldUseMaxCompletionTokens(params.model, host, degradeLevel)
         return buildJsonObject {
             put("model", params.model.modelId)
             put(
@@ -237,11 +278,17 @@ class ChatCompletionsAPI(
                 )
             )
 
-            if (isModelAllowTemperature(params.model)) {
+            if (degradeLevel < 2 && isModelAllowTemperature(params.model)) {
                 if (params.temperature != null) put("temperature", params.temperature)
                 if (params.topP != null) put("top_p", params.topP)
             }
-            if (params.maxTokens != null) put("max_tokens", params.maxTokens)
+            if (params.maxTokens != null) {
+                if (useMaxCompletionTokens) {
+                    put("max_completion_tokens", params.maxTokens)
+                } else {
+                    put("max_tokens", params.maxTokens)
+                }
+            }
 
             put("stream", stream)
             if (stream) {
@@ -262,7 +309,7 @@ class ChatCompletionsAPI(
                 }
             }
 
-            if (params.model.abilities.contains(ModelAbility.REASONING)) {
+            if (degradeLevel < 1 && params.model.abilities.contains(ModelAbility.REASONING)) {
                 val level = params.reasoningLevel
                 when (host) {
                     "openrouter.ai" -> {
@@ -403,7 +450,7 @@ class ChatCompletionsAPI(
                 }
             }
 
-            if (params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()) {
+            if (degradeLevel < 3 && params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()) {
                 putJsonArray("tools") {
                     params.tools.forEach { tool ->
                         add(buildJsonObject {
@@ -433,6 +480,19 @@ class ChatCompletionsAPI(
         return !ModelRegistry.OPENAI_O_MODELS.match(model.modelId) && 
                !ModelRegistry.GPT_5.match(model.modelId) && 
                !isMoonshotRestricted
+    }
+
+    /**
+     * 判断 max_tokens 还是 max_completion_tokens：
+     * 官方 OpenAI host 上的 o 系列 / gpt-5 系列使用 max_completion_tokens；
+     * 其它（第三方网关、克隆模型）默认 max_tokens，被拒后可切换。
+     */
+    private fun shouldUseMaxCompletionTokens(model: Model, host: String, degradeLevel: Int): Boolean {
+        val isOfficialHost = host == "api.openai.com" || host == "openai.com" || host == "chatgpt.com" ||
+                host == "api.azure.com" || host.endsWith("openai.azure.com")
+        val isRefreshedModel = ModelRegistry.isOpenAIRefreshedReasoningModel(model.modelId)
+        val default = isOfficialHost && isRefreshedModel
+        return if (degradeLevel >= 4) !default else default
     }
 
     private fun buildMessages(

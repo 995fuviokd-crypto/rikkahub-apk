@@ -98,7 +98,7 @@ fun SearchPickerButton(
     ) {
         Row(
             modifier = Modifier
-                .padding(vertical = 8.dp, horizontal = 8.dp),
+                .padding(vertical = 3.dp, horizontal = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {

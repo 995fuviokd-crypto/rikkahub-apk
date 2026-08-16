@@ -54,6 +54,36 @@ class MessageFtsManager(private val database: AppDatabase) {
         }
     }
 
+    /**
+     * 流式生成中的增量 FTS 索引：流式期间只有最后一条节点在变化，
+     * 只对该节点先删后插，避免每 800ms 对全会话全量删除重建。
+     */
+    suspend fun indexConversationIncremental(conversation: Conversation) = withContext(Dispatchers.IO) {
+        val lastNode = conversation.messageNodes.lastOrNull() ?: return@withContext
+        val conversationId = conversation.id.toString()
+        val nodeId = lastNode.id.toString()
+        db.execSQL(
+            "DELETE FROM message_fts WHERE conversation_id = ? AND node_id = ?",
+            arrayOf(conversationId, nodeId)
+        )
+        lastNode.messages.forEach { message ->
+            val text = message.extractFtsText()
+            if (text.isNotBlank()) {
+                db.execSQL(
+                    "INSERT INTO message_fts(text, node_id, message_id, conversation_id, title, update_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    arrayOf(
+                        text,
+                        nodeId,
+                        message.id.toString(),
+                        conversationId,
+                        conversation.title,
+                        conversation.updateAt.toEpochMilli().toString(),
+                    )
+                )
+            }
+        }
+    }
+
     suspend fun deleteConversation(conversationId: String) = withContext(Dispatchers.IO) {
         db.execSQL("DELETE FROM message_fts WHERE conversation_id = ?", arrayOf(conversationId))
     }

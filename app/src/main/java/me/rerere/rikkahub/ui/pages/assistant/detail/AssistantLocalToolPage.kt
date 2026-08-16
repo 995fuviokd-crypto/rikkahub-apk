@@ -34,6 +34,10 @@ import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.hasUsageStatsPermission
+import me.rerere.rikkahub.utils.hasAccessibilityServiceEnabled
+import me.rerere.rikkahub.utils.hasIgnoreBatteryOptimizationsPermission
+import me.rerere.rikkahub.utils.openAccessibilitySettings
+import me.rerere.rikkahub.utils.openBatteryOptimizationSettings
 import me.rerere.rikkahub.utils.openUsageAccessSettings
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
@@ -83,6 +87,12 @@ private fun AssistantLocalToolContent(
     val permissionRequiredText =
         stringResource(R.string.assistant_page_local_tools_screen_time_permission_required)
 
+    val accessibilityPermissionRequiredText =
+        stringResource(R.string.assistant_page_local_tools_accessibility_permission_required)
+
+    val batteryPermissionRequiredText =
+        stringResource(R.string.assistant_page_local_tools_battery_permission_required)
+
     val calendarPermissionState = rememberPermissionState(
         permissions = setOf(
             PermissionInfo(
@@ -109,6 +119,16 @@ private fun AssistantLocalToolContent(
         if (enabled && option == LocalToolOption.Calendar && !calendarPermissionState.allPermissionsGranted) {
             calendarPermissionState.requestPermissions()
             return
+        }
+        if (enabled && option == LocalToolOption.Accessibility && !context.hasAccessibilityServiceEnabled()) {
+            toaster.show(message = accessibilityPermissionRequiredText, type = ToastType.Warning)
+            context.openAccessibilitySettings()
+        }
+        if (enabled && option == LocalToolOption.PowerManagement &&
+            !context.hasIgnoreBatteryOptimizationsPermission()
+        ) {
+            toaster.show(message = batteryPermissionRequiredText, type = ToastType.Warning)
+            context.openBatteryOptimizationSettings()
         }
         val newLocalTools = if (enabled) {
             assistant.localTools + option
@@ -223,6 +243,48 @@ private fun AssistantLocalToolContent(
                     Switch(
                         checked = assistant.localTools.contains(LocalToolOption.Calendar),
                         onCheckedChange = { toggleLocalTool(LocalToolOption.Calendar, it) }
+                    )
+                }
+            )
+            item(
+                headlineContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_device_info_title))
+                },
+                supportingContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_device_info_desc))
+                },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.localTools.contains(LocalToolOption.DeviceInfo),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.DeviceInfo, it) }
+                    )
+                }
+            )
+            item(
+                headlineContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_accessibility_title))
+                },
+                supportingContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_accessibility_desc))
+                },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.localTools.contains(LocalToolOption.Accessibility),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.Accessibility, it) }
+                    )
+                }
+            )
+            item(
+                headlineContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_power_management_title))
+                },
+                supportingContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_power_management_desc))
+                },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.localTools.contains(LocalToolOption.PowerManagement),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.PowerManagement, it) }
                     )
                 }
             )

@@ -33,6 +33,9 @@ data class WorkspaceEntity(
     // 工具审批的用户覆盖项 (toolName -> needsApproval)，未覆盖的工具沿用默认值
     @ColumnInfo("tool_approvals", defaultValue = "{}")
     val toolApprovals: String = "{}",
+    // Android 本地读写工作区与本地互通（默认开启）：关闭后 shell 不再挂载/解析 Android 本地目录
+    @ColumnInfo("android_local_access", defaultValue = "1")
+    val androidLocalAccess: Boolean = true,
 ) {
     fun toolApprovalOverrides(): Map<String, Boolean> = runCatching {
         JsonInstant.decodeFromString<Map<String, Boolean>>(toolApprovals)

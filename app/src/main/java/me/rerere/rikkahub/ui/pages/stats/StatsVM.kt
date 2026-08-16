@@ -26,7 +26,15 @@ data class AppStats(
     val totalCachedTokens: Long = 0L,
     val conversationsPerDay: Map<LocalDate, Int> = emptyMap(),
     val launchCount: Int = 0,
-)
+) {
+    // 总模型命中率（缓存命中率）：cachedTokens / promptTokens，无 promptTokens 时返回 null
+    val modelHitRate: Float? get() =
+        if (totalPromptTokens > 0) {
+            (totalCachedTokens.toFloat() / totalPromptTokens.toFloat()).coerceIn(0f, 1f)
+        } else {
+            null
+        }
+}
 
 class StatsVM(
     private val conversationDAO: ConversationDAO,
@@ -38,6 +46,10 @@ class StatsVM(
     val stats = _stats.asStateFlow()
 
     init {
+        viewModelScope.launch { loadStats() }
+    }
+
+    fun refresh() {
         viewModelScope.launch { loadStats() }
     }
 

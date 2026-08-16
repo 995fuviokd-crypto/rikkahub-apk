@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -8,10 +9,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.LargeFlexibleTopAppBar
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -21,15 +24,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.DisplaySetting
+import me.rerere.rikkahub.service.KeepAliveService
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceBoolean
 import me.rerere.rikkahub.ui.theme.CustomColors
+import me.rerere.rikkahub.utils.hasIgnoreBatteryOptimizationsPermission
+import me.rerere.rikkahub.utils.openBatteryOptimizationSettings
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
 
@@ -74,6 +83,92 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
                 ) {
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_smart_steward_mode_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_smart_steward_mode_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.smartStewardModeEnabled,
+                                onCheckedChange = {
+                                    vm.updateSettings(settings.copy(smartStewardModeEnabled = it))
+                                }
+                            )
+                        },
+                    )
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_page_multi_route_concurrent_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_multi_route_concurrent_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.multiRouteConcurrent,
+                                onCheckedChange = {
+                                    vm.updateSettings(settings.copy(multiRouteConcurrent = it))
+                                }
+                            )
+                        },
+                    )
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_screen_resolution_override_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_screen_resolution_override_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.screenResolutionOverrideEnabled,
+                                onCheckedChange = {
+                                    vm.updateSettings(settings.copy(screenResolutionOverrideEnabled = it))
+                                }
+                            )
+                        },
+                    )
+                    if (settings.screenResolutionOverrideEnabled) {
+                        item(
+                            headlineContent = { Text(stringResource(R.string.setting_display_page_screen_resolution_override_size_title)) },
+                            supportingContent = {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    OutlinedTextField(
+                                        value = if (settings.screenResolutionOverrideWidth > 0) {
+                                            settings.screenResolutionOverrideWidth.toString()
+                                        } else {
+                                            ""
+                                        },
+                                        onValueChange = { value ->
+                                            vm.updateSettings(
+                                                settings.copy(
+                                                    screenResolutionOverrideWidth = value.toIntOrNull() ?: 0
+                                                )
+                                            )
+                                        },
+                                        label = { Text(stringResource(R.string.setting_display_page_screen_resolution_override_width)) },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Text("×")
+                                    OutlinedTextField(
+                                        value = if (settings.screenResolutionOverrideHeight > 0) {
+                                            settings.screenResolutionOverrideHeight.toString()
+                                        } else {
+                                            ""
+                                        },
+                                        onValueChange = { value ->
+                                            vm.updateSettings(
+                                                settings.copy(
+                                                    screenResolutionOverrideHeight = value.toIntOrNull() ?: 0
+                                                )
+                                            )
+                                        },
+                                        label = { Text(stringResource(R.string.setting_display_page_screen_resolution_override_height)) },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            },
+                        )
+                    }
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_create_new_conversation_on_start_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_display_page_create_new_conversation_on_start_desc)) },
@@ -253,6 +348,49 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                             }
                         )
                     }
+                }
+            }
+
+            item {
+                val keepAliveContext = LocalContext.current
+                CardGroup(
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    title = { Text(stringResource(R.string.setting_page_background_keep_alive)) },
+                ) {
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_page_background_keep_alive_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_background_keep_alive_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.keepAliveEnabled,
+                                onCheckedChange = { enabled ->
+                                    vm.updateSettings(settings.copy(keepAliveEnabled = enabled))
+                                    if (!enabled) {
+                                        keepAliveContext.stopService(Intent(keepAliveContext, KeepAliveService::class.java))
+                                    }
+                                }
+                            )
+                        },
+                    )
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_page_ignore_battery_optimizations_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_ignore_battery_optimizations_desc)) },
+                        trailingContent = {
+                            TextButton(
+                                onClick = { keepAliveContext.openBatteryOptimizationSettings() },
+                            ) {
+                                Text(
+                                    stringResource(
+                                        if (keepAliveContext.hasIgnoreBatteryOptimizationsPermission()) {
+                                            R.string.setting_page_ignore_battery_optimizations_done
+                                        } else {
+                                            R.string.setting_page_ignore_battery_optimizations_action
+                                        }
+                                    )
+                                )
+                            }
+                        },
+                    )
                 }
             }
 

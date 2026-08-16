@@ -39,7 +39,8 @@ class ChatCompletionsMoonshotRequestTest {
             List::class.java,
             TextGenerationParams::class.java,
             ProviderSetting.OpenAI::class.java,
-            Boolean::class.javaPrimitiveType
+            Boolean::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType
         )
         method.isAccessible = true
         val model = Model(
@@ -56,7 +57,8 @@ class ChatCompletionsMoonshotRequestTest {
             listOf(UIMessage.user("hi")),
             params,
             providerSetting,
-            true
+            true,
+            0
         ) as JsonObject
     }
 

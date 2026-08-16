@@ -25,6 +25,7 @@ import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.provider.ApiEndpointResolver
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
@@ -48,6 +49,7 @@ import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.KeyRoulette
 import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.encodeBase64
+import me.rerere.ai.util.isHtmlBody
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.parseErrorDetail
@@ -78,37 +80,48 @@ class ResponseAPI(
         messages: List<UIMessage>,
         params: TextGenerationParams
     ): TextGenerationResult {
-        val requestBody = buildRequestBody(
-            providerSetting = providerSetting,
-            messages = messages,
-            params = params,
-            stream = false,
-        )
-        val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/responses")
-            .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader(
-                "Authorization",
-                "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
+        var degradeLevel = 0
+        while (true) {
+            val requestBody = buildRequestBody(
+                providerSetting = providerSetting,
+                messages = messages,
+                params = params,
+                stream = false,
+                degradeLevel = degradeLevel,
             )
-            .addHeader("Content-Type", "application/json")
-            .configureReferHeaders(providerSetting.baseUrl)
-            .build()
+            val request = Request.Builder()
+                .url(ApiEndpointResolver.resolveEndpoint(providerSetting.baseUrl, "/responses"))
+                .headers(params.customHeaders.toHeaders())
+                .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+                .addHeader(
+                    "Authorization",
+                    "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
+                )
+                .addHeader("Content-Type", "application/json")
+                .configureReferHeaders(providerSetting.baseUrl)
+                .build()
 
-        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+            Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
 
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            throw Exception("Failed to get response: ${response.code} ${response.body.string()}")
+            val response = client.newCall(request).await()
+            if (response.isSuccessful) {
+                val bodyStr = response.body?.string() ?: ""
+                Log.i(TAG, "generateText: $bodyStr")
+                val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
+                return parseResponseOutput(bodyJson)
+            }
+
+            val bodyRaw = response.body.string()
+            if (isProtocolUnavailableError(response.code, bodyRaw)) {
+                throw ProtocolUnavailableException("Responses endpoint not supported (HTTP ${response.code})")
+            }
+            if (degradeLevel < MAX_REQUEST_DEGRADE_LEVEL && isParamIncompatibilityError(response.code, bodyRaw)) {
+                Log.w(TAG, "generateText: request rejected (${response.code}), degrading params to level ${degradeLevel + 1}")
+                degradeLevel++
+                continue
+            }
+            throw buildRequestError(response.code, bodyRaw)
         }
-
-        val bodyStr = response.body?.string() ?: ""
-        Log.i(TAG, "generateText: $bodyStr")
-        val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-        val output = parseResponseOutput(bodyJson)
-
-        return output
     }
 
     override suspend fun streamText(
@@ -116,26 +129,10 @@ class ResponseAPI(
         messages: List<UIMessage>,
         params: TextGenerationParams
     ): Flow<StreamChunk> = callbackFlow {
-        val requestBody = buildRequestBody(
-            providerSetting = providerSetting,
-            messages = messages,
-            params = params,
-            stream = true,
-        )
-        val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/responses")
-            .headers(params.customHeaders.toHeaders())
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader(
-                "Authorization",
-                "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
-            )
-            .configureReferHeaders(providerSetting.baseUrl)
-            .build()
-
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
-
-        val decoder = ResponseApiStreamDecoder()
+        var degradeLevel = 0
+        var generation = 0
+        var eventSource: EventSource? = null
+        var decoder = ResponseApiStreamDecoder()
 
         fun sendChunks(chunks: Iterable<StreamChunk>) {
             chunks.forEach { chunk ->
@@ -145,57 +142,99 @@ class ResponseAPI(
             }
         }
 
-        val listener = object : EventSourceListener() {
-            override fun onEvent(
-                eventSource: EventSource,
-                id: String?,
-                type: String?,
-                data: String
-            ) {
-                Log.d(TAG, "onEvent: $id/$type $data")
-                try {
-                    val result = decoder.accept(SseEvent(id = id, event = type, data = data))
-                    sendChunks(result.chunks)
-                    if (result.completed) close()
-                } catch (e: Throwable) {
-                    close(e)
-                }
-            }
+        fun startEventSource() {
+            val myGeneration = generation
+            val requestBody = buildRequestBody(
+                providerSetting = providerSetting,
+                messages = messages,
+                params = params,
+                stream = true,
+                degradeLevel = degradeLevel,
+            )
+            val request = Request.Builder()
+                .url(ApiEndpointResolver.resolveEndpoint(providerSetting.baseUrl, "/responses"))
+                .headers(params.customHeaders.toHeaders())
+                .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+                .addHeader(
+                    "Authorization",
+                    "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
+                )
+                .configureReferHeaders(providerSetting.baseUrl)
+                .build()
 
-            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                var exception = t
+            Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
 
-                t?.printStackTrace()
-                println("[onFailure] 发生错误: ${t?.javaClass?.name} ${t?.message} / $response")
-
-                val bodyRaw = response?.body?.stringSafe()
-                try {
-                    if (!bodyRaw.isNullOrBlank()) {
-                        val bodyElement = Json.parseToJsonElement(bodyRaw)
-                        println(bodyElement)
-                        exception = bodyElement.parseErrorDetail()
-                        Log.i(TAG, "onFailure: $exception")
+            val listener = object : EventSourceListener() {
+                override fun onEvent(
+                    eventSource: EventSource,
+                    id: String?,
+                    type: String?,
+                    data: String
+                ) {
+                    if (myGeneration != generation) return
+                    Log.d(TAG, "onEvent: $id/$type $data")
+                    try {
+                        val result = decoder.accept(SseEvent(id = id, event = type, data = data))
+                        sendChunks(result.chunks)
+                        if (result.completed) close()
+                    } catch (e: Throwable) {
+                        close(e)
                     }
-                } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
-                } finally {
-                    close(exception)
+                }
+
+                override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
+                    if (myGeneration != generation) return
+                    var exception = t
+
+                    t?.printStackTrace()
+                    println("[onFailure] 发生错误: ${t?.javaClass?.name} ${t?.message} / $response")
+
+                    val bodyRaw = response?.body?.stringSafe()
+                    try {
+                        if (!bodyRaw.isNullOrBlank()) {
+                            val bodyElement = Json.parseToJsonElement(bodyRaw)
+                            println(bodyElement)
+                            exception = bodyElement.parseErrorDetail()
+                            Log.i(TAG, "onFailure: $exception")
+                        }
+                    } catch (e: Throwable) {
+                        Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
+                        e.printStackTrace()
+                    }
+
+                    val code = response?.code ?: -1
+                    if (isProtocolUnavailableError(code, bodyRaw.orEmpty())) {
+                        close(ProtocolUnavailableException("Responses endpoint not supported (HTTP $code)"))
+                    } else if (degradeLevel < MAX_REQUEST_DEGRADE_LEVEL && isParamIncompatibilityError(code, bodyRaw.orEmpty())) {
+                        Log.w(TAG, "streamText: request rejected ($code), degrading params to level ${degradeLevel + 1}")
+                        degradeLevel++
+                        generation++
+                        decoder = ResponseApiStreamDecoder()
+                        startEventSource()
+                    } else {
+                        if (code >= 400 && bodyRaw.orEmpty().isHtmlBody()) {
+                            exception = buildRequestError(code, bodyRaw.orEmpty())
+                        }
+                        close(exception)
+                    }
+                }
+
+                override fun onClosed(eventSource: EventSource) {
+                    if (myGeneration != generation) return
+                    sendChunks(decoder.onClosed())
+                    close()
                 }
             }
 
-            override fun onClosed(eventSource: EventSource) {
-                sendChunks(decoder.onClosed())
-                close()
-            }
+            eventSource = EventSources.createFactory(client)
+                .newEventSource(request, listener)
         }
 
-        val eventSource = EventSources.createFactory(client)
-            .newEventSource(request, listener)
+        startEventSource()
 
         awaitClose {
             println("[awaitClose] 关闭eventSource ")
-            eventSource.cancel()
+            eventSource?.cancel()
         }
         // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
     }.buffer(Channel.UNLIMITED)
@@ -204,7 +243,8 @@ class ResponseAPI(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams,
-        stream: Boolean
+        stream: Boolean,
+        degradeLevel: Int = 0,
     ): JsonObject {
         val host = providerSetting.baseUrl.toHttpUrl().host
         val capabilities = resolveResponseProviderCapabilities(host)
@@ -213,11 +253,11 @@ class ResponseAPI(
             put("stream", stream)
             put("store", false)
 
-            if (isModelAllowTemperature(params.model)) {
+            if (degradeLevel < 2 && isModelAllowTemperature(params.model)) {
                 if (params.temperature != null) put("temperature", params.temperature)
                 if (params.topP != null) put("top_p", params.topP)
             }
-            if (params.maxTokens != null) put("max_output_tokens", params.maxTokens)
+            if (params.maxTokens != null && degradeLevel < 4) put("max_output_tokens", params.maxTokens)
 
             // system instructions
             if (messages.any { it.role == MessageRole.SYSTEM }) {
@@ -231,7 +271,7 @@ class ResponseAPI(
             put("input", buildMessages(messages))
 
             // reasoning
-            if (params.model.abilities.contains(ModelAbility.REASONING)) {
+            if (degradeLevel < 1 && params.model.abilities.contains(ModelAbility.REASONING)) {
                 val level = params.reasoningLevel
                 put("reasoning", buildJsonObject {
                     if (capabilities.supportsReasoningSummary) {
@@ -253,7 +293,7 @@ class ResponseAPI(
             // 否则后写入的会覆盖前者
             val useFunctionTools =
                 params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()
-            if (useFunctionTools || params.model.tools.isNotEmpty()) {
+            if (degradeLevel < 3 && (useFunctionTools || params.model.tools.isNotEmpty())) {
                 putJsonArray("tools") {
                     if (useFunctionTools) {
                         params.tools.forEach { tool ->

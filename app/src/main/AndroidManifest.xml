@@ -8,6 +8,13 @@
   <uses-permission
     android:name="android.permission.WRITE_EXTERNAL_STORAGE"
     android:maxSdkVersion="28" />
+  <uses-permission
+    android:name="android.permission.READ_EXTERNAL_STORAGE"
+    android:maxSdkVersion="32" />
+  <!-- 全盘文件访问: 让 Linux 工作区 AI 能读写手机全部文件(/sdcard)。需要在系统设置中手动授予 -->
+  <uses-permission
+    android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+    tools:ignore="ScopedStorage" />
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
   <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
   <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -20,6 +27,9 @@
     tools:ignore="ProtectedPermissions" />
   <uses-permission android:name="android.permission.READ_CALENDAR" />
   <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+  <!-- 请求忽略电池优化, 配合后台保活提升存活能力 -->
+  <uses-permission
+    android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
   <uses-feature
     android:name="android.hardware.camera"
@@ -128,6 +138,21 @@
       android:name="com.yalantis.ucrop.UCropActivity"
       android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
 
+    <!-- 无障碍提权服务: 为本地工具提供打开应用/模拟点击/全局导航等操控手机能力 -->
+    <service
+      android:name=".service.accessibility.RikkaAccessibilityService"
+      android:exported="false"
+      android:label="@string/accessibility_service_label"
+      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+      <intent-filter>
+        <action android:name="android.accessibilityservice.AccessibilityService" />
+      </intent-filter>
+
+      <meta-data
+        android:name="android.accessibilityservice"
+        android:resource="@xml/accessibility_service_config" />
+    </service>
+
     <service
       android:name=".service.WebServerService"
       android:exported="false"
@@ -135,6 +160,16 @@
       <property
         android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
         android:value="local web server for LLM chat UI" />
+    </service>
+
+    <!-- 后台保活前台服务: 常驻通知显示"正在运行中", 提升进程存活 -->
+    <service
+      android:name=".service.KeepAliveService"
+      android:exported="false"
+      android:foregroundServiceType="specialUse">
+      <property
+        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="background keep-alive running indicator" />
     </service>
 
     <provider

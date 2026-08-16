@@ -28,6 +28,12 @@ class LocalTools(
 
     val calendarCreateTool by lazy { buildCalendarCreateTool(context) }
 
+    val deviceInfoTool by lazy { buildDeviceInfoTool(context, settingsStore) }
+
+    val accessibilityTools by lazy { buildAccessibilityTools(context) }
+
+    val powerTools by lazy { buildPowerTools(context) }
+
     fun getTools(options: List<LocalToolOption>): List<Tool> {
         val tools = mutableListOf<Tool>()
         if (options.contains(LocalToolOption.JavascriptEngine)) {
@@ -51,6 +57,15 @@ class LocalTools(
         if (options.contains(LocalToolOption.Calendar)) {
             tools.add(calendarQueryTool)
             tools.add(calendarCreateTool)
+        }
+        if (options.contains(LocalToolOption.DeviceInfo)) {
+            tools.add(deviceInfoTool)
+        }
+        if (options.contains(LocalToolOption.Accessibility)) {
+            tools.addAll(accessibilityTools)
+        }
+        if (options.contains(LocalToolOption.PowerManagement)) {
+            tools.addAll(powerTools)
         }
         return tools
     }

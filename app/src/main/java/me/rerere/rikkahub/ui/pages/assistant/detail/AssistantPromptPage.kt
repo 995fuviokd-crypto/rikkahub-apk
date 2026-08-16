@@ -77,6 +77,7 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.AssistantRegex
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.RouterMode
 import me.rerere.rikkahub.data.model.toMessageNode
 import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -248,6 +249,143 @@ private fun AssistantPromptContent(
                                     allowConversationPromptInjection = it
                                 )
                             )
+                        }
+                    )
+                }
+            )
+        }
+
+        Card(
+            colors = CustomColors.cardColorsOnSurfaceContainer
+        ) {
+            FormItem(
+                modifier = Modifier.padding(8.dp),
+                label = {
+                    Text(stringResource(R.string.assistant_page_smart_mode_router))
+                },
+                description = {
+                    Text(stringResource(R.string.assistant_page_smart_mode_router_desc))
+                },
+                tail = {
+                    Switch(
+                        checked = assistant.smartModeRouter,
+                        onCheckedChange = {
+                            onUpdate(assistant.copy(smartModeRouter = it))
+                        }
+                    )
+                }
+            )
+            if (assistant.smartModeRouter) {
+                FormItem(
+                    modifier = Modifier.padding(8.dp),
+                    label = {
+                        Text(stringResource(R.string.assistant_page_router_mode))
+                    },
+                    description = {
+                        Text(stringResource(R.string.assistant_page_router_mode_desc))
+                    },
+                    content = {
+                        Select(
+                            options = RouterMode.entries,
+                            selectedOption = assistant.routerModeOverride,
+                            onOptionSelected = { mode ->
+                                onUpdate(assistant.copy(routerModeOverride = mode))
+                            },
+                            optionToString = { mode ->
+                                when (mode) {
+                                    RouterMode.AUTO -> stringResource(R.string.assistant_page_router_mode_auto)
+                                    RouterMode.SPEC -> stringResource(R.string.assistant_page_router_mode_spec)
+                                    RouterMode.REACT -> stringResource(R.string.assistant_page_router_mode_react)
+                                    RouterMode.WEAK -> stringResource(R.string.assistant_page_router_mode_weak)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                )
+            }
+        }
+
+        Card(
+            colors = CustomColors.cardColorsOnSurfaceContainer
+        ) {
+            FormItem(
+                modifier = Modifier.padding(8.dp),
+                label = {
+                    Text(stringResource(R.string.assistant_page_smart_tool_anchor))
+                },
+                description = {
+                    Text(stringResource(R.string.assistant_page_smart_tool_anchor_desc))
+                },
+                tail = {
+                    Switch(
+                        checked = assistant.smartToolAnchor,
+                        onCheckedChange = {
+                            onUpdate(assistant.copy(smartToolAnchor = it))
+                        }
+                    )
+                }
+            )
+            if (assistant.smartToolAnchor) {
+                FormItem(
+                    modifier = Modifier.padding(8.dp),
+                    label = {
+                        Text(stringResource(R.string.assistant_page_anchor_core_tools))
+                    },
+                    description = {
+                        Text(stringResource(R.string.assistant_page_anchor_core_tools_desc))
+                    },
+                    content = {
+                        OutlinedTextField(
+                            value = assistant.anchorCoreToolNames.joinToString(", "),
+                            onValueChange = { text ->
+                                onUpdate(
+                                    assistant.copy(
+                                        anchorCoreToolNames = text
+                                            .split(',')
+                                            .map { it.trim() }
+                                            .filter { it.isNotEmpty() }
+                                    )
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = {
+                                Text(stringResource(R.string.assistant_page_anchor_core_tools_placeholder))
+                            }
+                        )
+                    }
+                )
+            }
+            FormItem(
+                modifier = Modifier.padding(8.dp),
+                label = {
+                    Text(stringResource(R.string.assistant_page_smart_cap_ladder))
+                },
+                description = {
+                    Text(stringResource(R.string.assistant_page_smart_cap_ladder_desc))
+                },
+                tail = {
+                    Switch(
+                        checked = assistant.smartAnchorCapLadder,
+                        onCheckedChange = {
+                            onUpdate(assistant.copy(smartAnchorCapLadder = it))
+                        }
+                    )
+                }
+            )
+            FormItem(
+                modifier = Modifier.padding(8.dp),
+                label = {
+                    Text(stringResource(R.string.assistant_page_smart_tool_playbook))
+                },
+                description = {
+                    Text(stringResource(R.string.assistant_page_smart_tool_playbook_desc))
+                },
+                tail = {
+                    Switch(
+                        checked = assistant.smartToolPlaybook,
+                        onCheckedChange = {
+                            onUpdate(assistant.copy(smartToolPlaybook = it))
                         }
                     )
                 }

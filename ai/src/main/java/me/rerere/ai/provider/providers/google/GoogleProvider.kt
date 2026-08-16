@@ -29,6 +29,7 @@ import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.provider.ApiEndpointResolver
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
@@ -83,8 +84,12 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
     }
 
     private fun buildUrl(providerSetting: ProviderSetting.Google, path: String): HttpUrl {
+        // 显式模式（@）：直接使用用户提供的完整地址，不拼接任何路径
+        if (ApiEndpointResolver.isExplicitBaseUrl(providerSetting.baseUrl)) {
+            return ApiEndpointResolver.resolveBaseUrl(providerSetting.baseUrl).toHttpUrl()
+        }
         return if (!providerSetting.vertexAI) {
-            "${providerSetting.baseUrl}/$path".toHttpUrl()
+            "${ApiEndpointResolver.resolveBaseUrl(providerSetting.baseUrl)}/$path".toHttpUrl()
         } else if (providerSetting.useServiceAccount) {
             "https://aiplatform.googleapis.com/v1/projects/${providerSetting.projectId}/locations/${providerSetting.location}/$path".toHttpUrl()
         } else {

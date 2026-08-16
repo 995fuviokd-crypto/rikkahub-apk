@@ -33,6 +33,7 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.core.merge
 import me.rerere.ai.provider.BuiltInTools
+import me.rerere.ai.provider.ApiEndpointResolver
 import me.rerere.ai.provider.ClaudePromptCacheTtl
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Model
@@ -245,7 +246,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
     override suspend fun listModels(providerSetting: ProviderSetting.Claude): List<Model> =
         withContext(Dispatchers.IO) {
             val request = Request.Builder()
-                .url("${providerSetting.baseUrl}/models")
+                .url(ApiEndpointResolver.resolveEndpoint(providerSetting.baseUrl, "/models"))
                 .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
                 .addHeader("anthropic-version", ANTHROPIC_VERSION)
                 .get()
@@ -296,7 +297,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
     ): TextGenerationResult {
         val requestBody = buildMessageRequest(providerSetting, messages, params)
         val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/messages")
+                .url(ApiEndpointResolver.resolveEndpoint(providerSetting.baseUrl, "/messages"))
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
@@ -345,7 +346,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
     ): Flow<StreamChunk> = callbackFlow {
         val requestBody = buildMessageRequest(providerSetting, messages, params, stream = true)
         val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/messages")
+                .url(ApiEndpointResolver.resolveEndpoint(providerSetting.baseUrl, "/messages"))
             .headers(params.customHeaders.toHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
