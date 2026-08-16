@@ -12,35 +12,62 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.common.http.await
 import me.rerere.rikkahub.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-private const val API_URL = "https://updates.rikka-ai.com/"
+// 更新源：我们的 GitHub Releases，应用内自动检测并下载，无需手动访问 GitHub
+private const val API_URL = "https://api.github.com/repos/995fuviokd-crypto/rikkahub-apk/releases/latest"
+private const val ASSET_NAME_PREFIX = "RikkaHub-"
 
 class UpdateChecker(private val client: OkHttpClient) {
     private val json = Json { ignoreUnknownKeys = true }
+
+    companion object {
+        // 记录正在等待自动安装的下载任务 ID, 供 UpdateDownloadReceiver 匹配
+        @Volatile
+        var pendingInstallDownloadId: Long = -1L
+    }
+
+    // 简单的进程内缓存, 避免频繁进入聊天页消耗 GitHub API 匿名额度
+    private var cachedResult: UpdateInfo? = null
+    private var cachedAt: Long = 0L
+    private val cacheTtlMillis = 10 * 60 * 1000L // 10 分钟
 
     fun checkUpdate(): Flow<UiState<UpdateInfo>> = flow {
         emit(UiState.Loading)
         emit(
             UiState.Success(
                 data = try {
-                    val response = client.newCall(
-                        Request.Builder()
-                            .url(API_URL)
-                            .get()
-                            .addHeader(
-                                "User-Agent",
-                                "RikkaHub ${BuildConfig.VERSION_NAME} #${BuildConfig.VERSION_CODE}"
-                            )
-                            .build()
-                    ).await()
-                    if (response.isSuccessful) {
-                        json.decodeFromString<UpdateInfo>(response.body.string())
+                    val now = System.currentTimeMillis()
+                    val cached = cachedResult
+                    if (cached != null && now - cachedAt < cacheTtlMillis) {
+                        cached
                     } else {
-                        throw Exception("Failed to fetch update info")
+                        val response = client.newCall(
+                            Request.Builder()
+                                .url(API_URL)
+                                .get()
+                                .addHeader(
+                                    "User-Agent",
+                                    "RikkaHub ${BuildConfig.VERSION_NAME} #${BuildConfig.VERSION_CODE}"
+                                )
+                                .addHeader("Accept", "application/vnd.github+json")
+                                .build()
+                        ).await()
+                        if (response.isSuccessful) {
+                            parseGithubRelease(response.body.string()).also {
+                                cachedResult = it
+                                cachedAt = System.currentTimeMillis()
+                            }
+                        } else {
+                            throw Exception("Failed to fetch update info")
+                        }
                     }
                 } catch (e: Exception) {
                     throw Exception("Failed to fetch update info", e)
@@ -50,6 +77,53 @@ class UpdateChecker(private val client: OkHttpClient) {
     }.catch {
         emit(UiState.Error(it))
     }.flowOn(Dispatchers.IO)
+
+    /**
+     * 将 GitHub Releases 响应解析为 UpdateInfo。
+     * GitHub API 响应格式：
+     * {
+     *   "tag_name": "v2.4.14",
+     *   "published_at": "2026-08-16T10:30:00Z",
+     *   "body": "...changelog...",
+     *   "assets": [{ "name": "RikkaHub-2.4.14-universal-debug.apk", "browser_download_url": "...", "size": 92217887 }]
+     * }
+     */
+    private fun parseGithubRelease(body: String): UpdateInfo {
+        val root = json.parseToJsonElement(body).jsonObject
+        val version = root["tag_name"]?.jsonPrimitive?.contentOrNull
+            ?.removePrefix("v")
+            ?: throw Exception("Missing version in update info")
+        val publishedAt = root["published_at"]?.jsonPrimitive?.contentOrNull ?: ""
+        val changelog = root["body"]?.jsonPrimitive?.contentOrNull ?: ""
+        val downloads = root["assets"]?.jsonArray?.mapNotNull { asset ->
+            val obj = asset.jsonObject
+            val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            if (!name.startsWith(ASSET_NAME_PREFIX)) return@mapNotNull null
+            val url = obj["browser_download_url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val size = obj["size"]?.jsonPrimitive?.contentOrNull ?: ""
+            UpdateDownload(
+                name = name,
+                url = url,
+                size = formatSize(size.toLongOrNull() ?: 0L),
+            )
+        }.orEmpty()
+        if (downloads.isEmpty()) {
+            throw Exception("No APK asset found in update")
+        }
+        return UpdateInfo(
+            version = version,
+            publishedAt = publishedAt,
+            changelog = changelog,
+            downloads = downloads,
+        )
+    }
+
+    private fun formatSize(bytes: Long): String = when {
+        bytes >= 1024 * 1024 * 1024 -> "%.2f GB".format(bytes / (1024.0 * 1024 * 1024))
+        bytes >= 1024 * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024))
+        bytes >= 1024 -> "%.1f KB".format(bytes / 1024.0)
+        else -> "$bytes B"
+    }
 
     fun downloadUpdate(context: Context, download: UpdateDownload) {
         runCatching {
@@ -68,8 +142,9 @@ class UpdateChecker(private val client: OkHttpClient) {
             }
             // 获取系统的DownloadManager
             val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            dm.enqueue(request)
-            // 你可以保存返回的downloadId到本地，以便后续查询下载进度或状态
+            val downloadId = dm.enqueue(request)
+            // 记录 downloadId, 下载完成后由 UpdateDownloadReceiver 自动弹出安装界面
+            pendingInstallDownloadId = downloadId
         }.onFailure {
             Toast.makeText(context, "Failed to update", Toast.LENGTH_SHORT).show()
             context.openUrl(download.url) // 跳转到下载页面

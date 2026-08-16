@@ -9,4 +9,8 @@
   <files-path
     name="upload"
     path="." />
+  <!-- 应用内更新: 覆盖公共 Downloads 目录, 供 FileProvider 共享安装 APK -->
+  <external-path
+    name="downloads"
+    path="Download/" />
 </paths>
