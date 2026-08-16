@@ -130,4 +130,29 @@ class TaskModeRouterTransformerTest {
         assertFalse(TaskModeRouterTransformer.isComplexTask("写一个 hello world"))
         assertFalse(TaskModeRouterTransformer.isComplexTask("修复这个 bug"))
     }
+
+    @Test
+    fun `we need anchor is appended for deepseek auto enabled`() {
+        val guide = TaskModeRouterTransformer.guideFor(RouterMode.REACT, isReasoningModel = false)
+        val anchored = TaskModeRouterTransformer.withWeNeedAnchor(guide, autoEnabled = true)
+        assertTrue(anchored.contains("We need"))
+        assertTrue(anchored.contains("shared goal"))
+        assertTrue(anchored.startsWith(guide))
+    }
+
+    @Test
+    fun `we need anchor is not appended when not auto enabled`() {
+        val guide = TaskModeRouterTransformer.guideFor(RouterMode.REACT, isReasoningModel = false)
+        val plain = TaskModeRouterTransformer.withWeNeedAnchor(guide, autoEnabled = false)
+        assertEquals(guide, plain)
+        assertFalse(plain.contains("We need"))
+    }
+
+    @Test
+    fun `we need anchor keeps exact wording stable for prompt cache`() {
+        val guide = TaskModeRouterTransformer.guideFor(RouterMode.SPEC, isReasoningModel = false)
+        val a = TaskModeRouterTransformer.withWeNeedAnchor(guide, autoEnabled = true)
+        val b = TaskModeRouterTransformer.withWeNeedAnchor(guide, autoEnabled = true)
+        assertEquals(a, b)
+    }
 }

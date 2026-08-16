@@ -126,13 +126,19 @@ object TaskModeRouterTransformer : InputMessageTransformer {
         )
         if (guide.isEmpty()) return messages
 
+        // "We need" 思维链锚定（借鉴 dsh-anchored-standard 的 Minimal trajectory）：
+        // DeepSeek 家族自动启用路由时，追加引导推理链以 "We need…" 风格展开，
+        // 让思考首行常用 "We need" 开头，聚焦协作式目标拆解；
+        // 非 DeepSeek 或手动开关不追加，避免改变其他模型的既有行为。
+        val finalGuide = withWeNeedAnchor(guide, autoEnabled)
+
         // 复杂任务深度自适应：在引导后追加深层探索指示（简单任务保持快速收敛）
-        val finalGuide = if (mode == RouterMode.WEAK && isComplexTask(taskText)) {
-            guide + COMPLEX_TASK_GUIDE_SUFFIX
+        val finalGuide2 = if (mode == RouterMode.WEAK && isComplexTask(taskText)) {
+            finalGuide + COMPLEX_TASK_GUIDE_SUFFIX
         } else {
-            guide
+            finalGuide
         }
-        return injectGuide(messages = messages, guide = finalGuide)
+        return injectGuide(messages = messages, guide = finalGuide2)
     }
 
     /**
@@ -168,6 +174,24 @@ object TaskModeRouterTransformer : InputMessageTransformer {
     private const val WEAK_PRO_GUIDE =
         "[task-routing] Judge the task yourself: decide whether this is a build or a fix task, then adopt the matching style — " +
             "build: act directly and deliver working output; fix: inspect the current state first, then plan and repair."
+
+    /**
+     * "We need" 思维链锚定（dsh-anchored-standard Minimal trajectory）：
+     * DeepSeek 家族自动启用路由时追加，引导推理链首行以 "We need…" 展开。
+     * 措辞保持固定以命中提示词缓存。
+     */
+    private const val WE_NEED_ANCHOR_GUIDE =
+        " [chain-of-thought] Start your reasoning with a single \"We need…\" line stating the shared goal, " +
+            "then break it into concrete steps before acting."
+
+    /**
+     * 是否追加 "We need" 思维链锚定：仅 DeepSeek 家族自动启用路由时生效
+     * （autoEnabled = isDeepSeekModel），非 DeepSeek 或手动开关不追加，
+     * 避免改变其他模型的既有行为。
+     */
+    fun withWeNeedAnchor(guide: String, autoEnabled: Boolean): String {
+        return if (autoEnabled) guide + WE_NEED_ANCHOR_GUIDE else guide
+    }
 
     /** WEAK 引导：Flash 家族（neutral + classify + 回顾锚 + 防跑题锚，dsh-router-standard w7） */
     private const val WEAK_FLASH_GUIDE =
