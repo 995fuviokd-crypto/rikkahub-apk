@@ -12,6 +12,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.migration.SettingsJsonMigrator
 import me.rerere.rikkahub.data.db.AppDatabase
+import me.rerere.rikkahub.data.db.DatabaseDowngrade
 import me.rerere.rikkahub.data.sync.s3.S3Client
 import me.rerere.rikkahub.data.sync.s3.S3Config
 import me.rerere.rikkahub.utils.fileSizeToString
@@ -129,20 +130,7 @@ class S3Sync(
             // Backup database files
             if (config.items.contains(S3Config.BackupItem.DATABASE)) {
                 checkpointDatabase()
-                val dbFile = context.getDatabasePath("rikka_hub")
-                if (dbFile.exists()) {
-                    addFileToZip(zipOut, dbFile, "rikka_hub.db")
-                }
-
-                val walFile = File(dbFile.parentFile, "rikka_hub-wal")
-                if (walFile.exists()) {
-                    addFileToZip(zipOut, walFile, "rikka_hub-wal")
-                }
-
-                val shmFile = File(dbFile.parentFile, "rikka_hub-shm")
-                if (shmFile.exists()) {
-                    addFileToZip(zipOut, shmFile, "rikka_hub-shm")
-                }
+                addDatabaseToZip(zipOut)
             }
 
             // Backup app files
@@ -320,6 +308,34 @@ class S3Sync(
         }
 
         Log.i(TAG, "restoreFromBackupFile: Restore completed successfully")
+    }
+
+    private fun addDatabaseToZip(zipOut: ZipOutputStream) {
+        val dbFile = context.getDatabasePath("rikka_hub")
+        if (!dbFile.exists()) return
+
+        val tempDir = File(context.cacheDir, "downgrade_${System.currentTimeMillis()}").apply { mkdirs() }
+        val downgradedDb = DatabaseDowngrade.createDowngradedCopy(dbFile, tempDir)
+        try {
+            if (downgradedDb != null) {
+                addFileToZip(zipOut, downgradedDb, "rikka_hub.db")
+                Log.i(TAG, "addDatabaseToZip: exported downgraded database (v24 compatible)")
+                return
+            }
+        } finally {
+            tempDir.deleteRecursively()
+        }
+
+        // 降级失败，回退到原始数据库文件
+        addFileToZip(zipOut, dbFile, "rikka_hub.db")
+        val walFile = File(dbFile.parentFile, "rikka_hub-wal")
+        if (walFile.exists()) {
+            addFileToZip(zipOut, walFile, "rikka_hub-wal")
+        }
+        val shmFile = File(dbFile.parentFile, "rikka_hub-shm")
+        if (shmFile.exists()) {
+            addFileToZip(zipOut, shmFile, "rikka_hub-shm")
+        }
     }
 
     private fun addFileToZip(zipOut: ZipOutputStream, file: File, entryName: String) {
