@@ -12,3 +12,5 @@ local.properties
 .history
 .kotlin
 .monkeycode/
+app/mapping.txt
+app/build/outputs/mapping/
