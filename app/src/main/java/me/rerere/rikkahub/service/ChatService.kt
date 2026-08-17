@@ -362,7 +362,10 @@ class ChatService(
     // ---- 初始化对话 ----
 
     suspend fun initializeConversation(conversationId: Uuid) {
-        getOrCreateSession(conversationId) // 确保 session 存在
+        val session = getOrCreateSession(conversationId) // 确保 session 存在
+        // 生成进行中时 session.state 由生成链实时维护，此时若用数据库旧快照覆盖，
+        // 会丢失正在生成的最新消息并导致状态错乱（切后台回来时表现为"消息消失 + 重新生成"）
+        if (session.isGenerating) return
         val conversation = conversationRepo.getConversationById(conversationId)
         if (conversation != null) {
             // 崩溃/中断恢复：数据库中未完成的 assistant 消息标记完成并写回，

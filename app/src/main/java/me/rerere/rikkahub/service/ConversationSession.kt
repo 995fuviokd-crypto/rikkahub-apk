@@ -73,9 +73,13 @@ class ConversationSession(
         _generationJob.value?.cancel()
         _generationJob.value = job
         job?.invokeOnCompletion {
-            _generationJob.value = null
-            if (refCount.get() <= 0) {
-                scheduleIdleCheck()
+            // 仅当仍是当前 job 时才清空：旧 job 被 cancel 后其完成回调可能晚于新 job 赋值，
+            // 无条件置 null 会把新 job 清掉，导致 isGenerating 误判为 false 并可能错误清理 session
+            if (_generationJob.value === job) {
+                _generationJob.value = null
+                if (refCount.get() <= 0) {
+                    scheduleIdleCheck()
+                }
             }
         }
     }
