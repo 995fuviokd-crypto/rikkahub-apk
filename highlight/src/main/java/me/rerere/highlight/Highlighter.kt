@@ -54,10 +54,11 @@ fun CodeHighlightText(
     softWrap: Boolean = true,
     maxLines: Int = Int.MAX_VALUE,
     minLines: Int = 1,
+    highlight: Boolean = true,
 ) {
     val highlighter = LocalCodeHighlighter.current
-    val annotatedString = remember(code, language, colors, highlighter) {
-        if (code.length > MAX_CODE_LENGTH) {
+    val annotatedString = remember(code, language, colors, highlighter, highlight) {
+        if (!highlight || code.length > MAX_CODE_LENGTH) {
             AnnotatedString(code)
         } else {
             buildAnnotatedString {

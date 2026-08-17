@@ -45,6 +45,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -237,7 +238,9 @@ fun MarkdownBlock(
     style: TextStyle = LocalTextStyle.current,
     onClickCitation: (String) -> Unit = {}
 ) {
-    var (data, setData) = remember { mutableStateOf(parseMarkdown(content)) }
+    // 初始为 null，首次解析放到后台线程完成，避免历史消息批量加载/切换分支时
+    // 每条消息都在主线程同步解析 AST 导致掉帧卡顿
+    var data by remember { mutableStateOf<MarkdownParseResult?>(null) }
 
     // 监听内容变化，重新解析AST树
     // 这里在后台线程解析AST树, 防止频繁更新的时候掉帧
@@ -248,10 +251,12 @@ fun MarkdownBlock(
             .mapLatest { parseMarkdown(it) }
             .catch { exception -> exception.printStackTrace() }
             .flowOn(Dispatchers.Default)
-            .collect { setData(it) }
+            .collect { data = it }
     }
 
-    if (data.hasHtml) {
+    val parsed = data ?: return
+
+    if (parsed.hasHtml) {
         MarkdownNew(
             content = content,
             modifier = modifier,
@@ -263,9 +268,9 @@ fun MarkdownBlock(
             Column(
                 modifier = modifier.padding(horizontal = 4.dp)
             ) {
-                data.astTree.children.fastForEach { child ->
+                parsed.astTree.children.fastForEach { child ->
                     MarkdownNode(
-                        node = child, content = data.preprocessed, onClickCitation = onClickCitation
+                        node = child, content = parsed.preprocessed, onClickCitation = onClickCitation
                     )
                 }
             }

@@ -192,6 +192,7 @@ fun HighlightCodeBlock(
                                 language = language,
                                 textStyle = textStyle,
                                 colorPalette = colorPalette,
+                                completeCodeBlock = completeCodeBlock,
                             )
                         }
                         else -> {
@@ -204,6 +205,7 @@ fun HighlightCodeBlock(
                                 autoWrap = autoWrap,
                                 showLineNumbers = showLineNumbers,
                                 scrollState = scrollState,
+                                completeCodeBlock = completeCodeBlock,
                             )
                         }
                     }
@@ -255,6 +257,7 @@ private fun CodeBlockWithLineNumbersWrapped(
     language: String,
     textStyle: TextStyle,
     colorPalette: HighlightTextColorPalette,
+    completeCodeBlock: Boolean = true,
 ) {
     val lineNumberWidth = remember(displayLines.size) {
         displayLines.size.toString().length
@@ -283,6 +286,7 @@ private fun CodeBlockWithLineNumbersWrapped(
                         overflow = TextOverflow.Visible,
                         softWrap = true,
                         fontFamily = JetbrainsMono,
+                        highlight = completeCodeBlock,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -301,6 +305,7 @@ private fun CodeBlockDefault(
     autoWrap: Boolean,
     showLineNumbers: Boolean,
     scrollState: ScrollState,
+    completeCodeBlock: Boolean = true,
 ) {
     Row(
         modifier = Modifier.then(
@@ -343,7 +348,8 @@ private fun CodeBlockDefault(
                 colors = colorPalette,
                 overflow = TextOverflow.Visible,
                 softWrap = autoWrap,
-                fontFamily = JetbrainsMono
+                fontFamily = JetbrainsMono,
+                highlight = completeCodeBlock,
             )
         }
     }

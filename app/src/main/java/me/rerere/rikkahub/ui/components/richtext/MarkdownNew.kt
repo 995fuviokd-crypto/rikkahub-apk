@@ -127,11 +127,8 @@ fun MarkdownNew(
     style: TextStyle = LocalTextStyle.current,
     onClickCitation: (String) -> Unit = {},
 ) {
-    var html by remember {
-        mutableStateOf(
-            value = generateMarkdownHtml(content),
-        )
-    }
+    // 初始为 null，首次解析放到后台线程完成，避免主线程同步解析大段 HTML markdown 导致掉帧
+    var html by remember { mutableStateOf<String?>(null) }
 
     val updatedContent by rememberUpdatedState(content)
     LaunchedEffect(Unit) {
@@ -144,7 +141,7 @@ fun MarkdownNew(
     }
 
     val document = remember(html) {
-        runCatching { Jsoup.parse(html) }.getOrElse { Jsoup.parse("") }
+        runCatching { Jsoup.parse(html ?: "") }.getOrElse { Jsoup.parse("") }
     }
 
     ProvideTextStyle(style) {
