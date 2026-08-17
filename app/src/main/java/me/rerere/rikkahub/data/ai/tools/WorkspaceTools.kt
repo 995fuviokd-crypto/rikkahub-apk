@@ -27,7 +27,7 @@ val WorkspaceToolDefaultApprovals: Map<String, Boolean> = mapOf(
     "workspace_read_file" to false,
     "workspace_write_file" to false,
     "workspace_edit_file" to false,
-    "workspace_shell" to true,
+    "workspace_shell" to false,
 )
 
 private val WorkspaceToolSuffixRegex = Regex("_\\d+$")
@@ -419,8 +419,8 @@ private fun kotlinx.serialization.json.JsonObject.absolutePath(name: String): St
     return path
 }
 
-// 免强制审批的可写安全区: 工作区文件目录, 以及临时目录 /tmp
-private val WRITABLE_ROOT_PREFIXES = listOf("/workspace", "/tmp")
+// 免强制审批的可写安全区: 工作区文件目录、临时目录 /tmp, 以及已授权本地访问后的手机存储 /sdcard
+private val WRITABLE_ROOT_PREFIXES = listOf("/workspace", "/tmp", "/sdcard")
 
 private fun kotlinx.serialization.json.JsonElement.pathOutsideWritableRoots(name: String): Boolean =
     runCatching {

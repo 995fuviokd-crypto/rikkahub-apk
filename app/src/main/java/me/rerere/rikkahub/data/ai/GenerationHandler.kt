@@ -42,7 +42,6 @@ import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.handleTextGenerationResult
 import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
-import me.rerere.rikkahub.data.ai.transformers.TaskModeRouterTransformer
 import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
 import me.rerere.rikkahub.data.files.FileFolders
@@ -69,23 +68,6 @@ private const val TOOL_OUTPUT_PREVIEW_CHARS = 4 * 1024
 // 流式 SSE delta 合并发射的时间窗口（毫秒）：高频 token 按此节流，
 // 只把最新状态发射给 UI，减少每 token 一次的全量 transform 与重组
 private const val STREAM_EMIT_INTERVAL_MS = 32L
-
-// 首轮工具锚定的默认核心工具集：轻量、安全、高频的能力工具。
-// 首轮只暴露这些（外加用户显式白名单），首次工具调用后自动恢复全部工具，
-// 既保持"极简锚定"降低首轮 schema 开销，又保证 AI 首轮就知道
-// 联网搜索(search_web/scrape_web)、Linux 执行(workspace_shell)、时间/设备信息与用户澄清。
-// 另含手机操控 open_app/set_volume：参数简单、无需无障碍服务即可执行（仅启动 Activity/调音量），
-// 让 AI 首轮即可按用户指令打开应用或调节音量；未开启无障碍工具集时自动跳过。
-private val CORE_ANCHOR_TOOL_NAMES = setOf(
-    "workspace_shell",
-    "search_web",
-    "scrape_web",
-    "get_time_info",
-    "get_device_info",
-    "ask_user",
-    "open_app",
-    "set_volume",
-)
 
 @Serializable
 sealed interface GenerationChunk {
@@ -185,49 +167,27 @@ class GenerationHandler(
                 addAll(tools)
             }
 
-            // 首轮工具锚定：启用时首轮请求只保留核心工具，首次工具调用后恢复全部
-            // （借鉴 dsh-anchored-standard：首轮窄工具面锚定训练对齐，工具目录扩大后能力不损）
-            // 极简模式默认开启（smartToolAnchor 默认 true）；DeepSeek 家族额外自动启用
-            val autoAnchor = TaskModeRouterTransformer.isDeepSeekModel(model.modelId)
-            val coreNames = assistant.anchorCoreToolNames.filter { it.isNotBlank() }
-            val effectiveTools = if (settings.smartStewardModeEnabled && (assistant.smartToolAnchor || autoAnchor)) {
-                val hasToolCalls = messages.any { it.getTools().isNotEmpty() }
-                if (hasToolCalls || toolsInternal.isEmpty()) {
-                    toolsInternal
-                } else {
-                    // 首轮核心工具选择优先级：
-                    // 1. 用户显式白名单（anchorCoreToolNames）
-                    // 2. 默认核心工具集（联网搜索 + Linux 执行 + 时间/设备/澄清），
-                    //    保证 AI 首轮就知道搜索工具，而不是只暴露单一工具
-                    // 3. 兜底保留第一个工具
-                    val anchored = when {
-                        coreNames.isNotEmpty() -> toolsInternal.filter { it.name in coreNames }
-                        else -> toolsInternal
-                            .filter { it.name in CORE_ANCHOR_TOOL_NAMES }
-                            .ifEmpty { toolsInternal.take(1) }
-                    }
-                    if (anchored.isEmpty()) toolsInternal.take(1) else anchored
-                }
+            // DeepSeek V4 条件复刻：首轮工具锚定（极简工具对）+ 输出预算阶梯（dcws capSchedule）
+            val deepSeekAnchor = DeepSeekAnchor.isDeepSeekModel(model.modelId) && assistant.deepSeekAnchorEnabled
+            val hasToolCalls = messages.any { it.getTools().isNotEmpty() }
+            val effectiveTools = if (deepSeekAnchor && !hasToolCalls && toolsInternal.isNotEmpty()) {
+                val anchored = toolsInternal.filter { it.name in DeepSeekAnchor.BOOTSTRAP_TOOL_NAMES }
+                if (anchored.isEmpty()) toolsInternal else anchored
             } else {
                 toolsInternal
             }
 
-            // 双约束首轮锚定之"输出预算绳"：warmup 轮次内逐轮递增输出预算，
-            // 配合 smartToolAnchor 的工具 schema 绳，让模型反复经历"极简思维 + 调工具"，
-            // 把首轮锚定延伸成贯穿会话的风格惯性；warmup 结束后放开到用户上限
-            // 仅用户显式开启时生效：自动启用会把 DeepSeek reasoning 模型的输出预算
-            // 砍到 1024 起步，推理 token 即超限，表现为生成卡住/截断
-            // 因此对已启用推理的模型自动豁免阶梯：reasoning token 计入 max_completion_tokens，
-            // 过小的预算会截断思考链，表现为生成卡顿/不流畅；豁免后按用户配置的 maxTokens 走
+            // 输出预算阶梯：首轮 1024 → 次轮 4096 → 释放。
+            // reasoning 模型豁免：reasoning token 计入 max_completion_tokens，
+            // 过小的预算会截断思考链，表现为生成卡顿/不流畅。
             val reasoningEnabled = model.abilities.contains(ModelAbility.REASONING) && assistant.reasoningLevel.isEnabled
-            val effectiveMaxTokens = if (settings.smartStewardModeEnabled && assistant.smartAnchorCapLadder && !reasoningEnabled) {
-                AnchorBudgetLadder.budgetFor(
-                    userRound = messages.count { it.role == MessageRole.USER },
-                    maxTokens = assistant.maxTokens,
-                    base = settings.anchorBudgetBase,
-                    step = settings.anchorBudgetStep,
-                    warmupRounds = settings.anchorWarmupRounds,
-                )
+            val effectiveMaxTokens = if (deepSeekAnchor && !reasoningEnabled) {
+                val cap = DeepSeekAnchor.capFor(messages.count { it.role == MessageRole.USER })
+                when {
+                    cap == null -> assistant.maxTokens
+                    assistant.maxTokens == null -> cap
+                    else -> minOf(cap, assistant.maxTokens)
+                }
             } else {
                 assistant.maxTokens
             }

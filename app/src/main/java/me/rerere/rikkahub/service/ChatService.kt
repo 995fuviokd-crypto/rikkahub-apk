@@ -45,7 +45,6 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.util.HttpException
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.canResumeToolExecution
 import me.rerere.ai.ui.finishPendingTools
@@ -57,8 +56,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.service.ConversationCompressor.markedAsCompressionSummary
 import me.rerere.rikkahub.data.ai.GenerationHandler
+import me.rerere.rikkahub.data.ai.DeepSeekAnchor
 import me.rerere.rikkahub.data.ai.mcp.McpManager
-import me.rerere.rikkahub.data.ai.prompts.DEFAULT_STEWARD_PROMPT
 import me.rerere.rikkahub.data.ai.tools.createConversationTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
@@ -71,9 +70,7 @@ import me.rerere.rikkahub.data.ai.transformers.OcrTransformer
 import me.rerere.rikkahub.data.ai.transformers.PlaceholderTransformer
 import me.rerere.rikkahub.data.ai.transformers.PromptInjectionTransformer
 import me.rerere.rikkahub.data.ai.transformers.RegexOutputTransformer
-import me.rerere.rikkahub.data.ai.transformers.TaskModeRouterTransformer
-import me.rerere.rikkahub.data.ai.transformers.ToolPlaybookTransformer
-import me.rerere.rikkahub.data.ai.transformers.JSpaceTransformer
+import me.rerere.rikkahub.data.ai.transformers.DeepSeekAnchorTransformer
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
 import me.rerere.rikkahub.data.ai.transformers.ThinkTagTransformer
 import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
@@ -136,14 +133,29 @@ internal fun shouldUseExternalWebSearch(assistant: Assistant, model: Model): Boo
     return assistant.enableWebSearch && BuiltInTools.Search !in model.tools
 }
 
-/**
- * 托管模式完成度判断结果。
- */
+/** 托管模式完成度判断结果。 */
 data class StewardJudgement(
     val completed: Boolean,
     val reason: String = "",
     val nextInstruction: String? = null,
 )
+
+private val DEFAULT_STEWARD_PROMPT = """
+    You are a task supervisor. The user gave an instruction and the AI has given an execution report. Determine whether the user's instruction has been fully completed.
+
+    User original instruction:
+    {instruction}
+
+    AI last execution report:
+    {report}
+
+    Return only a JSON object, with no additional content:
+    {
+      "completed": true or false,
+      "reason": "one-sentence justification",
+      "next_instruction": "the next instruction when not completed; leave as an empty string when completed"
+    }
+""".trimIndent()
 
 private fun stewardJudgePrompt(anchorInstruction: String, lastAssistantReport: String, template: String): String {
     return template
@@ -186,9 +198,7 @@ private val inputTransformers by lazy {
     listOf(
         TimeReminderTransformer,
         PromptInjectionTransformer,
-        TaskModeRouterTransformer,
-        ToolPlaybookTransformer,
-        JSpaceTransformer,
+        DeepSeekAnchorTransformer,
         PlaceholderTransformer,
         DocumentAsPromptTransformer,
         OcrTransformer,
@@ -776,20 +786,30 @@ class ChatService(
                 continue
             }
             val failure = result.exceptionOrNull()
-            if (messageRange == null && settings.autoReconnectEnabled && isRetriableNetworkError(failure)) {
+            // 自动重连：除用户主动取消外的任何错误（网络中断、流截断、协议异常等）都立即重连，
+            // 不再区分错误类型，也不再指数退避，保证信息截断或异常时第一时间续跑
+            if (messageRange == null && settings.autoReconnectEnabled && shouldReconnect(failure)) {
                 // 一次"单次"重连窗口：自上次成功收到响应以来已尝试的次数
                 if (hasReceivedChunkInRun) {
                     reconnectAttempts = 0
                 }
                 reconnectAttempts++
                 if (reconnectAttempts <= settings.autoReconnectMaxRetries) {
-                    Logging.log(TAG, "handleMessageComplete: network error, reconnecting ($reconnectAttempts/${settings.autoReconnectMaxRetries})")
-                    rollbackIncompleteAssistantMessage(conversationId)
-                    delay(1000L * (1 shl (reconnectAttempts - 1).coerceAtMost(4)))
+                    Logging.log(TAG, "handleMessageComplete: generation interrupted (${failure?.javaClass?.simpleName}), reconnecting ($reconnectAttempts/${settings.autoReconnectMaxRetries})")
+                    sealIncompleteAssistantMessage(conversationId)
+                    // 立即重连：仅加极短延迟避免空转
+                    delay(100L)
                     continue
                 }
             }
             result.onFailure {
+                // 重连彻底失败：把残留的半截 assistant 消息标记完成并保留已生成的可见内容，
+                // 避免 UI 一直停留在"生成中"，同时不丢失用户已经看到的内容
+                saveConversation(
+                    conversationId,
+                    finalizeInterruptedAssistantMessages(getConversationFlow(conversationId).value)
+                )
+
                 // 兜底取消 Live Update 通知（生成开始前失败时 onCompletion 不会执行）
                 appEventBus.tryEmit(AppEvent.ChatGenerationEnded(conversationId, senderName, null))
 
@@ -841,7 +861,7 @@ class ChatService(
         model: Model,
     ): Set<Uuid> {
         assistant.effectiveWorkspaceIds.let { if (it.isNotEmpty()) return it }
-        if (!TaskModeRouterTransformer.isDeepSeekModel(model.modelId)) return emptySet()
+        if (!DeepSeekAnchor.isDeepSeekModel(model.modelId)) return emptySet()
         return workspaceRepository.listFlow().first()
             .firstOrNull { it.shellStatus == WorkspaceShellStatus.READY.name }
             ?.let { setOf(Uuid.parse(it.id)) }
@@ -1003,41 +1023,6 @@ class ChatService(
         }
     }
 
-    // ---- 智能托管模式判断 ----
-
-    /**
-     * 使用当前对话模型判断用户指令是否已完成，未完成则生成下一步指令。
-     *
-     * 走独立模型调用，不写入对话历史。
-     */
-    suspend fun judgeStewardCompletion(
-        conversationId: Uuid,
-        anchorInstruction: String,
-        lastAssistantReport: String,
-    ): StewardJudgement = withContext(Dispatchers.IO) {
-        val settings = settingsStore.settingsFlow.first()
-        val model = settings.findModelById(settings.stewardModelId, fallback = settings.getCurrentChatModel()?.id)
-            ?: settings.findModelById(null, fallback = settings.fastModelId)
-            ?: throw IllegalStateException("No chat model available")
-        val provider = model.findProvider(settings.providers)
-            ?: throw IllegalStateException("No provider available for chat model")
-        val providerHandler = providerManager.getProviderByType(provider)
-        val result = providerHandler.generateText(
-            providerSetting = provider,
-            messages = listOf(
-                UIMessage.user(
-                    stewardJudgePrompt(
-                        anchorInstruction,
-                        lastAssistantReport,
-                        settings.stewardPrompt.ifBlank { DEFAULT_STEWARD_PROMPT },
-                    )
-                ),
-            ),
-            params = backgroundTextGenerationParams(model),
-        )
-        parseStewardJudgement(result.message.toText())
-    }
-
     // ---- 生成建议 ----
 
     suspend fun generateSuggestion(
@@ -1089,6 +1074,41 @@ class ChatService(
         }.onFailure {
             it.printStackTrace()
         }
+    }
+
+    // ---- 智能托管模式判断 ----
+
+    /**
+     * 使用当前对话模型判断用户指令是否已完成，未完成则生成下一步指令。
+     *
+     * 走独立模型调用，不写入对话历史。
+     */
+    suspend fun judgeStewardCompletion(
+        conversationId: Uuid,
+        anchorInstruction: String,
+        lastAssistantReport: String,
+    ): StewardJudgement = withContext(Dispatchers.IO) {
+        val settings = settingsStore.settingsFlow.first()
+        val model = settings.getCurrentChatModel()
+            ?: settings.findModelById(null, fallback = settings.fastModelId)
+            ?: throw IllegalStateException("No chat model available")
+        val provider = model.findProvider(settings.providers)
+            ?: throw IllegalStateException("No provider available for chat model")
+        val providerHandler = providerManager.getProviderByType(provider)
+        val result = providerHandler.generateText(
+            providerSetting = provider,
+            messages = listOf(
+                UIMessage.user(
+                    stewardJudgePrompt(
+                        anchorInstruction,
+                        lastAssistantReport,
+                        DEFAULT_STEWARD_PROMPT,
+                    )
+                ),
+            ),
+            params = backgroundTextGenerationParams(model, reasoningLevel = ReasoningLevel.OFF),
+        )
+        parseStewardJudgement(result.message.toText())
     }
 
     // ---- 压缩对话历史 ----
@@ -1226,6 +1246,27 @@ class ChatService(
                     updateAt = Instant.now()
                 )
             )
+        }
+    }
+
+    /**
+     * 重连前封口流式中断留下的半截 assistant 消息的推理部分（reasoning），
+     * 但保留消息本身与已生成的文本内容；重连后 StreamChunkHandler 会继续在这条消息上追加。
+     * 相比 rollback 直接丢弃整条消息，这里只封口 reasoning，避免用户已看到的内容被撤回后从头重新生成。
+     */
+    private suspend fun sealIncompleteAssistantMessage(conversationId: Uuid) {
+        val conversation = getConversationFlow(conversationId).value
+        val last = conversation.currentMessages.lastOrNull()
+        if (last?.role == MessageRole.ASSISTANT && last.finishedAt == null && conversation.messageNodes.isNotEmpty()) {
+            val sealed = last.finishReasoning()
+            if (sealed != last) {
+                updateConversation(
+                    conversationId,
+                    conversation.updateCurrentMessages(
+                        conversation.currentMessages.dropLast(1) + sealed
+                    )
+                )
+            }
         }
     }
 
@@ -1630,52 +1671,18 @@ private fun List<UIMessage>.latestUserText(): String {
 }
 
 /**
- * 是否可重试错误。
+ * 是否应立即重连。
  *
- * 触发重连的条件（任一命中）：
- * 1. 异常链中存在 IOException（网络中断/超时等传输层错误）；
- * 2. 异常链中存在携带 HTTP 状态码的 HttpException（statusCode 非空），
- *    且状态码属于可重试集合；
- * 3. 异常消息文本包含可识别的 HTTP 状态码（兜底：协议回退等未携带
- *    statusCode 的异常，如 "Failed to get response: 503 ..."）。
+ * 用户要求：信息一截断或出现任何问题时立即重连，不管错误类型。
+ * 因此除用户主动取消（CancellationException）外，任何异常都触发重连，
+ * 不再需要按错误类型/HTTP 状态码分类判断。
  */
-internal fun isRetriableNetworkError(error: Throwable?): Boolean {
-    if (error is CancellationException) return false
+internal fun shouldReconnect(error: Throwable?): Boolean {
+    if (error == null) return false
     var cause: Throwable? = error
     while (cause != null) {
-        if (cause is java.io.IOException) return true
-        val code = extractHttpStatusCode(cause)
-        if (code != null && code in RETRIABLE_HTTP_STATUS_CODES) return true
+        if (cause is CancellationException) return false
         cause = cause.cause
     }
-    return false
-}
-
-/** 可重试的 HTTP 状态码：5xx 服务端错误 + 429 限流 + 可恢复的 4xx */
-internal val RETRIABLE_HTTP_STATUS_CODES = setOf(
-    400, 401, 403, 404, 405, 408, 409, 425, 429,
-    500, 501, 502, 503, 504, 505, 507, 508, 529,
-)
-
-/**
- * 从异常链节点提取 HTTP 状态码：
- * 1. HttpException.statusCode 字段（优先，可靠）；
- * 2. 消息文本匹配 "HTTP xxx" / "(xxx)" / "code xxx" 等模式（兜底）。
- */
-internal fun extractHttpStatusCode(error: Throwable): Int? {
-    if (error is HttpException && error.statusCode != null) {
-        return error.statusCode
-    }
-    val message = error.message ?: return null
-    val regexes = listOf(
-        Regex("""HTTP\s*(\d{3})""", RegexOption.IGNORE_CASE),
-        Regex("""code\s*[=:]\s*(\d{3})""", RegexOption.IGNORE_CASE),
-        Regex("""[(\[](\d{3})\s*(Server\s*Error|Bad\s*Gateway|Too\s*Many\s*Requests)""", RegexOption.IGNORE_CASE),
-    )
-    for (regex in regexes) {
-        regex.find(message)?.let { match ->
-            match.groupValues[1].toIntOrNull()?.let { return it }
-        }
-    }
-    return null
+    return true
 }

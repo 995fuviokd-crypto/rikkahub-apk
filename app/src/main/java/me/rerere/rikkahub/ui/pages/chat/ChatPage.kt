@@ -292,6 +292,9 @@ private fun ChatPageContent(
     val assistant = setting.getCurrentAssistant()
     var showFilesSheet by remember { mutableStateOf(false) }
 
+    val stewardModeState by vm.stewardModeState.collectAsStateWithLifecycle()
+    val stewardMaxLoops by vm.stewardMaxLoops.collectAsStateWithLifecycle()
+
     val completionProviders = remember(assistant.workspaceId, conversation.workspaceCwd, workspaceRepository) {
         assistant.workspaceId?.let { workspaceId ->
             listOf(
@@ -429,14 +432,10 @@ private fun ChatPageContent(
                     onMoreClick = {
                         showFilesSheet = true
                     },
-                    stewardModeState = vm.stewardModeState.collectAsStateWithLifecycle().value,
-                    stewardMaxLoops = vm.stewardMaxLoops.collectAsStateWithLifecycle().value,
-                    onToggleStewardMode = {
-                        vm.toggleStewardMode()
-                    },
-                    onStewardMaxLoopsChange = {
-                        vm.setStewardMaxLoops(it)
-                    },
+                    stewardModeState = stewardModeState,
+                    stewardMaxLoops = stewardMaxLoops,
+                    onToggleStewardMode = { vm.toggleStewardMode() },
+                    onStewardMaxLoopsChange = { vm.setStewardMaxLoops(it) },
                 )
             },
             containerColor = Color.Transparent,

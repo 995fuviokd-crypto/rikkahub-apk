@@ -108,12 +108,12 @@ import me.rerere.rikkahub.ui.components.ui.KeepScreenOn
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionRecordAudio
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
-import me.rerere.rikkahub.ui.pages.chat.StewardModeController
-import me.rerere.rikkahub.ui.pages.chat.StewardModeState
 import me.rerere.rikkahub.ui.context.LocalASRState
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.ChatInputState
+import me.rerere.rikkahub.ui.pages.chat.StewardModeController
+import me.rerere.rikkahub.ui.pages.chat.StewardModeState
 import me.rerere.rikkahub.utils.SoundEffectPlayer
 import org.koin.compose.koinInject
 import kotlin.time.Duration.Companion.seconds
@@ -306,7 +306,7 @@ fun ChatInput(
                                 )
                             }
 
-                            // 智能托管模式
+                            // Steward Mode（智能托管）
                             if (stewardModeState != null) {
                                 StewardModeButton(
                                     enabled = stewardModeState.enabled,

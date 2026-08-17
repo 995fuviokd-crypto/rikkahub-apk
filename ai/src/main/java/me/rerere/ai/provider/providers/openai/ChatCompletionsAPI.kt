@@ -69,6 +69,7 @@ import okhttp3.Response
 import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
+import java.io.IOException
 import kotlin.time.Clock
 
 private const val TAG = "ChatCompletionsAPI"
@@ -239,6 +240,11 @@ class ChatCompletionsAPI(
 
                 override fun onClosed(eventSource: EventSource) {
                     if (myGeneration != generation) return
+                    // 流在 [DONE] 前被关闭视为截断，抛错以触发上层重连
+                    if (!decoder.isFinished) {
+                        close(IOException("Stream truncated before [DONE]"))
+                        return
+                    }
                     sendChunks(decoder.onClosed())
                     close()
                 }

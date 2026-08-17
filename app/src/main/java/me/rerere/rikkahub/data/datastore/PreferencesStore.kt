@@ -26,11 +26,9 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.AppScope
-import me.rerere.rikkahub.data.ai.AnchorBudgetLadder
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
-import me.rerere.rikkahub.data.ai.prompts.DEFAULT_STEWARD_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
@@ -166,13 +164,7 @@ class SettingsStore(
         // 赞助提醒
         val SPONSOR_ALERT_DISMISSED_AT = intPreferencesKey("sponsor_alert_dismissed_at")
 
-        // 智能管家模式 + 屏幕分辨率覆盖
-        val SMART_STEWARD_MODE_ENABLED = booleanPreferencesKey("smart_steward_mode_enabled")
-        val STEWARD_MODEL = stringPreferencesKey("steward_model")
-        val STEWARD_PROMPT = stringPreferencesKey("steward_prompt")
-        val ANCHOR_BUDGET_BASE = intPreferencesKey("anchor_budget_base")
-        val ANCHOR_BUDGET_STEP = intPreferencesKey("anchor_budget_step")
-        val ANCHOR_WARMUP_ROUNDS = intPreferencesKey("anchor_warmup_rounds")
+        // 屏幕分辨率覆盖
         val SCREEN_RESOLUTION_OVERRIDE_ENABLED = booleanPreferencesKey("screen_resolution_override_enabled")
         val SCREEN_RESOLUTION_OVERRIDE_WIDTH = intPreferencesKey("screen_resolution_override_width")
         val SCREEN_RESOLUTION_OVERRIDE_HEIGHT = intPreferencesKey("screen_resolution_override_height")
@@ -281,13 +273,6 @@ class SettingsStore(
                 } ?: BackupReminderConfig(),
                 launchCount = preferences[LAUNCH_COUNT] ?: 0,
                 sponsorAlertDismissedAt = preferences[SPONSOR_ALERT_DISMISSED_AT] ?: 0,
-                // 极简锚定默认开启：键缺失时回退 true（老用户升级后同样默认生效）
-                smartStewardModeEnabled = preferences[SMART_STEWARD_MODE_ENABLED] != false,
-                stewardModelId = preferences[STEWARD_MODEL]?.let { Uuid.parse(it) },
-                stewardPrompt = preferences[STEWARD_PROMPT] ?: DEFAULT_STEWARD_PROMPT,
-                anchorBudgetBase = preferences[ANCHOR_BUDGET_BASE] ?: AnchorBudgetLadder.DEFAULT_BASE,
-                anchorBudgetStep = preferences[ANCHOR_BUDGET_STEP] ?: AnchorBudgetLadder.DEFAULT_STEP,
-                anchorWarmupRounds = preferences[ANCHOR_WARMUP_ROUNDS] ?: AnchorBudgetLadder.DEFAULT_WARMUP_ROUNDS,
                 screenResolutionOverrideEnabled = preferences[SCREEN_RESOLUTION_OVERRIDE_ENABLED] == true,
                 screenResolutionOverrideWidth = preferences[SCREEN_RESOLUTION_OVERRIDE_WIDTH] ?: 0,
                 screenResolutionOverrideHeight = preferences[SCREEN_RESOLUTION_OVERRIDE_HEIGHT] ?: 0,
@@ -478,14 +463,6 @@ class SettingsStore(
             preferences[BACKUP_REMINDER_CONFIG] = JsonInstant.encodeToString(settings.backupReminderConfig)
             preferences[LAUNCH_COUNT] = settings.launchCount
             preferences[SPONSOR_ALERT_DISMISSED_AT] = settings.sponsorAlertDismissedAt
-            preferences[SMART_STEWARD_MODE_ENABLED] = settings.smartStewardModeEnabled
-            settings.stewardModelId?.let {
-                preferences[STEWARD_MODEL] = it.toString()
-            } ?: preferences.remove(STEWARD_MODEL)
-            preferences[STEWARD_PROMPT] = settings.stewardPrompt
-            preferences[ANCHOR_BUDGET_BASE] = settings.anchorBudgetBase
-            preferences[ANCHOR_BUDGET_STEP] = settings.anchorBudgetStep
-            preferences[ANCHOR_WARMUP_ROUNDS] = settings.anchorWarmupRounds
             preferences[SCREEN_RESOLUTION_OVERRIDE_ENABLED] = settings.screenResolutionOverrideEnabled
             preferences[SCREEN_RESOLUTION_OVERRIDE_WIDTH] = settings.screenResolutionOverrideWidth
             preferences[SCREEN_RESOLUTION_OVERRIDE_HEIGHT] = settings.screenResolutionOverrideHeight
@@ -653,17 +630,6 @@ data class Settings(
     val autoReconnectMaxRetries: Int = 3,
     // 多线路并发：请求自动探测同名模型的多条 provider 线路，并发竞速 + 故障转移
     val multiRouteConcurrent: Boolean = false,
-    // 智能管家模式：任务感知思维模式路由 + 首轮工具锚定的全局总开关
-    // 默认开启：结合 dsh-anchored-standard 的 dual-anchor 思路，
-    // 极简锚定（首轮窄工具面 + 预算阶梯）默认生效，DeepSeek 通过 Linux 发挥原生性能
-    val smartStewardModeEnabled: Boolean = true,
-    // 托管模式专用模型与提示词；模型为空时回退到当前对话模型
-    val stewardModelId: Uuid? = null,
-    val stewardPrompt: String = DEFAULT_STEWARD_PROMPT,
-    // 锚定预算阶梯参数（warmup 轮次内逐轮递增的输出预算）
-    val anchorBudgetBase: Int = AnchorBudgetLadder.DEFAULT_BASE,
-    val anchorBudgetStep: Int = AnchorBudgetLadder.DEFAULT_STEP,
-    val anchorWarmupRounds: Int = AnchorBudgetLadder.DEFAULT_WARMUP_ROUNDS,
     // 屏幕分辨率覆盖：伪造 RikkaHub 读取到的设备屏幕宽高（px），0 表示不启用
     val screenResolutionOverrideEnabled: Boolean = false,
     val screenResolutionOverrideWidth: Int = 0,

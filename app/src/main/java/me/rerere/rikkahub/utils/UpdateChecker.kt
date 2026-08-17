@@ -25,6 +25,9 @@ import okhttp3.Request
 private const val API_URL = "https://api.github.com/repos/995fuviokd-crypto/rikkahub-apk/releases/latest"
 private const val ASSET_NAME_PREFIX = "RikkaHub-"
 
+// gh-proxy 加速前缀：弱网环境代理 GitHub 下载，提升更新包下载速度
+private const val GH_PROXY_PREFIX = "https://v6.gh-proxy.org/"
+
 class UpdateChecker(private val client: OkHttpClient) {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -99,7 +102,8 @@ class UpdateChecker(private val client: OkHttpClient) {
             val obj = asset.jsonObject
             val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
             if (!name.startsWith(ASSET_NAME_PREFIX)) return@mapNotNull null
-            val url = obj["browser_download_url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val rawUrl = obj["browser_download_url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val url = GH_PROXY_PREFIX + rawUrl
             val size = obj["size"]?.jsonPrimitive?.contentOrNull ?: ""
             UpdateDownload(
                 name = name,

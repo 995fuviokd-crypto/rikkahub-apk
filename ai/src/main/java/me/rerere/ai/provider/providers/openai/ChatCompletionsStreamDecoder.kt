@@ -36,6 +36,9 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
     private var finishReason: String? = null
     private var finished = false
 
+    /** 是否已收到 [DONE]（流未截断）。供传输层在 onClosed 时判断是否为异常截断。 */
+    val isFinished: Boolean get() = finished
+
     override fun accept(event: SseEvent): DecodeResult {
         if (finished) return DecodeResult(completed = true)
         if (event.data == "[DONE]") return DecodeResult(finish(), completed = true)

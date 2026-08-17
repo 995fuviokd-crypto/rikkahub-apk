@@ -38,6 +38,7 @@ import me.rerere.rikkahub.data.sync.webdav.WebDavSync
 import me.rerere.search.SearchService
 import me.rerere.rikkahub.data.sync.S3Sync
 import okhttp3.ConnectionPool
+import okhttp3.Dispatcher
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -188,13 +189,19 @@ val dataSourceModule = module {
         val acceptLang = AcceptLanguageBuilder.fromAndroid(get())
             .build()
         OkHttpClient.Builder()
-            .connectTimeout(20, TimeUnit.SECONDS)
+            .connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(10, TimeUnit.MINUTES)
             .writeTimeout(120, TimeUnit.SECONDS)
             .followSslRedirects(true)
             .followRedirects(true)
             .retryOnConnectionFailure(true)
-            .connectionPool(ConnectionPool(20, 5, TimeUnit.MINUTES))
+            .connectionPool(ConnectionPool(32, 5, TimeUnit.MINUTES))
+            .dispatcher(
+                Dispatcher().apply {
+                    maxRequests = 64
+                    maxRequestsPerHost = 32
+                }
+            )
             .addInterceptor { chain ->
                 val originalRequest = chain.request()
                 val requestBuilder = originalRequest.newBuilder()
@@ -252,7 +259,7 @@ val dataSourceModule = module {
         HttpClient(OkHttp) {
             engine {
                 config {
-                    connectTimeout(20, TimeUnit.SECONDS)
+                    connectTimeout(5, TimeUnit.SECONDS)
                     readTimeout(10, TimeUnit.MINUTES)
                     writeTimeout(120, TimeUnit.SECONDS)
                     followSslRedirects(true)

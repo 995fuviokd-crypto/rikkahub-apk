@@ -84,18 +84,6 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                     modifier = Modifier.padding(horizontal = 8.dp),
                 ) {
                     item(
-                        headlineContent = { Text(stringResource(R.string.setting_display_page_smart_steward_mode_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_display_page_smart_steward_mode_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = settings.smartStewardModeEnabled,
-                                onCheckedChange = {
-                                    vm.updateSettings(settings.copy(smartStewardModeEnabled = it))
-                                }
-                            )
-                        },
-                    )
-                    item(
                         headlineContent = { Text(stringResource(R.string.setting_page_multi_route_concurrent_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_page_multi_route_concurrent_desc)) },
                         trailingContent = {

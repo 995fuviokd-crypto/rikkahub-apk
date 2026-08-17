@@ -205,16 +205,6 @@ private fun ModelSettingsPage(settings: Settings, vm: SettingVM, contentPadding:
                 onClear = { vm.updateSettings(settings.copy(selfHostedModelId = null)) },
             )
         }
-        item {
-            ModelSettingItem(
-                title = stringResource(R.string.setting_model_page_steward_model),
-                description = stringResource(R.string.setting_model_page_steward_model_desc),
-                modelId = settings.stewardModelId,
-                providers = settings.providers,
-                onSelect = { vm.updateSettings(settings.copy(stewardModelId = it.id)) },
-                onClear = { vm.updateSettings(settings.copy(stewardModelId = null)) },
-            )
-        }
     }
 }
 

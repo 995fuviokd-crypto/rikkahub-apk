@@ -23,6 +23,9 @@ import me.rerere.common.http.jsonObjectOrNull
 internal class ResponseApiStreamDecoder : StreamChunkDecoder {
     private val state = ResponseStreamState()
 
+    /** 是否已收到终止事件（response.completed/incomplete 或 [DONE]），即流未截断。 */
+    val isFinished: Boolean get() = state.finished
+
     override fun accept(event: SseEvent): DecodeResult {
         if (state.finished) return DecodeResult(completed = true)
         if (event.data == "[DONE]") return DecodeResult(state.finish(), completed = true)

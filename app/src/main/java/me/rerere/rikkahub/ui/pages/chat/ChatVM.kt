@@ -16,6 +16,7 @@ import com.google.firebase.analytics.FirebaseAnalytics
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
@@ -85,7 +86,7 @@ class ChatVM(
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     // 智能托管模式
-    val stewardModeController = StewardModeController(
+    private val stewardModeController = StewardModeController(
         judgeCompletion = { anchorInstruction, lastAssistantReport ->
             chatService.judgeStewardCompletion(_conversationId, anchorInstruction, lastAssistantReport)
         },
@@ -225,6 +226,15 @@ class ChatVM(
         chatService.sendMessage(_conversationId, content, answer)
     }
 
+    fun handleMessageEdit(parts: List<UIMessagePart>, messageId: Uuid) {
+        if (parts.isEmptyInputMessage()) return
+        analytics.logEvent("ai_edit_message", null)
+
+        viewModelScope.launch {
+            chatService.editMessage(_conversationId, messageId, parts)
+        }
+    }
+
     // ---- 智能托管模式 ----
 
     fun toggleStewardMode() {
@@ -254,15 +264,6 @@ class ChatVM(
 
     fun setStewardMaxLoops(value: Int) {
         stewardModeController.setMaxLoops(value)
-    }
-
-    fun handleMessageEdit(parts: List<UIMessagePart>, messageId: Uuid) {
-        if (parts.isEmptyInputMessage()) return
-        analytics.logEvent("ai_edit_message", null)
-
-        viewModelScope.launch {
-            chatService.editMessage(_conversationId, messageId, parts)
-        }
     }
 
     suspend fun forkMessage(message: UIMessage): Conversation {
@@ -411,12 +412,9 @@ class ChatVM(
             }
         }
     }
-
 }
 
-/**
- * 取会话最后一条用户指令文本，作为托管模式的锚定指令。
- */
+/** 取会话最后一条用户指令文本，作为托管模式的锚定指令。 */
 private fun Conversation.lastUserInstruction(): String? {
     return currentMessages
         .lastOrNull { it.role == MessageRole.USER }
@@ -424,3 +422,5 @@ private fun Conversation.lastUserInstruction(): String? {
         ?.trim()
         ?.takeIf { it.isNotBlank() }
 }
+
+

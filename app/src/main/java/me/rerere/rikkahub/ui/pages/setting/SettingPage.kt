@@ -474,17 +474,12 @@ private fun NewFeaturesCard(navController: Navigator) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     val entries = remember {
         listOf(
-            NewFeatureEntry(R.string.setting_display_page_smart_steward_mode_title, Screen.SettingPreferences),
             NewFeatureEntry(R.string.setting_page_multi_route_concurrent_title, Screen.SettingPreferences),
             NewFeatureEntry(R.string.setting_display_page_screen_resolution_override_title, Screen.SettingPreferences),
             NewFeatureEntry(R.string.setting_page_background_keep_alive, Screen.SettingPreferences),
             NewFeatureEntry(R.string.setting_page_ignore_battery_optimizations_title, Screen.SettingPreferences),
             NewFeatureEntry(R.string.workspace_detail_android_local_access, Screen.Workspaces),
             NewFeatureEntry(R.string.workspace_detail_all_files_access, Screen.Workspaces),
-            NewFeatureEntry(R.string.assistant_page_smart_mode_router, Screen.Assistant),
-            NewFeatureEntry(R.string.assistant_page_smart_tool_anchor, Screen.Assistant),
-            NewFeatureEntry(R.string.assistant_page_smart_cap_ladder, Screen.Assistant),
-            NewFeatureEntry(R.string.assistant_page_smart_tool_playbook, Screen.Assistant),
         )
     }
     CardGroup(

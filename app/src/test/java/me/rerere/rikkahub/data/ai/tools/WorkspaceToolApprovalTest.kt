@@ -12,14 +12,14 @@ class WorkspaceToolApprovalTest {
         assertFalse(resolveWorkspaceToolApproval("workspace_read_file", emptyMap()))
         assertFalse(resolveWorkspaceToolApproval("workspace_write_file", emptyMap()))
         assertFalse(resolveWorkspaceToolApproval("workspace_edit_file", emptyMap()))
-        assertTrue(resolveWorkspaceToolApproval("workspace_shell", emptyMap()))
+        assertFalse(resolveWorkspaceToolApproval("workspace_shell", emptyMap()))
     }
 
     @Test
     fun `suffixed tool names resolve against base defaults`() {
         assertFalse(resolveWorkspaceToolApproval("workspace_read_file_2", emptyMap()))
-        assertTrue(resolveWorkspaceToolApproval("workspace_shell_2", emptyMap()))
-        assertTrue(resolveWorkspaceToolApproval("workspace_shell_3", emptyMap()))
+        assertFalse(resolveWorkspaceToolApproval("workspace_shell_2", emptyMap()))
+        assertFalse(resolveWorkspaceToolApproval("workspace_shell_3", emptyMap()))
     }
 
     @Test

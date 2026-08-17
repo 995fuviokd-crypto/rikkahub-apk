@@ -130,7 +130,6 @@ private fun StewardModeSheet(
                 )
             }
 
-            // 循环轮数上限调节（开启按钮下方）
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp),

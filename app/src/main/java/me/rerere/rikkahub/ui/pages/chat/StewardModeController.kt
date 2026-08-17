@@ -27,7 +27,7 @@ data class StewardModeState(
 /**
  * 智能托管模式状态机。
  *
- * 会话级内存状态，不落库。开启时固定锚定用户原始指令，AI 空闲时自动判断任务是否完成，
+ * 会话级内存状态，不落库。开启时锚定用户原始指令，AI 空闲时自动判断任务是否完成，
  * 未完成则由当前模型生成下一步指令并自动发送，直到完成或达到循环轮数上限。
  *
  * 依赖以函数注入，便于单元测试。
@@ -48,9 +48,7 @@ class StewardModeController(
         _maxLoops.value = value.coerceIn(MIN_MAX_LOOPS, MAX_MAX_LOOPS)
     }
 
-    /**
-     * 开启托管模式，锚定用户原始指令。
-     */
+    /** 开启托管模式，锚定用户原始指令。 */
     fun enable(anchorInstruction: String) {
         if (anchorInstruction.isBlank()) return
         this.anchorInstruction = anchorInstruction
@@ -62,9 +60,7 @@ class StewardModeController(
         )
     }
 
-    /**
-     * 关闭托管模式。幂等。
-     */
+    /** 关闭托管模式。幂等。 */
     fun disable(status: StewardModeStatus = StewardModeStatus.Idle) {
         anchorInstruction = null
         _state.value = StewardModeState(status = status)
@@ -79,7 +75,6 @@ class StewardModeController(
         val current = _state.value
         if (!current.enabled || current.checking) return
 
-        // 达到循环上限，关闭托管模式
         if (current.loopCount >= _maxLoops.value) {
             disable(StewardModeStatus.Stopped)
             return
@@ -106,11 +101,9 @@ class StewardModeController(
                 return
             }
 
-            // 自动发送下一步指令
             sendMessage(nextInstruction)
             val newLoopCount = _state.value.loopCount + 1
             if (newLoopCount >= _maxLoops.value) {
-                // 已达循环上限，发送本轮后关闭托管模式
                 _state.value = StewardModeState(
                     loopCount = newLoopCount,
                     status = StewardModeStatus.Stopped,
@@ -136,9 +129,7 @@ class StewardModeController(
     }
 }
 
-/**
- * 取会话最后一条助手回复文本，作为判断依据。
- */
+/** 取会话最后一条助手回复文本，作为判断依据。 */
 private fun Conversation.lastAssistantReport(): String {
     return currentMessages
         .lastOrNull { it.role == MessageRole.ASSISTANT }

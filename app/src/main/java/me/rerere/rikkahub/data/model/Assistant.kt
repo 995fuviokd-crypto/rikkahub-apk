@@ -54,24 +54,9 @@ data class Assistant(
     val allowConversationSystemPrompt: Boolean = false, // 允许对话单独重写 system prompt
     val allowConversationPromptInjection: Boolean = false, // 允许对话单独绑定提示词注入
 
-    // 任务感知思维模式路由（借鉴 dsh-router-standard：spec 规划型 / react 执行型 / weak 弱引导）
-    val smartModeRouter: Boolean = false,               // 路由开关（默认关闭）
-    val routerModeOverride: RouterMode = RouterMode.AUTO, // 路由模式覆盖（AUTO = 按任务自动分类）
-    // 首轮工具锚定（借鉴 dsh-anchored-standard：首轮只暴露核心工具，首次工具调用后恢复全部）
-    // 默认开启：极简锚定默认生效，DeepSeek 家族默认保留 workspace_shell（Linux 执行能力）
-    val smartToolAnchor: Boolean = true,               // 锚定开关（默认开启）
-    val anchorCoreToolNames: List<String> = emptyList(), // 首轮保留的核心工具名（空 = 自动取第一个）
-    // 锚定预算阶梯（与首轮工具锚定合成"双约束首轮锚定"：输出预算绳 + 工具 schema 绳）
-    // warmup 轮次内逐轮递增输出预算，让模型反复经历"极简思维 + 调工具"，延伸成会话风格惯性
-    // 默认开启：与 smartToolAnchor 组成完整的双约束首轮锚定，开箱即用
-    val smartAnchorCapLadder: Boolean = true,           // 预算阶梯开关（默认开启）
-    // 晋升后工具守则（借鉴 dsh-win-fable-report：首个工具调用后一次性注入 workspace
-    // 工具调用守则 + 关键节点及时汇报，每会话仅一次）
-    val smartToolPlaybook: Boolean = false,             // 守则注入开关（默认关闭）
-    // J-Space 认知控制（借鉴 J-Space Cognition Suite V3.6：模型不可知的推理时认知控制层）
-    // 提炼三寄存器/Dense Track/门控/经验验证核心协议为紧凑引导，对全部模型生效，
-    // 默认开启：智能管家模式下所有模型获得统一的推理时认知控制
-    val smartJSpace: Boolean = true,                   // J-Space 开关（默认开启，支持所有模型）
+    // DeepSeek V4 条件复刻锚定（借鉴 noone89 + dcws：极简工具 + Beyond 档提示词 + 预热）
+    // 默认开启：仅对 DeepSeek 家族模型生效，复刻训练条件以稳定 "We need" 协作口吻
+    val deepSeekAnchorEnabled: Boolean = true,
 ) {
     /**
      * 生效的工作区集合：优先多选字段（workspaceIds），
@@ -80,29 +65,6 @@ data class Assistant(
      */
     val effectiveWorkspaceIds: Set<Uuid>
         get() = if (workspaceIds.isNotEmpty()) workspaceIds else workspaceId?.let { setOf(it) }.orEmpty()
-}
-
-/**
- * 任务感知思维模式路由模式
- *
- * - AUTO：根据任务文本自动分类为 spec / react / weak
- * - SPEC：强制规划型（先分析方案再执行）
- * - REACT：强制执行型（直接动手）
- * - WEAK：弱引导（把分类交给模型自己）
- */
-@Serializable
-enum class RouterMode {
-    @SerialName("auto")
-    AUTO,
-
-    @SerialName("spec")
-    SPEC,
-
-    @SerialName("react")
-    REACT,
-
-    @SerialName("weak")
-    WEAK,
 }
 
 @Serializable
