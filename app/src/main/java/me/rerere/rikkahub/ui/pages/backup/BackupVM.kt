@@ -3,7 +3,9 @@ package me.rerere.rikkahub.ui.pages.backup
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -143,7 +145,7 @@ class BackupVM(
         )
     }
 
-    fun restoreFromCherryStudio(file: File) {
+    suspend fun restoreFromCherryStudio(file: File) = withContext(Dispatchers.IO) {
         val importProviders = CherryStudioProviderImporter.importProviders(file)
 
         if (importProviders.isEmpty()) {
@@ -152,7 +154,7 @@ class BackupVM(
 
         Log.i(TAG, "restoreFromCherryStudio: import ${importProviders.size} providers: $importProviders")
 
-        updateSettings(
+        settingsStore.update(
             settings.value.copy(
                 providers = importProviders + settings.value.providers,
             )

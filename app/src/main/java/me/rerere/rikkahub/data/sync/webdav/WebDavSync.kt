@@ -12,6 +12,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.WebDavConfig
 import me.rerere.rikkahub.data.datastore.migration.SettingsJsonMigrator
+import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.utils.fileSizeToString
 import java.io.File
 import java.io.FileInputStream
@@ -30,6 +31,7 @@ class WebDavSync(
     private val json: Json,
     private val context: Context,
     private val httpClient: HttpClient,
+    private val appDatabase: AppDatabase,
 ) {
     private fun getClient(config: WebDavConfig): WebDavClient {
         return WebDavClient(config, httpClient)
@@ -149,6 +151,7 @@ class WebDavSync(
 
             // Backup database files
             if (config.items.contains(WebDavConfig.BackupItem.DATABASE)) {
+                checkpointDatabase()
                 val dbFile = context.getDatabasePath("rikka_hub")
                 if (dbFile.exists()) {
                     addFileToZip(zipOut, dbFile, "rikka_hub.db")
@@ -216,6 +219,8 @@ class WebDavSync(
     private suspend fun restoreFromBackupFile(backupFile: File, config: WebDavConfig) = withContext(Dispatchers.IO) {
         Log.i(TAG, "restoreFromBackupFile: Starting restore from ${backupFile.absolutePath}")
 
+        var databaseClosed = false
+
         ZipInputStream(FileInputStream(backupFile)).use { zipIn ->
             var entry: ZipEntry?
             while (zipIn.nextEntry.also { entry = it } != null) {
@@ -239,6 +244,11 @@ class WebDavSync(
 
                         "rikka_hub.db", "rikka_hub-wal", "rikka_hub-shm" -> {
                             if (config.items.contains(WebDavConfig.BackupItem.DATABASE)) {
+                                if (!databaseClosed) {
+                                    closeDatabase()
+                                    databaseClosed = true
+                                }
+
                                 val dbFile = when (zipEntry.name) {
                                     "rikka_hub.db" -> context.getDatabasePath("rikka_hub")
                                     "rikka_hub-wal" -> File(
@@ -393,6 +403,24 @@ class WebDavSync(
         } catch (e: Exception) {
             Log.e(TAG, "restoreFromBackupFile: Failed to restore skill file $entryName", e)
             throw Exception("Failed to restore skill file $entryName: ${e.message}")
+        }
+    }
+
+    private fun checkpointDatabase() {
+        try {
+            appDatabase.openHelper.writableDatabase.execSQL("PRAGMA wal_checkpoint(FULL)")
+            Log.i(TAG, "checkpointDatabase: WAL checkpoint completed")
+        } catch (e: Exception) {
+            Log.e(TAG, "checkpointDatabase: Failed to checkpoint database", e)
+        }
+    }
+
+    private fun closeDatabase() {
+        try {
+            appDatabase.close()
+            Log.i(TAG, "closeDatabase: Database closed")
+        } catch (e: Exception) {
+            Log.e(TAG, "closeDatabase: Failed to close database", e)
         }
     }
 
