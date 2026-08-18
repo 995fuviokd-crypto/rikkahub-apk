@@ -98,6 +98,8 @@ import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspacePage
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceDetailPage
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceFileEditorPage
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceTerminalPage
+import me.rerere.rikkahub.ui.pages.extensions.workflow.WorkflowListPage
+import me.rerere.rikkahub.ui.pages.extensions.workflow.WorkflowEditorPage
 import me.rerere.workspace.WorkspaceStorageArea
 import me.rerere.rikkahub.ui.pages.favorite.FavoritePage
 import me.rerere.rikkahub.ui.pages.history.HistoryPage
@@ -532,6 +534,14 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.Stats> {
                                 StatsPage()
                             }
+
+                            entry<Screen.Workflows> {
+                                WorkflowListPage()
+                            }
+
+                            entry<Screen.WorkflowEditor> { key ->
+                                WorkflowEditorPage(key.id)
+                            }
                         }
                     )
                     AnimatedVisibility(
@@ -724,4 +734,10 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object Stats : Screen
+
+    @Serializable
+    data object Workflows : Screen
+
+    @Serializable
+    data class WorkflowEditor(val id: String) : Screen
 }

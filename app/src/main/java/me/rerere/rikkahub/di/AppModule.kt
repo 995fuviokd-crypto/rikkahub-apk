@@ -9,6 +9,7 @@ import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.service.ChatNotificationManager
 import me.rerere.rikkahub.service.ChatService
+import me.rerere.rikkahub.data.ai.workflow.WorkflowRunner
 import me.rerere.rikkahub.service.FloatingActivityHub
 import me.rerere.rikkahub.utils.EmojiData
 import me.rerere.rikkahub.utils.EmojiUtils
@@ -96,6 +97,16 @@ val appModule = module {
             workspaceRepository = get(),
             folderRepository = get(),
             workspaceManager = get(),
+            workflowRepository = get(),
+            workflowRunner = get(),
+        )
+    }
+
+    single {
+        WorkflowRunner(
+            providerManager = get(),
+            settingsStore = get(),
+            httpClient = get(),
         )
     }
 

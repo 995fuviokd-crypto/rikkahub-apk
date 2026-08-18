@@ -17,6 +17,8 @@ import me.rerere.rikkahub.ui.pages.extensions.skills.SkillDetailVM
 import me.rerere.rikkahub.ui.pages.extensions.skills.SkillsVM
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceDetailVM
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceVM
+import me.rerere.rikkahub.ui.pages.extensions.workflow.WorkflowEditorVM
+import me.rerere.rikkahub.ui.pages.extensions.workflow.WorkflowListVM
 import me.rerere.rikkahub.ui.pages.setting.SettingVM
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerVM
 import me.rerere.rikkahub.ui.pages.translator.TranslatorVM
@@ -71,6 +73,14 @@ val viewModelModule = module {
         WorkspaceDetailVM(
             id = it.get(),
             repository = get(),
+        )
+    }
+    viewModelOf(::WorkflowListVM)
+    viewModel<WorkflowEditorVM> {
+        WorkflowEditorVM(
+            id = it.get(),
+            repository = get(),
+            runner = get(),
         )
     }
     viewModelOf(::FavoriteVM)
