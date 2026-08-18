@@ -1349,7 +1349,12 @@ class ChatService(
     private fun updateConversation(conversationId: Uuid, conversation: Conversation) {
         if (conversation.id != conversationId) return
         val session = getOrCreateSession(conversationId)
-        checkFilesDelete(conversation, session.state.value)
+        // 生成活跃期间跳过文件删除检查：conversation.files 是计算属性，每次访问都全量
+        // 遍历所有消息 parts 提取文件 URI。流式阶段每 delta 调用两次会重复扫描全量消息，
+        // 长对话下严重拖慢生成。生成只增改文本、不会删除含附件的消息，等生成结束再检查。
+        if (!session.isGenerating) {
+            checkFilesDelete(conversation, session.state.value)
+        }
         session.state.value = conversation
     }
 

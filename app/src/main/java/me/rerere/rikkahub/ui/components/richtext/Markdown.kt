@@ -128,9 +128,6 @@ private val CODE_BLOCK_REGEX = Regex("```[\\s\\S]*?```|`[^`\n]*`", RegexOption.D
 private val BREAK_LINE_REGEX = Regex("(?i)<br\\s*/?>")
 private val LATEX_BLOCK_LINE_BREAK_REGEX = Regex("""[ \t]*\r?\n[ \t]*""")
 
-// 流式生成期间，超过该字符数的消息降级为纯文本渲染，避免每个 delta 都全量解析 Markdown 导致卡顿
-private const val STREAMING_RENDER_TEXT_THRESHOLD = 4096
-
 // 预处理markdown内容
 private fun preProcess(content: String): String {
     // 先找出所有代码块的位置
@@ -242,10 +239,10 @@ fun MarkdownBlock(
     onClickCitation: (String) -> Unit = {},
     streaming: Boolean = false,
 ) {
-    // 流式生成期间，超长消息降级为纯文本渲染：长回复的 Markdown AST 解析是 O(n)，
-    // 每个 delta 都全量重新解析会随消息增长越来越慢，最终导致卡顿甚至 ANR。
-    // 生成结束（streaming=false）后恢复完整 Markdown 渲染。
-    if (streaming && content.length > STREAMING_RENDER_TEXT_THRESHOLD) {
+    // 流式生成期间统一降级为纯文本渲染：每次 delta 都触发 Markdown AST 全量解析与
+    // AST 树整体重组渲染，长消息卡顿明显。流式阶段用 Text 直接展示原文（O(n) 极轻量），
+    // 生成结束（streaming=false）后一次性解析并渲染完整 Markdown，最终效果不受影响。
+    if (streaming) {
         ProvideTextStyle(style) {
             Text(
                 text = content,

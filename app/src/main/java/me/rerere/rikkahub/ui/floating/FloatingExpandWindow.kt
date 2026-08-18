@@ -69,6 +69,8 @@ import me.rerere.rikkahub.service.FloatingActivityHub
 import me.rerere.rikkahub.service.FloatingActivityState
 import me.rerere.rikkahub.service.TerminalCommand
 import me.rerere.rikkahub.service.TodoItem
+import me.rerere.rikkahub.utils.STREAM_UI_THROTTLE_MS
+import me.rerere.rikkahub.utils.throttleLatest
 
 /**
  * 悬浮球展开窗口：一个可通过 WindowManager 显示在任意应用之上的 Compose 悬浮窗。
@@ -220,7 +222,9 @@ private fun ExpandWindowContent(
     onResize: (Int, Int) -> Unit,
 ) {
     val settings by settingsStore.settingsFlow.collectAsState()
-    val state by hub.state.collectAsState()
+    val state by hub.state
+        .throttleLatest(STREAM_UI_THROTTLE_MS)
+        .collectAsState(initial = hub.state.value)
 
     LaunchedEffect(settings.floatingBubbleExpandWidth, settings.floatingBubbleExpandHeight) {
         onResize(settings.floatingBubbleExpandWidth, settings.floatingBubbleExpandHeight)

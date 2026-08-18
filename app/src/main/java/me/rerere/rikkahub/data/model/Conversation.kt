@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.model
 
 import android.net.Uri
+import androidx.compose.runtime.Immutable
 import androidx.core.net.toUri
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -12,6 +13,8 @@ import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
 import java.time.Instant
 import kotlin.uuid.Uuid
 
+// 全部属性为 val 且每次更新都生成新实例（data class copy），满足 @Immutable 语义：
+// Compose 据此在流式更新时按引用相等跳过未变化的消息节点，避免每 delta 全量重组。
 @Serializable
 data class Conversation(
     val id: Uuid = Uuid.random(),
@@ -125,6 +128,7 @@ data class Conversation(
 }
 
 @Serializable
+@Immutable
 data class MessageNode(
     val id: Uuid = Uuid.random(),
     val messages: List<UIMessage>,

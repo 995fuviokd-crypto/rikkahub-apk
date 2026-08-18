@@ -317,13 +317,36 @@ private fun ChatListNormal(
                 key = { index, item -> item.id },
             ) { index, node ->
                 Column {
+                    // 流式性能：把 ChatMessage 的回调参数稳定为「只随 node.id 变化」的引用，
+                    // 配合 MessageNode 的 @Immutable，让历史消息（node 引用不变）在每 delta
+                    // 重组时整体跳过函数体，避免长对话下每 token 全量重建所有消息。
+                    val latestNode by rememberUpdatedState(node)
+                    val latestOnRegenerate by rememberUpdatedState(onRegenerate)
+                    val latestOnEdit by rememberUpdatedState(onEdit)
+                    val latestOnFork by rememberUpdatedState(onForkMessage)
+                    val latestOnDelete by rememberUpdatedState(onDelete)
+                    val latestOnUpdate by rememberUpdatedState(onUpdateMessage)
+                    val latestOnToggleFavorite by rememberUpdatedState(onToggleFavorite)
+                    val latestOnTranslate by rememberUpdatedState(onTranslate)
+                    val latestOnClearTranslation by rememberUpdatedState(onClearTranslation)
+                    val latestOnToolApproval by rememberUpdatedState(onToolApproval)
+                    val latestOnToolAnswer by rememberUpdatedState(onToolAnswer)
+                    val latestOnShare by rememberUpdatedState {
+                        selecting = true  // 使用 CoroutineScope 延迟状态更新
+                        selectedItems.clear()
+                        selectedItems.addAll(conversation.messageNodes.map { it.id }
+                            .subList(0, conversation.messageNodes.indexOf(node) + 1))
+                    }
+
                     ListSelectableItem(
                         key = node.id,
-                        onSelectChange = {
-                            if (!selectedItems.contains(node.id)) {
-                                selectedItems.add(node.id)
-                            } else {
-                                selectedItems.remove(node.id)
+                        onSelectChange = remember(node.id) {
+                            {
+                                if (selectedItems.contains(node.id)) {
+                                    selectedItems.remove(node.id)
+                                } else {
+                                    selectedItems.add(node.id)
+                                }
                             }
                         },
                         selectedKeys = selectedItems,
@@ -334,35 +357,24 @@ private fun ChatListNormal(
                             model = node.currentMessage.modelId?.let(modelById::get),
                             assistant = assistant,
                             loading = loading && index == lastMessageIndex,
-                            onRegenerate = {
-                                onRegenerate(node.currentMessage)
-                            },
-                            onEdit = {
-                                onEdit(node.currentMessage)
-                            },
-                            onFork = {
-                                onForkMessage(node.currentMessage)
-                            },
-                            onDelete = {
-                                onDelete(node.currentMessage)
-                            },
-                            onShare = {
-                                selecting = true  // 使用 CoroutineScope 延迟状态更新
-                                selectedItems.clear()
-                                selectedItems.addAll(conversation.messageNodes.map { it.id }
-                                    .subList(0, conversation.messageNodes.indexOf(node) + 1))
-                            },
-                            onUpdate = {
-                                onUpdateMessage(it)
-                            },
+                            onRegenerate = remember(node.id) { { latestOnRegenerate(latestNode.currentMessage) } },
+                            onEdit = remember(node.id) { { latestOnEdit(latestNode.currentMessage) } },
+                            onFork = remember(node.id) { { latestOnFork(latestNode.currentMessage) } },
+                            onDelete = remember(node.id) { { latestOnDelete(latestNode.currentMessage) } },
+                            onShare = remember(node.id) { { latestOnShare() } },
+                            onUpdate = remember(node.id) { { msg: MessageNode -> latestOnUpdate(msg) } },
                             isFavorite = node.isFavorite,
-                            onToggleFavorite = {
-                                onToggleFavorite?.invoke(node)
-                            },
-                            onTranslate = onTranslate,
-                            onClearTranslation = onClearTranslation,
-                            onToolApproval = onToolApproval,
-                            onToolAnswer = onToolAnswer,
+                            onToggleFavorite = remember(node.id) { { latestOnToggleFavorite?.invoke(latestNode) } },
+                            onTranslate = remember(node.id) { { message: UIMessage, locale: java.util.Locale ->
+                                latestOnTranslate?.invoke(message, locale)
+                            } },
+                            onClearTranslation = remember(node.id) { { message: UIMessage -> latestOnClearTranslation(message) } },
+                            onToolApproval = remember(node.id) { { toolCallId: String, approved: Boolean, reason: String ->
+                                latestOnToolApproval?.invoke(toolCallId, approved, reason)
+                            } },
+                            onToolAnswer = remember(node.id) { { toolCallId: String, answer: String ->
+                                latestOnToolAnswer?.invoke(toolCallId, answer)
+                            } },
                             lastMessage = index == lastMessageIndex,
                         )
                     }
