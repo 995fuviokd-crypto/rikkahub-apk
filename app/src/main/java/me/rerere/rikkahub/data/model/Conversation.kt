@@ -61,18 +61,24 @@ data class Conversation(
         var changed = false
 
         messages.forEachIndexed { index, message ->
-            val node = newNodes
-                .getOrElse(index) { message.toMessageNode() }
+            // 该 index 的节点是否已存在。快速短路只对既有节点生效：
+            // 对不存在的 index 新建节点时，节点内容就是 message 本身（同一对象恒相等），
+            // 若同样短路会导致新节点永不加入，流式生成的首条 assistant 消息永远无法显示。
+            val nodeExists = index < newNodes.size
+            val node = if (nodeExists) newNodes[index] else message.toMessageNode()
 
-            // 快速短路：消息已存在且内容未变化时直接跳过。流式 emit 携带完整历史，
-            // 只有末条消息在变化，避免为每条历史消息重复创建列表并复制节点导致卡顿
-            val existingIndex = node.messages.indexOfFirst { it.id == message.id }
-            if (existingIndex >= 0 && node.messages[existingIndex] == message) {
-                return@forEachIndexed
+            if (nodeExists) {
+                // 快速短路：消息已存在且内容未变化时直接跳过。流式 emit 携带完整历史，
+                // 只有末条消息在变化，避免为每条历史消息重复创建列表并复制节点导致卡顿
+                val existingIndex = node.messages.indexOfFirst { it.id == message.id }
+                if (existingIndex >= 0 && node.messages[existingIndex] == message) {
+                    return@forEachIndexed
+                }
             }
 
             val newMessages = node.messages.toMutableList()
             var newMessageIndex = node.selectIndex
+            val existingIndex = newMessages.indexOfFirst { it.id == message.id }
             if (existingIndex >= 0) {
                 newMessages[existingIndex] = message
             } else {
