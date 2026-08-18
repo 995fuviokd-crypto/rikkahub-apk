@@ -831,7 +831,10 @@ class ChatService(
                 reconnectAttempts++
                 if (reconnectAttempts <= settings.autoReconnectMaxRetries) {
                     Logging.log(TAG, "handleMessageComplete: generation interrupted (${failure?.javaClass?.simpleName}), reconnecting ($reconnectAttempts/${settings.autoReconnectMaxRetries})")
-                    sealIncompleteAssistantMessage(conversationId)
+                    // 丢弃流式中断留下的半截 assistant 消息，重连从干净的 user 消息重新生成：
+                    // 若保留半截 assistant 作为最后一条消息续跑（续写），部分 provider 对
+                    // "最后一条是 assistant"的续写请求会一直挂起不返回任何数据，表现为一直连接/加载、内容不输出。
+                    rollbackIncompleteAssistantMessage(conversationId)
                     // 立即重连：仅加极短延迟避免空转
                     delay(100L)
                     continue
@@ -1279,12 +1282,14 @@ class ChatService(
         }
     }
 
-    /** 判断是否为可重连的网络错误（连接断开、超时、DNS 失败等） */
-    /** 重连前移除流式中断留下的不完整 assistant 消息，避免把半截回复当历史 */
+    /**
+     * 重连前移除流式中断留下的不完整 assistant 消息，避免把半截回复当历史：
+     * 若保留半截 assistant 作为最后一条消息续跑（续写），部分 provider 对
+     * "最后一条是 assistant"的续写请求会一直挂起不返回任何数据，导致一直连接/加载。
+     */
     private suspend fun rollbackIncompleteAssistantMessage(conversationId: Uuid) {
         val conversation = getConversationFlow(conversationId).value
-        val last = conversation.currentMessages.lastOrNull()
-        if (last?.role == MessageRole.ASSISTANT && last.finishedAt == null && conversation.messageNodes.isNotEmpty()) {
+        if (shouldRollbackIncompleteAssistantMessage(conversation.currentMessages) && conversation.messageNodes.isNotEmpty()) {
             updateConversation(
                 conversationId,
                 conversation.copy(
@@ -1292,27 +1297,6 @@ class ChatService(
                     updateAt = Instant.now()
                 )
             )
-        }
-    }
-
-    /**
-     * 重连前封口流式中断留下的半截 assistant 消息的推理部分（reasoning），
-     * 但保留消息本身与已生成的文本内容；重连后 StreamChunkHandler 会继续在这条消息上追加。
-     * 相比 rollback 直接丢弃整条消息，这里只封口 reasoning，避免用户已看到的内容被撤回后从头重新生成。
-     */
-    private suspend fun sealIncompleteAssistantMessage(conversationId: Uuid) {
-        val conversation = getConversationFlow(conversationId).value
-        val last = conversation.currentMessages.lastOrNull()
-        if (last?.role == MessageRole.ASSISTANT && last.finishedAt == null && conversation.messageNodes.isNotEmpty()) {
-            val sealed = last.finishReasoning()
-            if (sealed != last) {
-                updateConversation(
-                    conversationId,
-                    conversation.updateCurrentMessages(
-                        conversation.currentMessages.dropLast(1) + sealed
-                    )
-                )
-            }
         }
     }
 
@@ -1979,4 +1963,16 @@ internal fun shouldReconnect(error: Throwable?): Boolean {
         cause = cause.cause
     }
     return true
+}
+
+/**
+ * 重连前是否应回滚最后一条半截 assistant 消息。
+ *
+ * 只要消息列表最后一条是尚未完成（[UIMessage.finishedAt] == null）的 assistant 消息，
+ * 就应回滚丢弃：保留它作为最后一条消息续跑（续写）会让部分 provider 的续写请求
+ * 一直挂起不返回数据，表现为一直连接/加载、内容不输出。
+ */
+internal fun shouldRollbackIncompleteAssistantMessage(messages: List<UIMessage>): Boolean {
+    val last = messages.lastOrNull() ?: return false
+    return last.role == MessageRole.ASSISTANT && last.finishedAt == null
 }
