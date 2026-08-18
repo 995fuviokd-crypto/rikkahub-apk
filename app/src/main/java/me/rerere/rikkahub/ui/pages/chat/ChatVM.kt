@@ -17,6 +17,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
@@ -40,6 +41,7 @@ import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.NodeFavoriteTarget
+import me.rerere.rikkahub.data.recall.RecallRecord
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FavoriteRepository
 import me.rerere.rikkahub.service.ChatError
@@ -158,6 +160,31 @@ class ChatVM(
 
     // MCP管理器
     val mcpManager = chatService.mcpManager
+
+    // 撤回/恢复状态
+    val recallHistory: StateFlow<List<RecallRecord>> = chatService
+        .getRecallHistoryFlow(_conversationId)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val canRedo: StateFlow<Boolean> = recallHistory.map { it.isNotEmpty() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    val canRecall: StateFlow<Boolean> = combine(conversation, conversationJob) { conv, job ->
+        job?.isActive != true && conv.messageNodes.isNotEmpty()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    fun recallMessage(onResult: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val ok = chatService.recallMessage(_conversationId)
+            onResult(ok)
+        }
+    }
+
+    fun redoMessage() {
+        viewModelScope.launch {
+            chatService.redoMessage(_conversationId)
+        }
+    }
 
     // 更新设置
     fun updateSettings(newSettings: Settings): Job {

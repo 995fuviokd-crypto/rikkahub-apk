@@ -84,6 +84,9 @@ class MemoryRepository(private val memoryDAO: MemoryDAO, private val database: A
         memoryOps.deleteMemory(id)
     }
 
+    suspend fun getMemoryById(id: Int): AssistantMemory? =
+        memoryDAO.getMemoryById(id)?.toModel()
+
     // ---- 新 API（scope-recall 记忆引擎） ----
 
     suspend fun storeMemory(

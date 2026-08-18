@@ -7,8 +7,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.recall.RecallRecord
+import me.rerere.rikkahub.data.recall.SideEffectLog
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.uuid.Uuid
 
@@ -29,6 +32,31 @@ class ConversationSession(
 
     // 处理状态（如 OCR 识别中）
     val processingStatus = MutableStateFlow<String?>(null)
+
+    // 撤回历史栈（会话级、内存态）：连续撤回 / 连续恢复
+    private val _recallHistory = MutableStateFlow<List<RecallRecord>>(emptyList())
+    val recallHistory: StateFlow<List<RecallRecord>> = _recallHistory.asStateFlow()
+
+    // nodeId -> 该 AI 回复产生的副作用 log（用于回滚）
+    val sideEffectLogs = mutableMapOf<Uuid, SideEffectLog>()
+
+    val canRedo: Boolean get() = _recallHistory.value.isNotEmpty()
+
+    fun pushRecallRecord(record: RecallRecord) {
+        _recallHistory.update { it + record }
+    }
+
+    fun popRecallRecord(): RecallRecord? {
+        val list = _recallHistory.value
+        if (list.isEmpty()) return null
+        val last = list.last()
+        _recallHistory.value = list.dropLast(1)
+        return last
+    }
+
+    fun clearRecallRecords() {
+        _recallHistory.value = emptyList()
+    }
 
     // 生成任务（内聚在 session 中）
     private val _generationJob = MutableStateFlow<Job?>(null)

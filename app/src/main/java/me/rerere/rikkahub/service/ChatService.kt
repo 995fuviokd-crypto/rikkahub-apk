@@ -88,16 +88,25 @@ import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
+import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.data.model.toMessageNode
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
+import me.rerere.rikkahub.data.recall.MemoryActionRecord
+import me.rerere.rikkahub.data.recall.RecallMode
+import me.rerere.rikkahub.data.recall.RecallRecord
+import me.rerere.rikkahub.data.recall.SideEffectLog
+import me.rerere.rikkahub.data.recall.SideEffectRecorder
+import me.rerere.rikkahub.data.recall.WorkspaceSnapshotManager
 import me.rerere.rikkahub.web.BadRequestException
 import me.rerere.rikkahub.web.NotFoundException
 import me.rerere.rikkahub.utils.TokenEstimate
 import me.rerere.rikkahub.utils.applyPlaceholders
+import me.rerere.rikkahub.utils.writeClipboardText
+import me.rerere.workspace.WorkspaceManager
 import me.rerere.workspace.WorkspaceShellStatus
 import java.time.Instant
 import java.util.Locale
@@ -106,6 +115,9 @@ import kotlin.uuid.Uuid
 
 private const val TAG = "ChatService"
 private const val MAX_AUTO_COMPRESS_TRIES = 3
+
+// 撤回标记 SYSTEM 消息的内容前缀，用于识别并清理重启后残留的撤回标记
+private const val RECALL_MARKER_PREFIX = "[撤回] "
 
 // 压缩摘要输出的 token 上限，避免压缩模型生成过长的总结
 private const val COMPRESS_MAX_OUTPUT_TOKENS = 2048
@@ -229,9 +241,15 @@ class ChatService(
     private val skillManager: SkillManager,
     private val workspaceRepository: WorkspaceRepository,
     private val folderRepository: FolderRepository,
+    private val workspaceManager: WorkspaceManager,
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
+
+    // 工作区文件快照管理（撤回副作用回滚依赖）
+    private val workspaceSnapshotManager by lazy {
+        WorkspaceSnapshotManager(context, workspaceManager)
+    }
 
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
@@ -344,6 +362,11 @@ class ChatService(
         return session.processingStatus
     }
 
+    fun getRecallHistoryFlow(conversationId: Uuid): StateFlow<List<RecallRecord>> {
+        val session = sessions[conversationId] ?: return MutableStateFlow(emptyList())
+        return session.recallHistory
+    }
+
     fun getConversationJobs(): Flow<Map<Uuid, Job?>> {
         return _sessionsVersion.flatMapLatest {
             val currentSessions = sessions.values.toList()
@@ -371,9 +394,10 @@ class ChatService(
             // 崩溃/中断恢复：数据库中未完成的 assistant 消息标记完成并写回，
             // 保留已生成内容而不是丢弃
             val restored = finalizeInterruptedAssistantMessages(conversation)
-            updateConversation(conversationId, restored)
-            if (restored.messageNodes != conversation.messageNodes) {
-                conversationRepo.updateConversation(restored)
+            val stripped = stripRecallMarkers(restored)
+            updateConversation(conversationId, stripped)
+            if (stripped.messageNodes != conversation.messageNodes) {
+                conversationRepo.updateConversation(stripped)
             }
             settingsStore.updateAssistant(conversation.assistantId)
         } else {
@@ -397,6 +421,9 @@ class ChatService(
         val session = getOrCreateSession(conversationId)
         val previousJob = session.getJob()
         previousJob?.cancel()
+
+        // 新的写操作使撤回历史失效，避免恢复与后续消息分叉
+        clearRecallHistory(conversationId)
 
         // 生成链整体在后台线程执行：流式 chunk 的 CPU 处理（消息重建、token 估算）
         // 不再占用主线程，多个对话的生成可并行推进，避免互相拖累 UI 响应。
@@ -461,6 +488,8 @@ class ChatService(
     ) {
         val session = getOrCreateSession(conversationId)
         session.getJob()?.cancel()
+
+        clearRecallHistory(conversationId)
 
         val job = appScope.launch(Dispatchers.Default) {
             try {
@@ -580,6 +609,13 @@ class ChatService(
         var reconnectAttempts = 0
         // 生成中自动压缩的 token 估算节流：跨重连/压缩循环保留上次估算时间
         var lastTokenEstimateTime = 0L
+        // 副作用记录器：贯穿本轮完整生成（含重连/压缩续跑），完成后绑定到最后的 AI 节点
+        val workspaceIds = resolveWorkspaceIds(assistant, model)
+        val sideEffectRecorder = SideEffectRecorder(
+            context = context,
+            snapshotManager = workspaceSnapshotManager,
+            workspaceRoots = workspaceIds.map { it.toString() },
+        )
         while (true) {
             var hasReceivedChunkInRun = false
             val result = runCatching {
@@ -628,6 +664,7 @@ class ChatService(
                 conversationLorebookIds = conversation.lorebookIds,
                 workspaceCwd = conversation.workspaceCwd,
                 conversationId = conversationId,
+                sideEffectRecorder = sideEffectRecorder,
                 memories = if (!assistant.enableMemory) {
                     emptyList()
                 } else {
@@ -661,7 +698,7 @@ class ChatService(
                     if (assistant.enableRecentChatsReference) {
                         addAll(createConversationTools(conversationRepo, assistant.id))
                     }
-                    addAll(createWorkspaceToolsIfReady(resolveWorkspaceIds(assistant, model), conversation.workspaceCwd))
+                    addAll(createWorkspaceToolsIfReady(workspaceIds, conversation.workspaceCwd))
                     if (assistant.enabledSkills.isNotEmpty()) {
                         addAll(
                             createSkillTools(
@@ -823,6 +860,17 @@ class ChatService(
             }.onSuccess {
                 val finalConversation = getConversationFlow(conversationId).value
                 saveConversation(conversationId, finalConversation)
+
+                // 绑定副作用 log 到本轮最后一条 AI 节点，供撤回时回滚
+                val recallLog = sideEffectRecorder.buildLog()
+                if (!recallLog.isEmpty) {
+                    val lastAssistantNode = finalConversation.messageNodes.lastOrNull { node ->
+                        node.role == MessageRole.ASSISTANT
+                    }
+                    if (lastAssistantNode != null) {
+                        getOrCreateSession(conversationId).sideEffectLogs[lastAssistantNode.id] = recallLog
+                    }
+                }
 
                 // 记忆溯源：本轮生成成功后把用户提问与最终回复写入 journal，
                 // 供记忆提炼（总结沉淀）链路消费，构成记忆系统的完整闭环
@@ -1390,6 +1438,231 @@ class ChatService(
         }
     }
 
+    // ---- 消息撤回 / 恢复 ----
+
+    fun canRecall(conversationId: Uuid): Boolean {
+        val session = sessions[conversationId] ?: return false
+        if (session.isGenerating) return false
+        return session.state.value.messageNodes.any { it.role != MessageRole.SYSTEM }
+    }
+
+    fun canRedo(conversationId: Uuid): Boolean {
+        val session = sessions[conversationId] ?: return false
+        return session.canRedo
+    }
+
+    /**
+     * 撤回最近一条消息并回滚其副作用，返回是否全部副作用成功回滚。
+     */
+    suspend fun recallMessage(conversationId: Uuid): Boolean {
+        val session = getOrCreateSession(conversationId)
+        if (session.isGenerating) {
+            stopGeneration(conversationId)
+        }
+        val conversation = getConversationFlow(conversationId).value
+        val nodes = conversation.messageNodes
+        if (nodes.isEmpty()) return false
+
+        val settings = settingsStore.settingsFlow.first()
+        val lastNode = nodes.lastOrNull { it.role != MessageRole.SYSTEM } ?: return false
+        val lastIndex = nodes.indexOfFirst { it.id == lastNode.id }
+        val log = session.sideEffectLogs[lastNode.id] ?: SideEffectLog()
+
+        val segmentedResult = if (settings.recallSegmented) {
+            computeSegmentedRecall(lastNode, settings.recallBoundaryPunctuation)
+        } else {
+            null
+        }
+
+        var newNodes: List<MessageNode>
+        val mode: RecallMode
+        val trimmedText: String?
+        if (segmentedResult != null) {
+            val (trimmedNode, trimmed) = segmentedResult
+            mode = RecallMode.SEGMENTED
+            trimmedText = trimmed
+            newNodes = nodes.mapIndexed { i, node -> if (i == lastIndex) trimmedNode else node }
+        } else {
+            mode = RecallMode.WHOLE
+            trimmedText = null
+            newNodes = nodes.filterIndexed { i, _ -> i != lastIndex }
+        }
+
+        var rollbackOk = true
+        if (settings.recallRollbackEnabled) {
+            rollbackOk = rollbackSideEffects(log, undo = true)
+        }
+
+        val recallMarkerNodeId: Uuid? = if (settings.recallInformedAi) {
+            val markerText = if (mode == RecallMode.SEGMENTED) {
+                RECALL_MARKER_PREFIX + "用户撤回了上一条消息末尾的部分内容，后续对话请忽略被撤回的片段。"
+            } else {
+                RECALL_MARKER_PREFIX + "用户撤回了上一条消息，后续对话请忽略该条消息的内容。"
+            }
+            val marker = UIMessage.system(markerText).toMessageNode()
+            newNodes = newNodes + marker
+            marker.id
+        } else {
+            null
+        }
+
+        session.pushRecallRecord(
+            RecallRecord(
+                node = lastNode,
+                nodeIndex = lastIndex,
+                sideEffects = log,
+                recallMode = mode,
+                informedAi = settings.recallInformedAi,
+                trimmedText = trimmedText,
+                recallMarkerNodeId = recallMarkerNodeId,
+            )
+        )
+
+        updateConversation(conversationId, conversation.copy(messageNodes = newNodes))
+        saveConversation(conversationId, getConversationFlow(conversationId).value)
+        return rollbackOk
+    }
+
+    /** 恢复最近一次撤回，返回是否成功。 */
+    suspend fun redoMessage(conversationId: Uuid): Boolean {
+        val session = getOrCreateSession(conversationId)
+        if (session.isGenerating) return false
+        val record = session.popRecallRecord() ?: return false
+        val conversation = getConversationFlow(conversationId).value
+
+        var nodes = conversation.messageNodes
+        if (record.recallMarkerNodeId != null) {
+            nodes = nodes.filterNot { it.id == record.recallMarkerNodeId }
+        }
+
+        val newNodes = when (record.recallMode) {
+            RecallMode.WHOLE -> {
+                val list = nodes.toMutableList()
+                list.add(record.nodeIndex.coerceIn(0, list.size), record.node)
+                list
+            }
+
+            RecallMode.SEGMENTED -> nodes.map { node ->
+                if (node.id == record.node.id) record.node else node
+            }
+        }
+
+        if (settingsStore.settingsFlow.first().recallRollbackEnabled) {
+            rollbackSideEffects(record.sideEffects, undo = false)
+        }
+
+        updateConversation(conversationId, conversation.copy(messageNodes = newNodes))
+        saveConversation(conversationId, getConversationFlow(conversationId).value)
+        return true
+    }
+
+    /** 新的对话写操作后清空撤回历史栈并释放快照，避免恢复与后续消息分叉。 */
+    fun clearRecallHistory(conversationId: Uuid) {
+        val session = sessions[conversationId] ?: return
+        session.sideEffectLogs.values.forEach { log ->
+            log.workspaceSnapshotId?.let { workspaceSnapshotManager.release(it) }
+        }
+        session.clearRecallRecords()
+        session.sideEffectLogs.clear()
+    }
+
+    private suspend fun rollbackSideEffects(log: SideEffectLog, undo: Boolean): Boolean {
+        var ok = true
+
+        log.workspaceSnapshotId?.let { snapshotId ->
+            val success = if (undo) {
+                workspaceSnapshotManager.restore(snapshotId, log.workspaceRoots)
+            } else {
+                workspaceSnapshotManager.redo(snapshotId, log.workspaceRoots)
+            }
+            if (!success) ok = false
+        }
+
+        log.memoryActions.forEach { action ->
+            runCatching {
+                if (undo) undoMemory(action) else redoMemory(action)
+            }.onFailure { ok = false }
+        }
+
+        val clipboardText = if (undo) log.clipboardBefore else log.clipboardAfter
+        if (clipboardText != null) {
+            runCatching { context.writeClipboardText(clipboardText) }.onFailure { ok = false }
+        }
+
+        return ok
+    }
+
+    private suspend fun undoMemory(action: MemoryActionRecord) {
+        when (action) {
+            is MemoryActionRecord.Create -> memoryRepository.deleteMemory(action.id)
+            is MemoryActionRecord.Update -> memoryRepository.updateMemory(
+                action.id, action.beforeContent, action.beforeSummary
+            )
+
+            is MemoryActionRecord.Delete -> memoryRepository.storeMemory(
+                assistantId = action.assistantId,
+                content = action.content,
+                target = action.target,
+                summary = action.summary,
+                source = "tool",
+            )
+        }
+    }
+
+    private suspend fun redoMemory(action: MemoryActionRecord) {
+        when (action) {
+            is MemoryActionRecord.Create -> memoryRepository.storeMemory(
+                assistantId = action.assistantId,
+                content = action.content,
+                target = action.target,
+                summary = action.summary,
+                source = "tool",
+            )
+
+            is MemoryActionRecord.Update -> memoryRepository.updateMemory(
+                action.id, action.afterContent, action.afterSummary
+            )
+
+            is MemoryActionRecord.Delete -> memoryRepository.deleteMemory(action.id)
+        }
+    }
+
+    /** 清理重启后残留的撤回标记 SYSTEM 节点（撤回栈为内存态，退出后无法恢复对应标记）。 */
+    private fun stripRecallMarkers(conversation: Conversation): Conversation {
+        val nodes = conversation.messageNodes.filterNot { node ->
+            val message = node.currentMessage
+            message.role == MessageRole.SYSTEM && message.parts.any {
+                it is UIMessagePart.Text && it.text.startsWith(RECALL_MARKER_PREFIX)
+            }
+        }
+        return if (nodes.size == conversation.messageNodes.size) {
+            conversation
+        } else {
+            conversation.copy(messageNodes = nodes)
+        }
+    }
+
+    /** 分段撤回：仅单一纯文本消息可截断尾部，否则返回 null（回退整条撤回）。 */
+    private fun computeSegmentedRecall(
+        lastNode: MessageNode,
+        boundaryPunctuation: String,
+    ): Pair<MessageNode, String>? {
+        if (boundaryPunctuation.isEmpty()) return null
+        val message = lastNode.messages.lastOrNull() ?: return null
+        if (message.parts.size != 1) return null
+        val onlyPart = message.parts.single()
+        if (onlyPart !is UIMessagePart.Text) return null
+        val text = onlyPart.text
+        val lastPunctIndex = text.indexOfLast { it in boundaryPunctuation }
+        if (lastPunctIndex < 0) return null
+        val kept = text.substring(0, lastPunctIndex + 1)
+        if (kept.isBlank()) return null
+        val trimmed = text.substring(lastPunctIndex + 1)
+        if (trimmed.isBlank()) return null
+        val trimmedMessage = message.copy(parts = listOf(onlyPart.copy(text = kept)))
+        return lastNode.copy(messages = listOf(trimmedMessage)) to trimmed
+    }
+
     // ---- 翻译消息 ----
 
     fun translateMessage(
@@ -1487,6 +1760,7 @@ class ChatService(
 
         if (!edited) return
 
+        clearRecallHistory(conversationId)
         saveConversation(conversationId, currentConversation.copy(messageNodes = updatedNodes))
     }
 
@@ -1573,6 +1847,7 @@ class ChatService(
             return
         }
 
+        clearRecallHistory(conversationId)
         saveConversation(conversationId, updatedConversation)
     }
 

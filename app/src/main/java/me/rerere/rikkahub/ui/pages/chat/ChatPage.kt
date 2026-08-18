@@ -6,6 +6,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -65,6 +67,8 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.android.appTempFolder
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowTurnBackward
+import me.rerere.hugeicons.stroke.ArrowTurnForward
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.Menu03
@@ -294,6 +298,8 @@ private fun ChatPageContent(
 
     val stewardModeState by vm.stewardModeState.collectAsStateWithLifecycle()
     val stewardMaxLoops by vm.stewardMaxLoops.collectAsStateWithLifecycle()
+    val canRecall by vm.canRecall.collectAsStateWithLifecycle()
+    val canRedo by vm.canRedo.collectAsStateWithLifecycle()
 
     val completionProviders = remember(assistant.workspaceId, conversation.workspaceCwd, workspaceRepository) {
         assistant.workspaceId?.let { workspaceId ->
@@ -330,6 +336,14 @@ private fun ChatPageContent(
                     },
                     onUpdateTitle = {
                         vm.updateTitle(it)
+                    },
+                    canRecall = canRecall,
+                    canRedo = canRedo,
+                    onRecall = {
+                        vm.recallMessage()
+                    },
+                    onRedo = {
+                        vm.redoMessage()
                     }
                 )
             },
@@ -762,7 +776,11 @@ private fun TopBar(
     previewMode: Boolean,
     onClickMenu: () -> Unit,
     onNewChat: () -> Unit,
-    onUpdateTitle: (String) -> Unit
+    onUpdateTitle: (String) -> Unit,
+    canRecall: Boolean,
+    canRedo: Boolean,
+    onRecall: () -> Unit,
+    onRedo: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
@@ -770,20 +788,21 @@ private fun TopBar(
         onUpdateTitle(it)
     }
 
-    TopAppBar(
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-        navigationIcon = {
-            if (!bigScreen) {
-                IconButton(
-                    onClick = {
-                        scope.launch { drawerState.open() }
+    Column {
+        TopAppBar(
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+            navigationIcon = {
+                if (!bigScreen) {
+                    IconButton(
+                        onClick = {
+                            scope.launch { drawerState.open() }
+                        }
+                    ) {
+                        Icon(HugeIcons.Menu03, "Messages")
                     }
-                ) {
-                    Icon(HugeIcons.Menu03, "Messages")
                 }
-            }
-        },
-        title = {
+            },
+            title = {
             val editTitleWarning = stringResource(R.string.chat_page_edit_title_warning)
             Surface(
                 onClick = {
@@ -870,7 +889,27 @@ private fun TopBar(
                 Icon(HugeIcons.MessageAdd01, "New Message")
             }
         },
-    )
+        )
+        if (canRecall || canRedo) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                IconButton(
+                    onClick = onRecall,
+                    enabled = canRecall,
+                ) {
+                    Icon(HugeIcons.ArrowTurnBackward, "Recall")
+                }
+                IconButton(
+                    onClick = onRedo,
+                    enabled = canRedo,
+                ) {
+                    Icon(HugeIcons.ArrowTurnForward, "Redo")
+                }
+            }
+        }
+    }
     titleState.EditStateContent { title, onUpdate ->
         AlertDialog(
             onDismissRequest = {

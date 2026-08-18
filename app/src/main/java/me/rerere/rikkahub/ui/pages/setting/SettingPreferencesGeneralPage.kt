@@ -96,6 +96,57 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
+                        headlineContent = { Text("消息撤回：分段截断") },
+                        supportingContent = { Text("关闭时撤回整条消息；开启时按边界标点截断最后一段") },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.recallSegmented,
+                                onCheckedChange = {
+                                    vm.updateSettings(settings.copy(recallSegmented = it))
+                                }
+                            )
+                        },
+                    )
+                    if (settings.recallSegmented) {
+                        item(
+                            headlineContent = { Text("撤回边界标点") },
+                            supportingContent = {
+                                OutlinedTextField(
+                                    value = settings.recallBoundaryPunctuation,
+                                    onValueChange = { value ->
+                                        vm.updateSettings(settings.copy(recallBoundaryPunctuation = value))
+                                    },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            },
+                        )
+                    }
+                    item(
+                        headlineContent = { Text("回滚工具副作用") },
+                        supportingContent = { Text("撤回时还原工作区文件、记忆与剪贴板等可回滚副作用") },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.recallRollbackEnabled,
+                                onCheckedChange = {
+                                    vm.updateSettings(settings.copy(recallRollbackEnabled = it))
+                                }
+                            )
+                        },
+                    )
+                    item(
+                        headlineContent = { Text("撤回后告知 AI") },
+                        supportingContent = { Text("撤回时在上下文中告知 AI 已撤回的内容") },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.recallInformedAi,
+                                onCheckedChange = {
+                                    vm.updateSettings(settings.copy(recallInformedAi = it))
+                                }
+                            )
+                        },
+                    )
+                    item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_screen_resolution_override_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_display_page_screen_resolution_override_desc)) },
                         trailingContent = {

@@ -55,6 +55,7 @@ import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.recall.SideEffectRecorder
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.utils.applyPlaceholders
 import java.util.Locale
@@ -98,6 +99,7 @@ class GenerationHandler(
         conversationLorebookIds: Set<Uuid> = emptySet(),
         workspaceCwd: String? = null,
         conversationId: Uuid? = null,
+        sideEffectRecorder: SideEffectRecorder? = null,
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
@@ -154,13 +156,20 @@ class GenerationHandler(
                                 summary = summary,
                                 source = "tool",
                                 conversationId = memoryConversationId,
-                            )
+                            ).also { newMemory ->
+                                sideEffectRecorder?.onMemoryCreate(newMemory, memoryAssistantId)
+                            }
                         },
                         onUpdate = { id, content, summary ->
-                            memoryRepo.updateMemory(id, content, summary = summary)
+                            val before = memoryRepo.getMemoryById(id)
+                            memoryRepo.updateMemory(id, content, summary = summary).also { after ->
+                                if (before != null) sideEffectRecorder?.onMemoryUpdate(before, after)
+                            }
                         },
                         onDelete = { id ->
+                            val before = memoryRepo.getMemoryById(id)
                             memoryRepo.deleteMemory(id)
+                            if (before != null) sideEffectRecorder?.onMemoryDelete(before, memoryAssistantId)
                         }
                     ).let(this::addAll)
                 }
@@ -369,7 +378,9 @@ class GenerationHandler(
                                 error("Invalid tool arguments JSON for ${tool.toolName}: ${it.message}")
                             }
                             Log.i(TAG, "generateText: executing tool ${toolDef.name} with args: $args")
+                            sideEffectRecorder?.onBeforeTool(toolDef.name, args)
                             val result = toolDef.execute(args)
+                            sideEffectRecorder?.onAfterTool(toolDef.name, args, result)
                             val hasShellAccess = effectiveTools.any { it.name == "workspace_shell" }
                             executedTools += tool.copy(
                                 output = maybeTruncateToolOutput(tool.toolCallId, result, hasShellAccess)

@@ -112,6 +112,12 @@ class SettingsStore(
         // 多线路并发：请求自动探测同名模型的多条 provider 线路，并发竞速 + 故障转移
         val MULTI_ROUTE_CONCURRENT = booleanPreferencesKey("multi_route_concurrent")
 
+        // 消息撤回
+        val RECALL_SEGMENTED = booleanPreferencesKey("recall_segmented")
+        val RECALL_BOUNDARY_PUNCTUATION = stringPreferencesKey("recall_boundary_punctuation")
+        val RECALL_ROLLBACK_ENABLED = booleanPreferencesKey("recall_rollback_enabled")
+        val RECALL_INFORMED_AI = booleanPreferencesKey("recall_informed_ai")
+
         // 提供商
         val PROVIDERS = stringPreferencesKey("providers")
 
@@ -214,6 +220,10 @@ class SettingsStore(
                 autoReconnectEnabled = preferences[AUTO_RECONNECT_ENABLED] ?: false,
                 autoReconnectMaxRetries = preferences[AUTO_RECONNECT_MAX_RETRIES] ?: 3,
                 multiRouteConcurrent = preferences[MULTI_ROUTE_CONCURRENT] ?: false,
+                recallSegmented = preferences[RECALL_SEGMENTED] ?: false,
+                recallBoundaryPunctuation = preferences[RECALL_BOUNDARY_PUNCTUATION] ?: "。！？～",
+                recallRollbackEnabled = preferences[RECALL_ROLLBACK_ENABLED] ?: true,
+                recallInformedAi = preferences[RECALL_INFORMED_AI] ?: true,
                 assistantId = preferences[SELECT_ASSISTANT]?.let { Uuid.parse(it) }
                     ?: DEFAULT_ASSISTANT_ID,
                 assistantTags = preferences[ASSISTANT_TAGS]?.let {
@@ -429,6 +439,10 @@ class SettingsStore(
             preferences[AUTO_RECONNECT_ENABLED] = settings.autoReconnectEnabled
             preferences[AUTO_RECONNECT_MAX_RETRIES] = settings.autoReconnectMaxRetries
             preferences[MULTI_ROUTE_CONCURRENT] = settings.multiRouteConcurrent
+            preferences[RECALL_SEGMENTED] = settings.recallSegmented
+            preferences[RECALL_BOUNDARY_PUNCTUATION] = settings.recallBoundaryPunctuation
+            preferences[RECALL_ROLLBACK_ENABLED] = settings.recallRollbackEnabled
+            preferences[RECALL_INFORMED_AI] = settings.recallInformedAi
 
             preferences[PROVIDERS] = JsonInstant.encodeToString(settings.providers)
 
@@ -630,6 +644,11 @@ data class Settings(
     val autoReconnectMaxRetries: Int = 3,
     // 多线路并发：请求自动探测同名模型的多条 provider 线路，并发竞速 + 故障转移
     val multiRouteConcurrent: Boolean = false,
+    // 消息撤回：范围（true=分段截断，false=整条）、边界标点、副作用回滚、撤回后告知 AI
+    val recallSegmented: Boolean = false,
+    val recallBoundaryPunctuation: String = "。！？～",
+    val recallRollbackEnabled: Boolean = true,
+    val recallInformedAi: Boolean = true,
     // 屏幕分辨率覆盖：伪造 RikkaHub 读取到的设备屏幕宽高（px），0 表示不启用
     val screenResolutionOverrideEnabled: Boolean = false,
     val screenResolutionOverrideWidth: Int = 0,
