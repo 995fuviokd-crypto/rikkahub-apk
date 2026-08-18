@@ -3,8 +3,10 @@ package me.rerere.rikkahub.service
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -12,22 +14,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import android.view.MotionEvent
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.unit.dp
+import android.view.View
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.petterp.floatingx.FloatingX
@@ -53,6 +40,10 @@ private const val TAG = "FloatingBubbleService"
 /**
  * 悬浮球前台服务: 在系统层显示一个可拖动、可半隐藏的悬浮小球，
  * 点击小球可回到 RikkaHub。颜色/大小/开关由偏好设置实时驱动。
+ *
+ * 注意: 悬浮球运行在 Service 进程中, 没有 Activity 的 LifecycleOwner,
+ * 因此不能使用 ComposeView (setContent 会因缺少 ViewTreeLifecycleOwner 崩溃),
+ * 改用普通 View + GradientDrawable 绘制纯色圆球。
  */
 class FloatingBubbleService : Service() {
 
@@ -73,11 +64,12 @@ class FloatingBubbleService : Service() {
     private var settingsJob: Job? = null
 
     private var control: IFxAppControl? = null
+    private var bubbleView: BubbleView? = null
 
-    // 悬浮球外观状态 (Compose 内容实时读取)
-    private var bubbleColor by mutableStateOf(Color(0xFF4F8EF7))
-    private var bubbleSizeDp by mutableIntStateOf(48)
-    private var bubbleAlpha by mutableFloatStateOf(1f)
+    // 悬浮球外观状态
+    private var bubbleColor = 0xFF4F8EF7.toInt()
+    private var bubbleSizeDp = 48
+    private var bubbleAlpha = 1f
 
     // 交互状态
     private var isHalfHidden = false
@@ -114,6 +106,7 @@ class FloatingBubbleService : Service() {
         mainHandler.removeCallbacksAndMessages(null)
         control?.cancel()
         control = null
+        bubbleView = null
         serviceScope.cancel()
     }
 
@@ -165,24 +158,19 @@ class FloatingBubbleService : Service() {
             return
         }
 
-        // 注意: 悬浮球在系统级 Service 中渲染, 不能包裹 RikkahubTheme
-        // (其内部会强转 Activity 上下文), 因此直接使用最简 Compose 内容。
-        val composeView = ComposeView(this).apply {
-            setContent {
-                FloatingBubbleContent(
-                    color = bubbleColor,
-                    sizeDp = bubbleSizeDp,
-                    alpha = bubbleAlpha,
-                )
-            }
+        val view = BubbleView(this).apply {
+            setBubbleColor(bubbleColor)
+            setBubbleAlpha(bubbleAlpha)
+            setBubbleSize(dp2px(bubbleSizeDp).toInt())
         }
+        bubbleView = view
 
         control = FloatingX.install {
             setTag(FLOATING_X_TAG)
             setContext(this@FloatingBubbleService)
             setScopeType(FxScopeType.SYSTEM_AUTO)
             setEnableSafeArea(true)
-            setLayoutView(composeView)
+            setLayoutView(view)
         }
         control?.configControl?.apply {
             setEnableEdgeAdsorption(true)
@@ -227,8 +215,10 @@ class FloatingBubbleService : Service() {
                     stopSelf()
                     return@collect
                 }
-                bubbleColor = Color(settings.floatingBubbleColor.toInt())
+                bubbleColor = settings.floatingBubbleColor.toInt()
                 bubbleSizeDp = settings.floatingBubbleSize.coerceIn(SIZE_MIN_DP, SIZE_MAX_DP)
+                bubbleView?.setBubbleColor(bubbleColor)
+                bubbleView?.setBubbleSize(dp2px(bubbleSizeDp).toInt())
             }
         }
     }
@@ -261,17 +251,20 @@ class FloatingBubbleService : Service() {
             if (isHalfHidden) return
             isHalfHidden = true
             bubbleAlpha = HALF_HIDE_ALPHA
+            bubbleView?.setBubbleAlpha(bubbleAlpha)
             val targetX = if (nearLeft) -sizePx / 2f else screenWidthPx - sizePx / 2f
             c.move(targetX, c.getY(), true)
         } else if (isHalfHidden) {
             isHalfHidden = false
             bubbleAlpha = 1f
+            bubbleView?.setBubbleAlpha(bubbleAlpha)
         }
     }
 
     private fun restoreFromHalfHide() {
         isHalfHidden = false
         bubbleAlpha = 1f
+        bubbleView?.setBubbleAlpha(bubbleAlpha)
         val c = control ?: return
         val sizePx = dp2px(bubbleSizeDp)
         val screenWidthPx = resources.displayMetrics.widthPixels
@@ -280,19 +273,40 @@ class FloatingBubbleService : Service() {
     }
 
     private fun dp2px(dp: Int): Float = dp * resources.displayMetrics.density
-}
 
-@Composable
-private fun FloatingBubbleContent(
-    color: Color,
-    sizeDp: Int,
-    alpha: Float,
-) {
-    Box(
-        modifier = Modifier
-            .size(sizeDp.dp)
-            .alpha(alpha)
-            .clip(CircleShape)
-            .background(color)
-    )
+    /**
+     * 悬浮球视图: 普通 View + GradientDrawable 绘制纯色圆球。
+     * 支持运行时更新颜色/透明度/大小, 不依赖 Compose 与 LifecycleOwner。
+     */
+    private class BubbleView(context: Context) : View(context) {
+
+        private val drawable = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+        }
+
+        private var sizePx = 0
+
+        init {
+            background = drawable
+        }
+
+        fun setBubbleColor(color: Int) {
+            drawable.setColor(color)
+        }
+
+        fun setBubbleAlpha(alpha: Float) {
+            drawable.alpha = (alpha * 255).toInt().coerceIn(0, 255)
+        }
+
+        fun setBubbleSize(px: Int) {
+            if (sizePx == px) return
+            sizePx = px
+            requestLayout()
+        }
+
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            val size = if (sizePx > 0) sizePx else suggestedMinimumWidth
+            setMeasuredDimension(size, size)
+        }
+    }
 }
