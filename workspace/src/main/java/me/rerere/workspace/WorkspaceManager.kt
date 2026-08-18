@@ -156,6 +156,34 @@ class WorkspaceManager(
         outputStream.use { out -> file.inputStream().use { it.copyTo(out) } }
     }
 
+    /**
+     * 按 Rootfs 内绝对路径写入 UTF-8 文本, 与 [readRootfsBuffer] 路径解析对称。
+     *
+     * 直接通过 [resolveRootfsPath] 映射到宿主机物理路径后用 Java IO 写入, 不经过 PRoot,
+     * 因此 /sdcard(手机外部存储) 这类 FUSE 挂载点也能可靠读写, 不受 PRoot bind mount 限制。
+     */
+    fun writeRootfsText(
+        root: String,
+        path: String,
+        text: String,
+        overwrite: Boolean = true,
+        includeAndroidLocal: Boolean = true,
+    ): WorkspaceFileEntry {
+        val location = resolveRootfsPath(root, path, includeAndroidLocal)
+        val file = fileSystem.resolve(location.rootDir, location.relativePath)
+        require(!file.exists() || overwrite) { "File already exists: $path" }
+        require(!file.exists() || file.isFile) { "Path is not a file: $path" }
+        file.parentFile?.mkdirs()
+        file.writeText(text)
+        return WorkspaceFileEntry(
+            path = path.trimEnd('/'),
+            name = file.name,
+            isDirectory = false,
+            sizeBytes = file.length(),
+            updatedAt = file.lastModified(),
+        )
+    }
+
     private fun resolveRootfsFile(root: String, path: String, includeAndroidLocal: Boolean = true): File {
         val location = resolveRootfsPath(root, path, includeAndroidLocal)
         return fileSystem.resolve(location.rootDir, location.relativePath)

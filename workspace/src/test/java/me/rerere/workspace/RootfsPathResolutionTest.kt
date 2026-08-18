@@ -44,6 +44,19 @@ class RootfsPathResolutionTest {
     }
 
     @Test
+    fun writesFileThroughBindMountPath() {
+        manager = createManager()
+        File(skillsDir, "issue-1561").mkdirs()
+
+        val entry = manager.writeRootfsText(root, "/skills/issue-1561/out.txt", "hello bind")
+
+        assertEquals("/skills/issue-1561/out.txt", entry.path)
+        assertEquals("out.txt", entry.name)
+        assertEquals("hello bind".toByteArray().size.toLong(), entry.sizeBytes)
+        assertEquals("hello bind", File(skillsDir, "issue-1561/out.txt").readText())
+    }
+
+    @Test
     fun bindMountTargetDoesNotMatchLongerSiblingPrefix() {
         val skills = tempFolder.newFolder("skills-src")
         val skillsets = tempFolder.newFolder("skillsets-src")

@@ -24,7 +24,7 @@ private const val ACTION_HOME = "home"
 private const val ACTION_NOTIFICATIONS = "notifications"
 private const val ACTION_RECENTS = "recents"
 
-/** 无障碍提权工具: 通过无障碍服务操控手机(打开应用/点击/导航), 均需用户审批 */
+/** 无障碍工具: 通过无障碍服务操控手机(打开应用/点击/导航), 默认执行无需审批 */
 internal fun buildAccessibilityTools(context: Context): List<Tool> = listOf(
     buildOpenAppTool(context),
     buildSetVolumeTool(context),
@@ -60,7 +60,6 @@ private fun buildOpenAppTool(context: Context): Tool = Tool(
             required = listOf(),
         )
     },
-    needsApproval = { true },
     execute = {
         val params = it.jsonObject
         val pkg = params.string("package")
@@ -109,7 +108,6 @@ private fun buildSetVolumeTool(context: Context): Tool = Tool(
             required = listOf("direction"),
         )
     },
-    needsApproval = { true },
     execute = {
         val params = it.jsonObject
         val streamName = params.string("stream") ?: "media"
@@ -155,7 +153,6 @@ private fun buildClickTextTool(): Tool = Tool(
             required = listOf("text"),
         )
     },
-    needsApproval = { true },
     execute = {
         val text = it.jsonObject.string("text") ?: error("text is required")
         val ok = AccessibilityBridge.requireService().clickByText(text)
@@ -206,7 +203,6 @@ private fun buildTapTool(): Tool = Tool(
             required = listOf("action", "x", "y"),
         )
     },
-    needsApproval = { true },
     execute = {
         val params = it.jsonObject
         val service = AccessibilityBridge.requireService()
@@ -250,7 +246,6 @@ private fun buildNavigateTool(): Tool = Tool(
             required = listOf("action"),
         )
     },
-    needsApproval = { true },
     execute = {
         val service = AccessibilityBridge.requireService()
         val action = it.jsonObject.string("action") ?: error("action is required")
@@ -294,7 +289,6 @@ private fun buildIgnoreBatteryOptimizationTool(context: Context): Tool = Tool(
         improving background keep-alive. Returns the current exemption status.
     """.trimIndent().replace("\n", " "),
     parameters = { InputSchema.Obj(properties = buildJsonObject { }) },
-    needsApproval = { true },
     execute = {
         if (!context.hasIgnoreBatteryOptimizationsPermission()) {
             context.openBatteryOptimizationSettings()
