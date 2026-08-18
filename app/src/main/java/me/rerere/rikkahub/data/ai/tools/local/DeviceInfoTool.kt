@@ -18,8 +18,9 @@ internal fun buildDeviceInfoTool(
     name = "get_device_info",
     description = """
         Get device information: model, manufacturer, Android version, and the current effective
-        screen resolution (width x height in pixels). The reported screen resolution may be an
-        override value if the user has configured a screen resolution override in preferences.
+        screen resolution (width x height in pixels). The reported screen resolution and density
+        may differ from the real values when the user has enabled the display scale mode
+        (e.g. tablet layout) in preferences.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -27,17 +28,22 @@ internal fun buildDeviceInfoTool(
         )
     },
     execute = {
-        val (effectiveWidth, effectiveHeight) = DeviceScreenMetrics.getEffectiveScreenSize(context, settingsStore)
-        val (realWidth, realHeight) = DeviceScreenMetrics.getRealScreenSize(context)
         val settings = settingsStore.settingsFlow.first()
-        val overridden = settings.screenResolutionOverrideEnabled &&
-            settings.screenResolutionOverrideWidth > 0 &&
-            settings.screenResolutionOverrideHeight > 0
+        val realDpi = DeviceScreenMetrics.getRealDensityDpi(context)
+        val effectiveDpi = DeviceScreenMetrics.modeDensityDpi(
+            settings.displayScaleMode,
+            settings.displayScaleDensityDpi,
+        ) ?: realDpi
+        val (realWidth, realHeight) = DeviceScreenMetrics.getRealScreenSize(context)
+        val (effectiveWidth, effectiveHeight) =
+            DeviceScreenMetrics.getEffectiveScreenSize(context, settingsStore)
+        val overridden = effectiveDpi != realDpi
         val payload = buildJsonObject {
             put("device_model", Build.MODEL)
             put("device_manufacturer", Build.MANUFACTURER)
             put("android_version", Build.VERSION.RELEASE)
             put("sdk_int", Build.VERSION.SDK_INT)
+            put("screen_density_dpi", effectiveDpi)
             put("screen_resolution", "${effectiveWidth}x$effectiveHeight")
             put("screen_resolution_width", effectiveWidth)
             put("screen_resolution_height", effectiveHeight)

@@ -475,7 +475,7 @@ private fun NewFeaturesCard(navController: Navigator) {
     val entries = remember {
         listOf(
             NewFeatureEntry(R.string.setting_page_multi_route_concurrent_title, Screen.SettingPreferences),
-            NewFeatureEntry(R.string.setting_display_page_screen_resolution_override_title, Screen.SettingPreferences),
+            NewFeatureEntry(R.string.setting_display_page_display_scale_title, Screen.SettingPreferences),
             NewFeatureEntry(R.string.setting_page_background_keep_alive, Screen.SettingPreferences),
             NewFeatureEntry(R.string.setting_page_ignore_battery_optimizations_title, Screen.SettingPreferences),
             NewFeatureEntry(R.string.workspace_detail_android_local_access, Screen.Workspaces),

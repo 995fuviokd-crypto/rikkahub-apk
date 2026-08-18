@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -48,6 +49,7 @@ import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.ColorPickerRow
 import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceBoolean
 import me.rerere.rikkahub.ui.theme.CustomColors
+import me.rerere.rikkahub.utils.DeviceScreenMetrics
 import me.rerere.rikkahub.utils.hasIgnoreBatteryOptimizationsPermission
 import me.rerere.rikkahub.utils.openBatteryOptimizationSettings
 import me.rerere.rikkahub.utils.plus
@@ -159,66 +161,49 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        headlineContent = { Text(stringResource(R.string.setting_display_page_screen_resolution_override_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_display_page_screen_resolution_override_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = settings.screenResolutionOverrideEnabled,
-                                onCheckedChange = {
-                                    vm.updateSettings(settings.copy(screenResolutionOverrideEnabled = it))
-                                }
-                            )
-                        },
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_display_scale_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_display_scale_desc)) },
                     )
-                    if (settings.screenResolutionOverrideEnabled) {
-                        item(
-                            headlineContent = { Text(stringResource(R.string.setting_display_page_screen_resolution_override_size_title)) },
-                            supportingContent = {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    OutlinedTextField(
-                                        value = if (settings.screenResolutionOverrideWidth > 0) {
-                                            settings.screenResolutionOverrideWidth.toString()
-                                        } else {
-                                            ""
-                                        },
-                                        onValueChange = { value ->
-                                            vm.updateSettings(
-                                                settings.copy(
-                                                    screenResolutionOverrideWidth = value.toIntOrNull() ?: 0
-                                                )
-                                            )
-                                        },
-                                        label = { Text(stringResource(R.string.setting_display_page_screen_resolution_override_width)) },
-                                        singleLine = true,
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Text("×")
-                                    OutlinedTextField(
-                                        value = if (settings.screenResolutionOverrideHeight > 0) {
-                                            settings.screenResolutionOverrideHeight.toString()
-                                        } else {
-                                            ""
-                                        },
-                                        onValueChange = { value ->
-                                            vm.updateSettings(
-                                                settings.copy(
-                                                    screenResolutionOverrideHeight = value.toIntOrNull() ?: 0
-                                                )
-                                            )
-                                        },
-                                        label = { Text(stringResource(R.string.setting_display_page_screen_resolution_override_height)) },
-                                        singleLine = true,
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            },
+                    item {
+                        val modes = listOf(
+                            DeviceScreenMetrics.MODE_NONE to stringResource(R.string.setting_display_page_display_scale_mode_none),
+                            DeviceScreenMetrics.MODE_TABLET to stringResource(R.string.setting_display_page_display_scale_mode_tablet),
+                            DeviceScreenMetrics.MODE_CUSTOM to stringResource(R.string.setting_display_page_display_scale_mode_custom),
                         )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            modes.forEach { (mode, label) ->
+                                FilterChip(
+                                    selected = settings.displayScaleMode == mode,
+                                    onClick = {
+                                        vm.updateSettings(settings.copy(displayScaleMode = mode))
+                                    },
+                                    label = { Text(label) },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+                    }
+                    if (settings.displayScaleMode == DeviceScreenMetrics.MODE_CUSTOM) {
+                        item(
+                            headlineContent = { Text(stringResource(R.string.setting_display_page_display_scale_custom_title)) },
+                            supportingContent = { Text(stringResource(R.string.setting_display_page_display_scale_custom_desc)) },
+                        )
+                        item {
+                            OutlinedTextField(
+                                value = settings.displayScaleDensityDpi.toString(),
+                                onValueChange = { value ->
+                                    val dpi = value.toIntOrNull()?.coerceIn(120, 600) ?: 160
+                                    vm.updateSettings(settings.copy(displayScaleDensityDpi = dpi))
+                                },
+                                label = { Text(stringResource(R.string.setting_display_page_display_scale_custom_dpi)) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                     }
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_create_new_conversation_on_start_title)) },

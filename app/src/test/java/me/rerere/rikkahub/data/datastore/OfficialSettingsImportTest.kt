@@ -24,9 +24,8 @@ class OfficialSettingsImportTest {
         "autoReconnectEnabled",
         "autoReconnectMaxRetries",
         "multiRouteConcurrent",
-        "screenResolutionOverrideEnabled",
-        "screenResolutionOverrideWidth",
-        "screenResolutionOverrideHeight",
+        "displayScaleMode",
+        "displayScaleDensityDpi",
         "keepAliveEnabled",
     )
 

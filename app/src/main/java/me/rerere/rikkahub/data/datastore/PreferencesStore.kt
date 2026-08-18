@@ -180,10 +180,9 @@ class SettingsStore(
         // 赞助提醒
         val SPONSOR_ALERT_DISMISSED_AT = intPreferencesKey("sponsor_alert_dismissed_at")
 
-        // 屏幕分辨率覆盖
-        val SCREEN_RESOLUTION_OVERRIDE_ENABLED = booleanPreferencesKey("screen_resolution_override_enabled")
-        val SCREEN_RESOLUTION_OVERRIDE_WIDTH = intPreferencesKey("screen_resolution_override_width")
-        val SCREEN_RESOLUTION_OVERRIDE_HEIGHT = intPreferencesKey("screen_resolution_override_height")
+        // 屏幕显示缩放：手机屏幕真实呈现平板布局（软件渲染密度覆盖）
+        val DISPLAY_SCALE_MODE = intPreferencesKey("display_scale_mode")
+        val DISPLAY_SCALE_DENSITY_DPI = intPreferencesKey("display_scale_density_dpi")
 
         // 后台保活常驻通知：进应用即在前台服务消息栏显示"正在运行中"
         val KEEP_ALIVE_ENABLED = booleanPreferencesKey("keep_alive_enabled")
@@ -300,9 +299,8 @@ class SettingsStore(
                 } ?: BackupReminderConfig(),
                 launchCount = preferences[LAUNCH_COUNT] ?: 0,
                 sponsorAlertDismissedAt = preferences[SPONSOR_ALERT_DISMISSED_AT] ?: 0,
-                screenResolutionOverrideEnabled = preferences[SCREEN_RESOLUTION_OVERRIDE_ENABLED] == true,
-                screenResolutionOverrideWidth = preferences[SCREEN_RESOLUTION_OVERRIDE_WIDTH] ?: 0,
-                screenResolutionOverrideHeight = preferences[SCREEN_RESOLUTION_OVERRIDE_HEIGHT] ?: 0,
+                displayScaleMode = preferences[DISPLAY_SCALE_MODE] ?: 0,
+                displayScaleDensityDpi = preferences[DISPLAY_SCALE_DENSITY_DPI] ?: 160,
                 // 后台保活常驻默认开启
                 keepAliveEnabled = preferences[KEEP_ALIVE_ENABLED] != false,
             )
@@ -501,9 +499,8 @@ class SettingsStore(
             preferences[BACKUP_REMINDER_CONFIG] = JsonInstant.encodeToString(settings.backupReminderConfig)
             preferences[LAUNCH_COUNT] = settings.launchCount
             preferences[SPONSOR_ALERT_DISMISSED_AT] = settings.sponsorAlertDismissedAt
-            preferences[SCREEN_RESOLUTION_OVERRIDE_ENABLED] = settings.screenResolutionOverrideEnabled
-            preferences[SCREEN_RESOLUTION_OVERRIDE_WIDTH] = settings.screenResolutionOverrideWidth
-            preferences[SCREEN_RESOLUTION_OVERRIDE_HEIGHT] = settings.screenResolutionOverrideHeight
+            preferences[DISPLAY_SCALE_MODE] = settings.displayScaleMode
+            preferences[DISPLAY_SCALE_DENSITY_DPI] = settings.displayScaleDensityDpi
             preferences[KEEP_ALIVE_ENABLED] = settings.keepAliveEnabled
         }
     }
@@ -673,10 +670,10 @@ data class Settings(
     val recallBoundaryPunctuation: String = "。！？～",
     val recallRollbackEnabled: Boolean = true,
     val recallInformedAi: Boolean = true,
-    // 屏幕分辨率覆盖：伪造 RikkaHub 读取到的设备屏幕宽高（px），0 表示不启用
-    val screenResolutionOverrideEnabled: Boolean = false,
-    val screenResolutionOverrideWidth: Int = 0,
-    val screenResolutionOverrideHeight: Int = 0,
+    // 屏幕显示缩放：把整个 app 按目标密度（densityDpi）渲染，手机屏幕上呈现平板布局。
+    // mode: 0=恢复（跟随设备） 1=平板预设 2=自定义密度
+    val displayScaleMode: Int = 0,
+    val displayScaleDensityDpi: Int = 160,
     // 后台保活常驻通知：进应用即在消息栏常驻显示"正在运行中"
     val keepAliveEnabled: Boolean = true,
     // 悬浮球：系统级悬浮窗，可拖动、半隐藏，点击回到软件
