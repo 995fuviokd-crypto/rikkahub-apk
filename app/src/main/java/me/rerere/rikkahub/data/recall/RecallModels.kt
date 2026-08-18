@@ -49,6 +49,8 @@ data class SideEffectLog(
     val memoryActions: List<MemoryActionRecord> = emptyList(),
     val clipboardBefore: String? = null,
     val clipboardAfter: String? = null,
+    val calendarEventIds: List<Long> = emptyList(),
+    val volumeStream: Int? = null,
     val volumeBefore: Int? = null,
     val volumeAfter: Int? = null,
 ) {
@@ -56,6 +58,7 @@ data class SideEffectLog(
         get() = workspaceSnapshotId == null &&
             memoryActions.isEmpty() &&
             clipboardBefore == null &&
+            calendarEventIds.isEmpty() &&
             volumeBefore == null
 }
 

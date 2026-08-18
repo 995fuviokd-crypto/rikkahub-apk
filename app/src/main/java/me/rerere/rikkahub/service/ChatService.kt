@@ -1,7 +1,10 @@
 package me.rerere.rikkahub.service
 
 import android.app.Application
+import android.content.ContentUris
 import android.content.Context
+import android.media.AudioManager
+import android.provider.CalendarContract
 import android.util.Log
 import androidx.core.net.toUri
 import kotlinx.coroutines.CancellationException
@@ -1589,7 +1592,28 @@ class ChatService(
             runCatching { context.writeClipboardText(clipboardText) }.onFailure { ok = false }
         }
 
+        if (undo) {
+            log.calendarEventIds.forEach { eventId ->
+                runCatching { deleteCalendarEvent(eventId) }.onFailure { ok = false }
+            }
+        }
+
+        val targetVolume = if (undo) log.volumeBefore else log.volumeAfter
+        if (log.volumeStream != null && targetVolume != null) {
+            runCatching { setStreamVolume(log.volumeStream, targetVolume) }.onFailure { ok = false }
+        }
+
         return ok
+    }
+
+    private fun deleteCalendarEvent(eventId: Long) {
+        val uri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId)
+        context.contentResolver.delete(uri, null, null)
+    }
+
+    private fun setStreamVolume(stream: Int, level: Int) {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audioManager.setStreamVolume(stream, level, 0)
     }
 
     private suspend fun undoMemory(action: MemoryActionRecord) {
