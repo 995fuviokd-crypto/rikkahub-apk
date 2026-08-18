@@ -620,7 +620,6 @@ class ChatService(
             workspaceRoots = workspaceIds.map { it.toString() },
         )
         while (true) {
-            var hasReceivedChunkInRun = false
             val result = runCatching {
 
             // reset suggestions
@@ -761,9 +760,6 @@ class ChatService(
                     )
                 )
             }.collect { chunk ->
-                if (!hasReceivedChunkInRun) {
-                    hasReceivedChunkInRun = true
-                }
                 // 自动压缩：生成中/工具执行中强制介入
                 if (settings.autoCompressEnabled && autoCompressTries < MAX_AUTO_COMPRESS_TRIES && chunk is GenerationChunk.Messages) {
                     // 全量 token 估算是 O(全部消息字符) 扫描，按 TOKEN_ESTIMATE_INTERVAL_MS 节流，
@@ -832,10 +828,6 @@ class ChatService(
             // 自动重连：除用户主动取消外的任何错误（网络中断、流截断、协议异常等）都立即重连，
             // 不再区分错误类型，也不再指数退避，保证信息截断或异常时第一时间续跑
             if (messageRange == null && settings.autoReconnectEnabled && shouldReconnect(failure)) {
-                // 一次"单次"重连窗口：自上次成功收到响应以来已尝试的次数
-                if (hasReceivedChunkInRun) {
-                    reconnectAttempts = 0
-                }
                 reconnectAttempts++
                 if (reconnectAttempts <= settings.autoReconnectMaxRetries) {
                     Logging.log(TAG, "handleMessageComplete: generation interrupted (${failure?.javaClass?.simpleName}), reconnecting ($reconnectAttempts/${settings.autoReconnectMaxRetries})")
