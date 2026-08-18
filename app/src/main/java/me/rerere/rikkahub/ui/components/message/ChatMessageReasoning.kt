@@ -178,6 +178,7 @@ private fun ReasoningContent(
                 ),
                 style = reasoningTextStyle,
                 modifier = Modifier.fillMaxSize(),
+                streaming = loading,
             )
         }
         // 流式生成期间不启用 SelectionContainer，避免 selectable 列表并发修改导致的

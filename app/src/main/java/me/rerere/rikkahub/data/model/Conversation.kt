@@ -64,13 +64,17 @@ data class Conversation(
             val node = newNodes
                 .getOrElse(index) { message.toMessageNode() }
 
+            // 快速短路：消息已存在且内容未变化时直接跳过。流式 emit 携带完整历史，
+            // 只有末条消息在变化，避免为每条历史消息重复创建列表并复制节点导致卡顿
+            val existingIndex = node.messages.indexOfFirst { it.id == message.id }
+            if (existingIndex >= 0 && node.messages[existingIndex] == message) {
+                return@forEachIndexed
+            }
+
             val newMessages = node.messages.toMutableList()
             var newMessageIndex = node.selectIndex
-            if (newMessages.any { it.id == message.id }) {
-                val existingIndex = newMessages.indexOfFirst { it.id == message.id }
-                if (newMessages[existingIndex] != message) {
-                    newMessages[existingIndex] = message
-                }
+            if (existingIndex >= 0) {
+                newMessages[existingIndex] = message
             } else {
                 newMessages.add(message)
                 newMessageIndex = newMessages.lastIndex
