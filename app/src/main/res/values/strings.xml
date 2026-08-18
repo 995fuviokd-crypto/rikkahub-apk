@@ -465,6 +465,17 @@
   <string name="setting_page_ignore_battery_optimizations_desc">Exempt the app from battery restrictions to reduce background killing</string>
   <string name="setting_page_ignore_battery_optimizations_action">Grant</string>
   <string name="setting_page_ignore_battery_optimizations_done">Granted</string>
+  <string name="notification_channel_floating_bubble">Floating Bubble</string>
+  <string name="notification_floating_bubble_running">Floating bubble is on</string>
+  <string name="notification_floating_bubble_desc">Tap the bubble to return to RikkaHub quickly</string>
+  <string name="setting_page_floating_bubble">Floating Bubble</string>
+  <string name="setting_page_floating_bubble_title">Floating bubble</string>
+  <string name="setting_page_floating_bubble_desc">Show a draggable bubble above all apps. Tap it to return to the app</string>
+  <string name="setting_page_floating_bubble_color">Color</string>
+  <string name="setting_page_floating_bubble_size">Size</string>
+  <string name="setting_page_floating_bubble_permission_title">Overlay permission required</string>
+  <string name="setting_page_floating_bubble_permission_desc">The floating bubble needs the "display over other apps" permission. Go to settings to grant it?</string>
+  <string name="setting_page_floating_bubble_permission_grant">Go to settings</string>
   <string name="permission_camera">Camera</string>
   <string name="permission_camera_desc">Camera permission is required to take photos</string>
   <string name="permission_desc_goto_setting">Some permissions have been permanently denied, please go to the app settings to manually enable them:</string>

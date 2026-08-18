@@ -1369,6 +1369,17 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_page_ignore_battery_optimizations_desc">豁免本应用的电池限制，减少后台被杀</string>
   <string name="setting_page_ignore_battery_optimizations_action">授予</string>
   <string name="setting_page_ignore_battery_optimizations_done">已授予</string>
+  <string name="notification_channel_floating_bubble">悬浮球</string>
+  <string name="notification_floating_bubble_running">悬浮球已开启</string>
+  <string name="notification_floating_bubble_desc">点击悬浮球可快速回到 RikkaHub</string>
+  <string name="setting_page_floating_bubble">悬浮球</string>
+  <string name="setting_page_floating_bubble_title">悬浮球</string>
+  <string name="setting_page_floating_bubble_desc">在所有应用上方显示可拖动的悬浮小球，点击回到软件</string>
+  <string name="setting_page_floating_bubble_color">颜色</string>
+  <string name="setting_page_floating_bubble_size">大小</string>
+  <string name="setting_page_floating_bubble_permission_title">需要悬浮窗权限</string>
+  <string name="setting_page_floating_bubble_permission_desc">开启悬浮球需要"显示在其他应用上层"权限，是否前往系统设置授权？</string>
+  <string name="setting_page_floating_bubble_permission_grant">前往授权</string>
   <string name="setting_tts_page_default_playback_speed">默认播放速度</string>
   <string name="setting_tts_page_default_playback_speed_description">本地应用于所有 TTS 提供商，不改变其合成设置。</string>
   <string name="theme_name_claude">Claude</string>

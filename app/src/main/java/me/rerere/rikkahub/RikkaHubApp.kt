@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import androidx.compose.foundation.ComposeFoundationFlags
 import androidx.compose.runtime.Composer
@@ -34,6 +35,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.fts.SimpleDictManager
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.service.ChatService
+import me.rerere.rikkahub.service.FloatingBubbleService
 import me.rerere.rikkahub.service.KeepAliveService
 import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.utils.CrashHandler
@@ -52,6 +54,7 @@ const val CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID = "chat_completed"
 const val CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID = "chat_live_update"
 const val WEB_SERVER_NOTIFICATION_CHANNEL_ID = "web_server"
 const val KEEP_ALIVE_NOTIFICATION_CHANNEL_ID = "keep_alive"
+const val FLOATING_BUBBLE_NOTIFICATION_CHANNEL_ID = "floating_bubble"
 
 class RikkaHubApp : Application() {
     override fun onCreate() {
@@ -126,6 +129,9 @@ class RikkaHubApp : Application() {
 
         // 后台保活: 进应用即在前台消息栏常驻显示"正在运行中"
         startKeepAliveIfEnabled()
+
+        // 悬浮球: 若已开启则恢复系统级悬浮球
+        startFloatingBubbleIfEnabled()
 
         // Increment launch count
         incrementLaunchCount()
@@ -259,6 +265,26 @@ class RikkaHubApp : Application() {
         }
     }
 
+    private fun startFloatingBubbleIfEnabled() {
+        get<AppScope>().launch(Dispatchers.Default) {
+            runCatching {
+                delay(300)
+                val settings = get<SettingsStore>().settingsFlowRaw.first()
+                if (!settings.floatingBubbleEnabled) return@launch
+                if (!Settings.canDrawOverlays(this@RikkaHubApp)) {
+                    Log.w(TAG, "startFloatingBubbleIfEnabled: overlay permission not granted, skipping")
+                    return@launch
+                }
+                val intent = Intent(this@RikkaHubApp, FloatingBubbleService::class.java).apply {
+                    action = FloatingBubbleService.ACTION_START
+                }
+                startForegroundService(intent)
+            }.onFailure {
+                Log.e(TAG, "startFloatingBubbleIfEnabled failed", it)
+            }
+        }
+    }
+
     private fun createNotificationChannel() {
         val notificationManager = NotificationManagerCompat.from(this)
         val chatCompletedChannel = NotificationChannelCompat
@@ -296,6 +322,14 @@ class RikkaHubApp : Application() {
             .setShowBadge(false)
             .build()
         notificationManager.createNotificationChannel(keepAliveChannel)
+
+        val floatingBubbleChannel = NotificationChannelCompat
+            .Builder(FLOATING_BUBBLE_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_LOW)
+            .setName(getString(R.string.notification_channel_floating_bubble))
+            .setVibrationEnabled(false)
+            .setShowBadge(false)
+            .build()
+        notificationManager.createNotificationChannel(floatingBubbleChannel)
     }
 
     override fun onTerminate() {

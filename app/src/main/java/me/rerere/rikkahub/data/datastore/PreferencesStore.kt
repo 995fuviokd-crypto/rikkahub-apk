@@ -118,6 +118,11 @@ class SettingsStore(
         val RECALL_ROLLBACK_ENABLED = booleanPreferencesKey("recall_rollback_enabled")
         val RECALL_INFORMED_AI = booleanPreferencesKey("recall_informed_ai")
 
+        // 悬浮球：系统级悬浮窗，点击回到软件
+        val FLOATING_BUBBLE_ENABLED = booleanPreferencesKey("floating_bubble_enabled")
+        val FLOATING_BUBBLE_COLOR = stringPreferencesKey("floating_bubble_color")
+        val FLOATING_BUBBLE_SIZE = intPreferencesKey("floating_bubble_size")
+
         // 提供商
         val PROVIDERS = stringPreferencesKey("providers")
 
@@ -224,6 +229,9 @@ class SettingsStore(
                 recallBoundaryPunctuation = preferences[RECALL_BOUNDARY_PUNCTUATION] ?: "。！？～",
                 recallRollbackEnabled = preferences[RECALL_ROLLBACK_ENABLED] ?: true,
                 recallInformedAi = preferences[RECALL_INFORMED_AI] ?: true,
+                floatingBubbleEnabled = preferences[FLOATING_BUBBLE_ENABLED] ?: false,
+                floatingBubbleColor = preferences[FLOATING_BUBBLE_COLOR]?.toLongOrNull() ?: 0xFF4F8EF7,
+                floatingBubbleSize = preferences[FLOATING_BUBBLE_SIZE] ?: 48,
                 assistantId = preferences[SELECT_ASSISTANT]?.let { Uuid.parse(it) }
                     ?: DEFAULT_ASSISTANT_ID,
                 assistantTags = preferences[ASSISTANT_TAGS]?.let {
@@ -443,6 +451,9 @@ class SettingsStore(
             preferences[RECALL_BOUNDARY_PUNCTUATION] = settings.recallBoundaryPunctuation
             preferences[RECALL_ROLLBACK_ENABLED] = settings.recallRollbackEnabled
             preferences[RECALL_INFORMED_AI] = settings.recallInformedAi
+            preferences[FLOATING_BUBBLE_ENABLED] = settings.floatingBubbleEnabled
+            preferences[FLOATING_BUBBLE_COLOR] = settings.floatingBubbleColor.toString()
+            preferences[FLOATING_BUBBLE_SIZE] = settings.floatingBubbleSize
 
             preferences[PROVIDERS] = JsonInstant.encodeToString(settings.providers)
 
@@ -655,6 +666,10 @@ data class Settings(
     val screenResolutionOverrideHeight: Int = 0,
     // 后台保活常驻通知：进应用即在消息栏常驻显示"正在运行中"
     val keepAliveEnabled: Boolean = true,
+    // 悬浮球：系统级悬浮窗，可拖动、半隐藏，点击回到软件
+    val floatingBubbleEnabled: Boolean = false,
+    val floatingBubbleColor: Long = 0xFF4F8EF7,
+    val floatingBubbleSize: Int = 48,
 ) {
     companion object {
         // 构造一个用于初始化的settings, 但它不能用于保存，防止使用初始值存储

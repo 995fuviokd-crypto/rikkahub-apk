@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.ui.pages.setting
 
 import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -8,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -17,29 +20,38 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.DisplaySetting
+import me.rerere.rikkahub.service.FloatingBubbleService
 import me.rerere.rikkahub.service.KeepAliveService
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.ColorPickerRow
 import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceBoolean
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.hasIgnoreBatteryOptimizationsPermission
 import me.rerere.rikkahub.utils.openBatteryOptimizationSettings
 import me.rerere.rikkahub.utils.plus
+import kotlin.math.roundToInt
 import org.koin.androidx.compose.koinViewModel
 
 @Composable
@@ -387,6 +399,119 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                             }
                         )
                     }
+                }
+            }
+
+            item {
+                val bubbleContext = LocalContext.current
+                var showOverlayPermissionDialog by remember { mutableStateOf(false) }
+                val lifecycleOwner = LocalLifecycleOwner.current
+                DisposableEffect(lifecycleOwner, settings.floatingBubbleEnabled) {
+                    val observer = LifecycleEventObserver { _, event ->
+                        if (event == Lifecycle.Event.ON_RESUME &&
+                            settings.floatingBubbleEnabled &&
+                            Settings.canDrawOverlays(bubbleContext)
+                        ) {
+                            bubbleContext.startForegroundService(
+                                Intent(bubbleContext, FloatingBubbleService::class.java)
+                            )
+                        }
+                    }
+                    lifecycleOwner.lifecycle.addObserver(observer)
+                    onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+                }
+                CardGroup(
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    title = { Text(stringResource(R.string.setting_page_floating_bubble)) },
+                ) {
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_page_floating_bubble_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_floating_bubble_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.floatingBubbleEnabled,
+                                onCheckedChange = { enabled ->
+                                    vm.updateSettings(settings.copy(floatingBubbleEnabled = enabled))
+                                    if (!enabled) {
+                                        bubbleContext.stopService(
+                                            Intent(bubbleContext, FloatingBubbleService::class.java)
+                                        )
+                                    } else if (Settings.canDrawOverlays(bubbleContext)) {
+                                        bubbleContext.startForegroundService(
+                                            Intent(bubbleContext, FloatingBubbleService::class.java)
+                                        )
+                                    } else {
+                                        showOverlayPermissionDialog = true
+                                    }
+                                }
+                            )
+                        },
+                    )
+                    if (settings.floatingBubbleEnabled) {
+                        item(
+                            headlineContent = { Text(stringResource(R.string.setting_page_floating_bubble_color)) },
+                            supportingContent = {
+                                ColorPickerRow(
+                                    color = Color(settings.floatingBubbleColor.toInt()),
+                                    onColorChange = { color ->
+                                        vm.updateSettings(
+                                            settings.copy(
+                                                floatingBubbleColor = color.toArgb().toLong() and 0xFFFFFFFFL
+                                            )
+                                        )
+                                    }
+                                )
+                            },
+                        )
+                        item(
+                            headlineContent = { Text(stringResource(R.string.setting_page_floating_bubble_size)) },
+                            supportingContent = {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Slider(
+                                        value = settings.floatingBubbleSize.toFloat(),
+                                        onValueChange = { value ->
+                                            vm.updateSettings(
+                                                settings.copy(floatingBubbleSize = value.roundToInt())
+                                            )
+                                        },
+                                        valueRange = 32f..80f,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Text("${settings.floatingBubbleSize}dp")
+                                }
+                            },
+                        )
+                    }
+                }
+                if (showOverlayPermissionDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showOverlayPermissionDialog = false },
+                        title = { Text(stringResource(R.string.setting_page_floating_bubble_permission_title)) },
+                        text = { Text(stringResource(R.string.setting_page_floating_bubble_permission_desc)) },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    showOverlayPermissionDialog = false
+                                    val intent = Intent(
+                                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                        Uri.parse("package:${bubbleContext.packageName}")
+                                    )
+                                    runCatching { bubbleContext.startActivity(intent) }
+                                }
+                            ) {
+                                Text(stringResource(R.string.setting_page_floating_bubble_permission_grant))
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showOverlayPermissionDialog = false }) {
+                                Text(stringResource(android.R.string.cancel))
+                            }
+                        },
+                    )
                 }
             }
 
