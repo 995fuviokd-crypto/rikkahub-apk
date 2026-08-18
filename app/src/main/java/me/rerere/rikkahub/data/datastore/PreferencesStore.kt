@@ -122,6 +122,11 @@ class SettingsStore(
         val FLOATING_BUBBLE_ENABLED = booleanPreferencesKey("floating_bubble_enabled")
         val FLOATING_BUBBLE_COLOR = stringPreferencesKey("floating_bubble_color")
         val FLOATING_BUBBLE_SIZE = intPreferencesKey("floating_bubble_size")
+        // 悬浮球展开窗口：宽度/高度（dp），以及待办/实时输出标签开关
+        val FLOATING_BUBBLE_EXPAND_WIDTH = intPreferencesKey("floating_bubble_expand_width")
+        val FLOATING_BUBBLE_EXPAND_HEIGHT = intPreferencesKey("floating_bubble_expand_height")
+        val FLOATING_BUBBLE_SHOW_TODO_TAB = booleanPreferencesKey("floating_bubble_show_todo_tab")
+        val FLOATING_BUBBLE_SHOW_LIVE_TAB = booleanPreferencesKey("floating_bubble_show_live_tab")
 
         // 提供商
         val PROVIDERS = stringPreferencesKey("providers")
@@ -232,6 +237,10 @@ class SettingsStore(
                 floatingBubbleEnabled = preferences[FLOATING_BUBBLE_ENABLED] ?: false,
                 floatingBubbleColor = preferences[FLOATING_BUBBLE_COLOR]?.toLongOrNull() ?: 0xFF4F8EF7,
                 floatingBubbleSize = preferences[FLOATING_BUBBLE_SIZE] ?: 48,
+                floatingBubbleExpandWidth = preferences[FLOATING_BUBBLE_EXPAND_WIDTH] ?: 300,
+                floatingBubbleExpandHeight = preferences[FLOATING_BUBBLE_EXPAND_HEIGHT] ?: 420,
+                floatingBubbleShowTodoTab = preferences[FLOATING_BUBBLE_SHOW_TODO_TAB] ?: true,
+                floatingBubbleShowLiveTab = preferences[FLOATING_BUBBLE_SHOW_LIVE_TAB] ?: true,
                 assistantId = preferences[SELECT_ASSISTANT]?.let { Uuid.parse(it) }
                     ?: DEFAULT_ASSISTANT_ID,
                 assistantTags = preferences[ASSISTANT_TAGS]?.let {
@@ -454,6 +463,10 @@ class SettingsStore(
             preferences[FLOATING_BUBBLE_ENABLED] = settings.floatingBubbleEnabled
             preferences[FLOATING_BUBBLE_COLOR] = settings.floatingBubbleColor.toString()
             preferences[FLOATING_BUBBLE_SIZE] = settings.floatingBubbleSize
+            preferences[FLOATING_BUBBLE_EXPAND_WIDTH] = settings.floatingBubbleExpandWidth
+            preferences[FLOATING_BUBBLE_EXPAND_HEIGHT] = settings.floatingBubbleExpandHeight
+            preferences[FLOATING_BUBBLE_SHOW_TODO_TAB] = settings.floatingBubbleShowTodoTab
+            preferences[FLOATING_BUBBLE_SHOW_LIVE_TAB] = settings.floatingBubbleShowLiveTab
 
             preferences[PROVIDERS] = JsonInstant.encodeToString(settings.providers)
 
@@ -670,6 +683,11 @@ data class Settings(
     val floatingBubbleEnabled: Boolean = false,
     val floatingBubbleColor: Long = 0xFF4F8EF7,
     val floatingBubbleSize: Int = 48,
+    // 悬浮球展开窗口：宽度/高度（dp），以及待办/实时输出标签开关
+    val floatingBubbleExpandWidth: Int = 300,
+    val floatingBubbleExpandHeight: Int = 420,
+    val floatingBubbleShowTodoTab: Boolean = true,
+    val floatingBubbleShowLiveTab: Boolean = true,
 ) {
     companion object {
         // 构造一个用于初始化的settings, 但它不能用于保存，防止使用初始值存储

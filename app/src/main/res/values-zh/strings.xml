@@ -1377,6 +1377,10 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_page_floating_bubble_desc">在所有应用上方显示可拖动的悬浮小球，点击回到软件</string>
   <string name="setting_page_floating_bubble_color">颜色</string>
   <string name="setting_page_floating_bubble_size">大小</string>
+  <string name="setting_page_floating_bubble_expand_width">展开窗口宽度</string>
+  <string name="setting_page_floating_bubble_expand_height">展开窗口高度</string>
+  <string name="setting_page_floating_bubble_show_todo_tab">显示待办标签</string>
+  <string name="setting_page_floating_bubble_show_live_tab">显示实时输出标签</string>
   <string name="setting_page_floating_bubble_permission_title">需要悬浮窗权限</string>
   <string name="setting_page_floating_bubble_permission_desc">开启悬浮球需要"显示在其他应用上层"权限，是否前往系统设置授权？</string>
   <string name="setting_page_floating_bubble_permission_grant">前往授权</string>

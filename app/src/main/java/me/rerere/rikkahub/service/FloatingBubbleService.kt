@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.view.MotionEvent
@@ -33,6 +34,7 @@ import me.rerere.rikkahub.FLOATING_BUBBLE_NOTIFICATION_CHANNEL_ID
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.RouteActivity
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.ui.floating.FloatingExpandWindow
 import org.koin.android.ext.android.inject
 
 private const val TAG = "FloatingBubbleService"
@@ -55,9 +57,11 @@ class FloatingBubbleService : Service() {
         private const val SIZE_MIN_DP = 32
         private const val SIZE_MAX_DP = 80
         private const val HALF_HIDE_ALPHA = 0.5f
+        private const val DOUBLE_CLICK_INTERVAL_MS = 350L
     }
 
     private val settingsStore: SettingsStore by inject()
+    private val floatingActivityHub: FloatingActivityHub by inject()
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -65,6 +69,7 @@ class FloatingBubbleService : Service() {
 
     private var control: IFxAppControl? = null
     private var bubbleView: BubbleView? = null
+    private var expandWindow: FloatingExpandWindow? = null
 
     // 悬浮球外观状态
     private var bubbleColor = 0xFF4F8EF7.toInt()
@@ -74,6 +79,11 @@ class FloatingBubbleService : Service() {
     // 交互状态
     private var isHalfHidden = false
     private var hasDragged = false
+    private var lastClickTime = 0L
+
+    private val singleClickRunnable = Runnable {
+        toggleExpandWindow()
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -104,6 +114,8 @@ class FloatingBubbleService : Service() {
         super.onDestroy()
         settingsJob?.cancel()
         mainHandler.removeCallbacksAndMessages(null)
+        expandWindow?.hide()
+        expandWindow = null
         control?.cancel()
         control = null
         bubbleView = null
@@ -226,8 +238,31 @@ class FloatingBubbleService : Service() {
     private fun handleClick() {
         if (isHalfHidden) {
             restoreFromHalfHide()
-        } else {
+            return
+        }
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastClickTime < DOUBLE_CLICK_INTERVAL_MS) {
+            // 双击：收起展开窗口并回到软件
+            mainHandler.removeCallbacks(singleClickRunnable)
+            lastClickTime = 0L
+            expandWindow?.hide()
             launchApp()
+        } else {
+            // 单击：延迟到双击判定窗口之后执行展开/收起
+            lastClickTime = now
+            mainHandler.removeCallbacks(singleClickRunnable)
+            mainHandler.postDelayed(singleClickRunnable, DOUBLE_CLICK_INTERVAL_MS)
+        }
+    }
+
+    private fun toggleExpandWindow() {
+        val window = expandWindow ?: FloatingExpandWindow(this, floatingActivityHub, settingsStore).also {
+            expandWindow = it
+        }
+        if (window.isShowing) {
+            window.hide()
+        } else {
+            window.show()
         }
     }
 

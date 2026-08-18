@@ -473,6 +473,10 @@
   <string name="setting_page_floating_bubble_desc">Show a draggable bubble above all apps. Tap it to return to the app</string>
   <string name="setting_page_floating_bubble_color">Color</string>
   <string name="setting_page_floating_bubble_size">Size</string>
+  <string name="setting_page_floating_bubble_expand_width">Expand window width</string>
+  <string name="setting_page_floating_bubble_expand_height">Expand window height</string>
+  <string name="setting_page_floating_bubble_show_todo_tab">Show todo tab</string>
+  <string name="setting_page_floating_bubble_show_live_tab">Show live output tab</string>
   <string name="setting_page_floating_bubble_permission_title">Overlay permission required</string>
   <string name="setting_page_floating_bubble_permission_desc">The floating bubble needs the "display over other apps" permission. Go to settings to grant it?</string>
   <string name="setting_page_floating_bubble_permission_grant">Go to settings</string>

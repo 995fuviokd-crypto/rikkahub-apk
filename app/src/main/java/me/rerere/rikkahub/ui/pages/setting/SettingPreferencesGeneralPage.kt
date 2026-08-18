@@ -485,6 +485,72 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                                 }
                             },
                         )
+                        item(
+                            headlineContent = { Text(stringResource(R.string.setting_page_floating_bubble_show_todo_tab)) },
+                            trailingContent = {
+                                Switch(
+                                    checked = settings.floatingBubbleShowTodoTab,
+                                    onCheckedChange = { enabled ->
+                                        vm.updateSettings(settings.copy(floatingBubbleShowTodoTab = enabled))
+                                    },
+                                )
+                            },
+                        )
+                        item(
+                            headlineContent = { Text(stringResource(R.string.setting_page_floating_bubble_show_live_tab)) },
+                            trailingContent = {
+                                Switch(
+                                    checked = settings.floatingBubbleShowLiveTab,
+                                    onCheckedChange = { enabled ->
+                                        vm.updateSettings(settings.copy(floatingBubbleShowLiveTab = enabled))
+                                    },
+                                )
+                            },
+                        )
+                        item(
+                            headlineContent = { Text(stringResource(R.string.setting_page_floating_bubble_expand_width)) },
+                            supportingContent = {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Slider(
+                                        value = settings.floatingBubbleExpandWidth.toFloat(),
+                                        onValueChange = { value ->
+                                            vm.updateSettings(
+                                                settings.copy(floatingBubbleExpandWidth = value.roundToInt())
+                                            )
+                                        },
+                                        valueRange = 240f..500f,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Text("${settings.floatingBubbleExpandWidth}dp")
+                                }
+                            },
+                        )
+                        item(
+                            headlineContent = { Text(stringResource(R.string.setting_page_floating_bubble_expand_height)) },
+                            supportingContent = {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Slider(
+                                        value = settings.floatingBubbleExpandHeight.toFloat(),
+                                        onValueChange = { value ->
+                                            vm.updateSettings(
+                                                settings.copy(floatingBubbleExpandHeight = value.roundToInt())
+                                            )
+                                        },
+                                        valueRange = 280f..700f,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Text("${settings.floatingBubbleExpandHeight}dp")
+                                }
+                            },
+                        )
                     }
                 }
                 if (showOverlayPermissionDialog) {
