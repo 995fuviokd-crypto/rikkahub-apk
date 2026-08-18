@@ -161,6 +161,18 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
+                        headlineContent = { Text("自动批准工具调用") },
+                        supportingContent = { Text("工作区 / 系统等托管工具调用自动通过审批，无需每次手动确认（ask_user 仍会询问）") },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.autoApproveTools,
+                                onCheckedChange = {
+                                    vm.updateSettings(settings.copy(autoApproveTools = it))
+                                }
+                            )
+                        },
+                    )
+                    item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_display_scale_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_display_page_display_scale_desc)) },
                     )

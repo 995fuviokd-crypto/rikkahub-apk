@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.pages.extensions.workspace
 
 import android.content.Intent
 import android.provider.OpenableColumns
+import android.util.Log
 import android.webkit.MimeTypeMap
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -25,6 +26,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -196,6 +198,7 @@ fun WorkspaceDetailPage(id: String) {
                     onInstallRootfs = { showInstallDialog = true },
                     onToolApprovalChange = vm::setToolApproval,
                     onAndroidLocalAccessChange = vm::setAndroidLocalAccess,
+                    onLocalDirectoryChange = vm::setLocalDirectory,
                 )
 
                 1 -> WorkspaceFilesPage(
@@ -320,6 +323,7 @@ private fun WorkspaceBasicPage(
     onInstallRootfs: () -> Unit,
     onToolApprovalChange: (String, Boolean) -> Unit,
     onAndroidLocalAccessChange: (Boolean) -> Unit,
+    onLocalDirectoryChange: (String?) -> Unit,
 ) {
     val context = LocalContext.current
     // 手机全部文件访问权限状态, 从系统设置返回后(ON_RESUME)自动刷新
@@ -425,6 +429,61 @@ private fun WorkspaceBasicPage(
                             text = stringResource(R.string.workspace_detail_all_files_access_restart),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+
+                    // 本地目录互通: SAF 目录授权, 挂载为 /local, 不依赖「手机全部文件」权限
+                    HorizontalDivider()
+                    val localDirPicker = rememberLauncherForActivityResult(
+                        contract = ActivityResultContracts.OpenDocumentTree()
+                    ) { uri ->
+                        if (uri != null) {
+                            val resolver = context.contentResolver
+                            try {
+                                resolver.takePersistableUriPermission(
+                                    uri,
+                                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                                )
+                            } catch (e: SecurityException) {
+                                Log.w("WorkspaceDetail", "takePersistableUriPermission failed: $uri", e)
+                            }
+                            onLocalDirectoryChange(uri.toString())
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.workspace_detail_local_directory),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                text = if (workspace?.localDirectoryUri.isNullOrBlank()) {
+                                    stringResource(R.string.workspace_detail_local_directory_desc)
+                                } else {
+                                    stringResource(R.string.workspace_detail_local_directory_set)
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (workspace?.localDirectoryUri.isNullOrBlank()) {
+                            TextButton(onClick = { localDirPicker.launch(null) }) {
+                                Text(stringResource(R.string.workspace_detail_local_directory_pick))
+                            }
+                        } else {
+                            TextButton(onClick = { onLocalDirectoryChange(null) }) {
+                                Text(stringResource(R.string.workspace_detail_local_directory_clear))
+                            }
+                        }
+                    }
+                    if (!workspace?.localDirectoryUri.isNullOrBlank()) {
+                        Text(
+                            text = stringResource(R.string.workspace_detail_local_directory_note),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
                         )
                     }
                 }

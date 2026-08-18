@@ -250,6 +250,7 @@ class ChatService(
     private val workspaceManager: WorkspaceManager,
     private val workflowRepository: WorkflowRepository,
     private val workflowRunner: WorkflowRunner,
+    private val pluginManager: me.rerere.rikkahub.data.plugin.PluginManager,
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
@@ -672,6 +673,7 @@ class ChatService(
                 workspaceCwd = conversation.workspaceCwd,
                 conversationId = conversationId,
                 sideEffectRecorder = sideEffectRecorder,
+                extraSystemPrompts = pluginManager.enabledSystemPrompts(settings.enabledPlugins),
                 memories = if (!assistant.enableMemory) {
                     emptyList()
                 } else {

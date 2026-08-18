@@ -40,6 +40,9 @@ class WorkspaceManager(
 
     fun tempDir(root: String): File = File(workspaceDir(root), TEMP_DIR)
 
+    /** 用户本地目录（SAF 授权）在 App 内的镜像目录，挂载到 Rootfs 的 /local */
+    fun localDir(root: String): File = File(workspaceDir(root), LOCAL_DIR)
+
     fun hasRootfs(root: String): Boolean = File(linuxDir(root), "bin/sh").isFile
 
     fun deleteWorkspace(root: String): Boolean = workspaceDir(root).deleteRecursively()
@@ -134,6 +137,14 @@ class WorkspaceManager(
             )
         }
 
+        // 用户通过系统目录选择器授权的本地目录镜像（/local），可在 shell 与文件工具中读写
+        if (trimmed == LOCAL_DIR || trimmed.startsWith("$LOCAL_DIR/")) {
+            return RootfsLocation(
+                rootDir = localDir(root),
+                relativePath = trimmed.removePrefix(LOCAL_DIR).trimStart('/'),
+            )
+        }
+
         // 内核伪文件系统: 显式拒绝, 而不是回落到一个必然读不到的物理路径
         KERNEL_FS_MOUNTS.firstOrNull { trimmed == it || trimmed.startsWith("$it/") }?.let {
             error("$it is a kernel filesystem and cannot be read as a file, use workspace_shell instead")
@@ -225,6 +236,7 @@ class WorkspaceManager(
         timeoutMillis: Long = DEFAULT_COMMAND_TIMEOUT_MS,
         stdin: ByteArray? = null,
         includeAndroidLocal: Boolean = true,
+        extraBindMounts: List<WorkspaceBindMount> = emptyList(),
     ): WorkspaceCommandResult {
         require(command.isNotBlank()) { "Command is required" }
         val workingDir = fileSystem.resolve(filesDir(root), cwd)
@@ -245,6 +257,7 @@ class WorkspaceManager(
                 timeoutMillis = timeoutMillis,
                 stdin = stdin,
                 bindMounts = effectiveBindMounts,
+                extraBindMounts = extraBindMounts,
             )
         )
     }
@@ -281,6 +294,9 @@ class WorkspaceManager(
 
         /** Rootfs 内工作区文件区的挂载点 */
         const val ROOTFS_WORKSPACE_DIR = "/workspace"
+
+        /** 用户本地目录镜像的挂载点（/local -> 手机本地目录） */
+        const val LOCAL_DIR = "/local"
 
         /** 由宿主机透传的内核伪文件系统, 只能通过 shell 访问 */
         val KERNEL_FS_MOUNTS = listOf("/dev", "/proc", "/sys")

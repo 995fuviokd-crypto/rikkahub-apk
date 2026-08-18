@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.data.repository
 
+import android.content.Context
+import android.net.Uri
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +15,7 @@ import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.workspace.RootfsInstallProgress
 import me.rerere.workspace.RootfsInstaller
+import me.rerere.workspace.WorkspaceBindMount
 import me.rerere.workspace.WorkspaceCommandResult
 import me.rerere.workspace.WorkspaceFileEntry
 import me.rerere.workspace.WorkspaceManager
@@ -24,6 +27,7 @@ import java.io.OutputStream
 import kotlin.uuid.Uuid
 
 class WorkspaceRepository(
+    private val context: Context,
     private val dao: WorkspaceDAO,
     private val manager: WorkspaceManager,
     private val rootfsInstaller: RootfsInstaller,
@@ -116,6 +120,58 @@ class WorkspaceRepository(
         return true
     }
 
+    /**
+     * 设置工作区的本地目录（SAF tree Uri）。传 null 表示解除授权。
+     * 解除时清空镜像，避免残留内容被误挂载。
+     */
+    suspend fun setLocalDirectory(id: String, uri: String?): Boolean {
+        val workspace = dao.getById(id) ?: return false
+        dao.updateLocalDirectory(id, uri, System.currentTimeMillis())
+        withContext(Dispatchers.IO) {
+            if (uri.isNullOrBlank()) {
+                manager.localDir(workspace.root).deleteRecursively()
+            }
+        }
+        return true
+    }
+
+    /**
+     * 为工作区准备 /local 镜像：若已授权 SAF 目录且本地互通开启，
+     * 先把本地目录最新内容拉取到镜像，并返回 tree Uri（挂载 /local 用）。
+     */
+    private suspend fun prepareLocalMirror(workspace: WorkspaceEntity): Uri? {
+        if (!workspace.androidLocalAccess) return null
+        val uriString = workspace.localDirectoryUri
+        if (uriString.isNullOrBlank()) return null
+        val treeUri = runCatching { Uri.parse(uriString) }.getOrNull() ?: return null
+        if (!LocalDirectorySync.hasPersistedPermission(context, treeUri)) return null
+        val mirror = manager.localDir(workspace.root)
+        mirror.mkdirs()
+        LocalDirectorySync.syncToMirror(context, treeUri, mirror)
+        return treeUri
+    }
+
+    /** 操作 /local 路径前先同步本地目录 -> 镜像，返回 tree Uri（非 /local 路径返回 null） */
+    private suspend fun syncLocalMirrorBefore(workspace: WorkspaceEntity, path: String): Uri? {
+        if (!path.startsWith("$LOCAL_MOUNT_POINT/") && path != LOCAL_MOUNT_POINT) return null
+        return try {
+            prepareLocalMirror(workspace)
+        } catch (e: Throwable) {
+            Log.w(TAG, "prepareLocalMirror failed", e)
+            null
+        }
+    }
+
+    /** 操作 /local 路径后把镜像变更写回本地目录 */
+    private suspend fun syncLocalMirrorAfter(workspace: WorkspaceEntity, treeUri: Uri?) {
+        if (treeUri == null) return
+        try {
+            LocalDirectorySync.syncMirrorBack(context, treeUri, manager.localDir(workspace.root))
+        } catch (e: Throwable) {
+            Log.w(TAG, "syncMirrorBack failed", e)
+        }
+    }
+
     suspend fun installRootfs(
         id: String,
         url: String,
@@ -154,6 +210,7 @@ class WorkspaceRepository(
     ): List<WorkspaceFileEntry> = withContext(Dispatchers.IO) {
         val workspace = dao.getById(id) ?: return@withContext emptyList()
         manager.ensureWorkspace(workspace.root)
+        syncLocalMirrorBefore(workspace, path)
         manager.listFiles(workspace.root, path, area)
     }
 
@@ -189,6 +246,7 @@ class WorkspaceRepository(
     ): String = withContext(Dispatchers.IO) {
         val workspace = dao.getById(id) ?: error("Workspace not found: $id")
         manager.ensureWorkspace(workspace.root)
+        syncLocalMirrorBefore(workspace, path)
         when (area) {
             WorkspaceStorageArea.FILES -> manager.readText(workspace.root, path)
             WorkspaceStorageArea.LINUX -> {
@@ -242,6 +300,7 @@ class WorkspaceRepository(
     ): Long = withContext(Dispatchers.IO) {
         val workspace = dao.getById(id) ?: error("Workspace not found: $id")
         manager.ensureWorkspace(workspace.root)
+        syncLocalMirrorBefore(workspace, path)
         manager.rootfsFileSize(workspace.root, path, workspace.androidLocalAccess)
     }
 
@@ -253,6 +312,7 @@ class WorkspaceRepository(
     ) = withContext(Dispatchers.IO) {
         val workspace = dao.getById(id) ?: error("Workspace not found: $id")
         manager.ensureWorkspace(workspace.root)
+        syncLocalMirrorBefore(workspace, path)
         manager.exportRootfsFile(workspace.root, path, outputStream, workspace.androidLocalAccess)
     }
 
@@ -265,7 +325,10 @@ class WorkspaceRepository(
     ): WorkspaceFileEntry = withContext(Dispatchers.IO) {
         val workspace = dao.getById(id) ?: error("Workspace not found: $id")
         manager.ensureWorkspace(workspace.root)
-        manager.writeRootfsText(workspace.root, path, text, overwrite, workspace.androidLocalAccess)
+        val treeUri = syncLocalMirrorBefore(workspace, path)
+        val result = manager.writeRootfsText(workspace.root, path, text, overwrite, workspace.androidLocalAccess)
+        syncLocalMirrorAfter(workspace, treeUri)
+        result
     }
 
     suspend fun deleteFile(
@@ -300,8 +363,20 @@ class WorkspaceRepository(
         stdin: ByteArray? = null,
     ): WorkspaceCommandResult {
         val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        // SAF 本地目录: 命令前拉取到镜像并挂载 /local, 命令后把变更写回本地目录
+        val localUri = try {
+            prepareLocalMirror(workspace)
+        } catch (e: Throwable) {
+            Log.w(TAG, "prepareLocalMirror failed", e)
+            null
+        }
+        val extraBindMounts = if (localUri != null) {
+            listOf(WorkspaceBindMount(source = manager.localDir(workspace.root), target = LOCAL_MOUNT_POINT))
+        } else {
+            emptyList()
+        }
         // runInterruptible 让协程取消转化为线程中断，从而打断阻塞的 Process.waitFor 并杀掉进程
-        return runInterruptible(Dispatchers.IO) {
+        val result = runInterruptible(Dispatchers.IO) {
             manager.ensureWorkspace(workspace.root)
             manager.executeCommand(
                 workspace.root,
@@ -310,8 +385,11 @@ class WorkspaceRepository(
                 timeoutMillis,
                 stdin,
                 includeAndroidLocal = workspace.androidLocalAccess,
+                extraBindMounts = extraBindMounts,
             )
         }
+        syncLocalMirrorAfter(workspace, localUri)
+        return result
     }
 
     suspend fun delete(id: String): Boolean {
@@ -366,5 +444,8 @@ class WorkspaceRepository(
     companion object {
         private const val TAG = "WorkspaceRepository"
         private const val MAX_PREVIEW_BYTES = 512L * 1024
+
+        /** SAF 授权目录在 Rootfs 中的挂载点 */
+        const val LOCAL_MOUNT_POINT = "/local"
     }
 }

@@ -36,6 +36,10 @@ data class WorkspaceEntity(
     // Android 本地读写工作区与本地互通（默认开启）：关闭后 shell 不再挂载/解析 Android 本地目录
     @ColumnInfo("android_local_access", defaultValue = "1")
     val androidLocalAccess: Boolean = true,
+    // 用户通过系统目录选择器（SAF）授权的本地目录 Uri，镜像挂载到 Rootfs 的 /local；
+    // 为空表示未授权本地目录。该方式不依赖 MANAGE_EXTERNAL_STORAGE，任意目录都可读写。
+    @ColumnInfo("local_directory_uri", defaultValue = "null")
+    val localDirectoryUri: String? = null,
 ) {
     fun toolApprovalOverrides(): Map<String, Boolean> = runCatching {
         JsonInstant.decodeFromString<Map<String, Boolean>>(toolApprovals)

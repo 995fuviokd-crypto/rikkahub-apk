@@ -1252,6 +1252,12 @@
   <string name="workspace_detail_all_files_access_grant">Grant</string>
   <string name="workspace_detail_all_files_access_granted">Granted</string>
   <string name="workspace_detail_all_files_access_restart">Restart the app after granting access</string>
+  <string name="workspace_detail_local_directory">Local directory</string>
+  <string name="workspace_detail_local_directory_desc">Pick a folder on your phone to sync into the workspace as /local. Works without the all-files permission</string>
+  <string name="workspace_detail_local_directory_set">Synced into the workspace as /local</string>
+  <string name="workspace_detail_local_directory_pick">Choose folder</string>
+  <string name="workspace_detail_local_directory_clear">Remove</string>
+  <string name="workspace_detail_local_directory_note">Files are synced between the folder and /local before and after commands</string>
   <string name="workspace_detail_loading">Loading</string>
   <string name="workspace_detail_enable_shell">Enable Shell</string>
   <string name="workspace_detail_enable_shell_desc">Allow this workspace to run a terminal environment using local Rootfs</string>

@@ -100,6 +100,7 @@ class GenerationHandler(
         workspaceCwd: String? = null,
         conversationId: Uuid? = null,
         sideEffectRecorder: SideEffectRecorder? = null,
+        extraSystemPrompts: List<String> = emptyList(),
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
@@ -247,6 +248,7 @@ class GenerationHandler(
                     conversationModeInjectionIds = conversationModeInjectionIds,
                     conversationLorebookIds = conversationLorebookIds,
                     workspaceCwd = workspaceCwd,
+                    extraSystemPrompts = extraSystemPrompts,
                     // 多线路并发仅用于无工具首轮：工具调用会让不同线路产生分叉的工具参数，
                     // 状态无法合并；已有工具调用历史（hasToolCalls）或首轮就带工具时只用主线路
                     backupRoutes = if (assistant.streamOutput &&
@@ -287,6 +289,14 @@ class GenerationHandler(
                 val updatedTools = tools.map { tool ->
                     val toolDef = effectiveTools.find { it.name == tool.toolName }
                     when {
+                        // 自动审批开启：需审批的工具直接放行执行（ask_user 这类需要人工输入的工具除外）
+                        settings.autoApproveTools &&
+                            tool.toolName != "ask_user" &&
+                            toolDef?.needsApproval(tool.inputAsJson()) == true &&
+                            tool.approvalState is ToolApprovalState.Auto -> {
+                            Log.i(TAG, "generateText: auto-approving tool ${tool.toolName}")
+                            tool.copy(approvalState = ToolApprovalState.Approved)
+                        }
                         // Tool needs approval and state is Auto -> set to Pending
                         toolDef?.needsApproval(tool.inputAsJson()) == true &&
                             tool.approvalState is ToolApprovalState.Auto -> {
@@ -472,6 +482,7 @@ class GenerationHandler(
         conversationLorebookIds: Set<Uuid> = emptySet(),
         workspaceCwd: String? = null,
         backupRoutes: List<Pair<Provider<ProviderSetting>, ProviderSetting>> = emptyList(),
+        extraSystemPrompts: List<String> = emptyList(),
     ) {
         val internalMessages = buildList {
             val system = buildString {
@@ -489,6 +500,13 @@ class GenerationHandler(
                 if (assistant.enableMemory) {
                     appendLine()
                     append(buildMemoryPrompt(memories = memories))
+                }
+                // 插件注入的系统提示（启用插件的 systemPrompt）
+                extraSystemPrompts.forEach { prompt ->
+                    if (prompt.isNotBlank()) {
+                        appendLine()
+                        append(prompt)
+                    }
                 }
                 // 工具prompt
                 tools.forEach { tool ->

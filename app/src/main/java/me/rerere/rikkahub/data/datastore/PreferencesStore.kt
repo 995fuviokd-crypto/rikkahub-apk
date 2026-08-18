@@ -186,6 +186,12 @@ class SettingsStore(
 
         // 后台保活常驻通知：进应用即在前台服务消息栏显示"正在运行中"
         val KEEP_ALIVE_ENABLED = booleanPreferencesKey("keep_alive_enabled")
+        // 托管工具自动审批：开启后工作区/系统等需审批的工具调用自动通过（ask_user 除外）
+        val AUTO_APPROVE_TOOLS = booleanPreferencesKey("auto_approve_tools")
+        // 插件市场：已启用插件 id 集合（JSON）、市场索引仓库、GitHub 访问令牌
+        val ENABLED_PLUGINS = stringPreferencesKey("enabled_plugins")
+        val PLUGIN_MARKET_REPO = stringPreferencesKey("plugin_market_repo")
+        val GITHUB_TOKEN = stringPreferencesKey("github_token")
     }
 
     private val dataStore = context.settingsStore
@@ -301,8 +307,14 @@ class SettingsStore(
                 sponsorAlertDismissedAt = preferences[SPONSOR_ALERT_DISMISSED_AT] ?: 0,
                 displayScaleMode = preferences[DISPLAY_SCALE_MODE] ?: 0,
                 displayScaleDensityDpi = preferences[DISPLAY_SCALE_DENSITY_DPI] ?: 160,
+                autoApproveTools = preferences[AUTO_APPROVE_TOOLS] == true,
                 // 后台保活常驻默认开启
                 keepAliveEnabled = preferences[KEEP_ALIVE_ENABLED] != false,
+                enabledPlugins = preferences[ENABLED_PLUGINS]?.let {
+                    runCatching { JsonInstant.decodeFromString<Set<String>>(it) }.getOrDefault(emptySet())
+                } ?: emptySet(),
+                pluginMarketRepo = preferences[PLUGIN_MARKET_REPO] ?: Settings.DEFAULT_PLUGIN_MARKET_REPO,
+                githubToken = preferences[GITHUB_TOKEN] ?: "",
             )
         }
         .map {
@@ -501,7 +513,11 @@ class SettingsStore(
             preferences[SPONSOR_ALERT_DISMISSED_AT] = settings.sponsorAlertDismissedAt
             preferences[DISPLAY_SCALE_MODE] = settings.displayScaleMode
             preferences[DISPLAY_SCALE_DENSITY_DPI] = settings.displayScaleDensityDpi
+            preferences[AUTO_APPROVE_TOOLS] = settings.autoApproveTools
             preferences[KEEP_ALIVE_ENABLED] = settings.keepAliveEnabled
+            preferences[ENABLED_PLUGINS] = JsonInstant.encodeToString(settings.enabledPlugins)
+            preferences[PLUGIN_MARKET_REPO] = settings.pluginMarketRepo
+            preferences[GITHUB_TOKEN] = settings.githubToken
         }
     }
 
@@ -674,6 +690,14 @@ data class Settings(
     // mode: 0=恢复（跟随设备） 1=平板预设 2=自定义密度
     val displayScaleMode: Int = 0,
     val displayScaleDensityDpi: Int = 160,
+    // 托管工具自动审批：开启后工作区/系统等需审批的工具调用自动通过（ask_user 仍需人工）
+    val autoApproveTools: Boolean = false,
+    // 插件市场：已启用插件 id 集合；插件启用后注入 systemPrompt 并显示快捷操作
+    val enabledPlugins: Set<String> = emptySet(),
+    // 插件市场索引仓库（owner/repo，根目录放 plugins.json）
+    val pluginMarketRepo: String = DEFAULT_PLUGIN_MARKET_REPO,
+    // GitHub 访问令牌（PAT），用于上传插件到自己的仓库
+    val githubToken: String = "",
     // 后台保活常驻通知：进应用即在消息栏常驻显示"正在运行中"
     val keepAliveEnabled: Boolean = true,
     // 悬浮球：系统级悬浮窗，可拖动、半隐藏，点击回到软件
@@ -689,6 +713,9 @@ data class Settings(
     companion object {
         // 构造一个用于初始化的settings, 但它不能用于保存，防止使用初始值存储
         fun dummy() = Settings(init = true)
+
+        /** 默认插件市场索引仓库 */
+        const val DEFAULT_PLUGIN_MARKET_REPO = "rikkahub/plugin-market"
     }
 }
 

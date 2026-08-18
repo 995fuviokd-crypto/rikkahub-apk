@@ -184,6 +184,14 @@ class WorkspaceDetailVM(
         }
     }
 
+    fun setLocalDirectory(uri: String?) {
+        viewModelScope.launch {
+            val workspace = state.value.workspace ?: return@launch
+            repository.setLocalDirectory(workspace.id, uri)
+            loadWorkspace()
+        }
+    }
+
     fun installRootfs(url: String) {
         viewModelScope.launch {
             _installError.value = null

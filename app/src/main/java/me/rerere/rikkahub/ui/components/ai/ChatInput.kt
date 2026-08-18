@@ -44,6 +44,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -237,6 +238,32 @@ fun ChatInput(
                 ) {
                     if (state.messageContent.isNotEmpty()) {
                         MediaFileInputRow(state = state)
+                    }
+
+                    // 已启用插件的快捷操作按钮：点击把插件提示词填入输入框
+                    val pluginManager: me.rerere.rikkahub.data.plugin.PluginManager = koinInject()
+                    val pluginActions = remember(settings.enabledPlugins) {
+                        pluginManager.enabledActions(settings.enabledPlugins)
+                    }
+                    if (pluginActions.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            pluginActions.forEach { action ->
+                                SuggestionChip(
+                                    onClick = {
+                                        val current = state.textContent.text.toString()
+                                        state.setMessageText(
+                                            if (current.isBlank()) action.prompt else "$current ${action.prompt}"
+                                        )
+                                    },
+                                    label = { Text(action.label) },
+                                )
+                            }
+                        }
                     }
 
                     TextInputRow(

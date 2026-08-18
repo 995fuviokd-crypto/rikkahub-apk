@@ -81,7 +81,7 @@ val repositoryModule = module {
     }
 
     single {
-        WorkspaceRepository(get(), get(), get(), get())
+        WorkspaceRepository(get(), get(), get(), get(), get())
     }
 
     single {
@@ -94,5 +94,17 @@ val repositoryModule = module {
 
     single {
         WorkflowRepository(get())
+    }
+
+    single {
+        me.rerere.rikkahub.data.plugin.PluginManager(get())
+    }
+
+    single {
+        me.rerere.rikkahub.data.api.GitHubPluginAPI.create(get())
+    }
+
+    single {
+        me.rerere.rikkahub.data.api.PluginMarketDataSource(get(), get())
     }
 }

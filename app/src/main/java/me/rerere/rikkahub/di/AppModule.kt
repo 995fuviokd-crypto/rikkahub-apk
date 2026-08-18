@@ -99,6 +99,7 @@ val appModule = module {
             workspaceManager = get(),
             workflowRepository = get(),
             workflowRunner = get(),
+            pluginManager = get(),
         )
     }
 

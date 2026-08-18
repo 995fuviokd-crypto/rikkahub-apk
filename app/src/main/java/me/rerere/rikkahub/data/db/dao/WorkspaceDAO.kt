@@ -27,6 +27,9 @@ interface WorkspaceDAO {
     @Query("UPDATE workspaces SET android_local_access = :enabled, updated_at = :updatedAt WHERE id = :id")
     suspend fun updateAndroidLocalAccess(id: String, enabled: Boolean, updatedAt: Long): Int
 
+    @Query("UPDATE workspaces SET local_directory_uri = :uri, updated_at = :updatedAt WHERE id = :id")
+    suspend fun updateLocalDirectory(id: String, uri: String?, updatedAt: Long): Int
+
     @Query("DELETE FROM workspaces WHERE id = :id")
     suspend fun deleteById(id: String): Int
 }

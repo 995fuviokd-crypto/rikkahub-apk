@@ -79,6 +79,12 @@ class ProotShellRunner(
                 command += "${mount.source.absolutePath}:${mount.target.trimEnd('/')}"
             }
         }
+        context.extraBindMounts.forEach { mount ->
+            if (mount.source.exists()) {
+                command += "-b"
+                command += "${mount.source.absolutePath}:${mount.target.trimEnd('/')}"
+            }
+        }
 
         WorkspaceManager.KERNEL_FS_MOUNTS.forEach { path ->
             if (File(path).exists()) {
