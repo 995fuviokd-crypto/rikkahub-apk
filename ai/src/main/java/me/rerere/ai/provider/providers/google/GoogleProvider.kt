@@ -2,6 +2,9 @@ package me.rerere.ai.provider.providers.google
 
 import android.content.Context
 import android.util.Log
+import androidx.core.net.toUri
+import java.io.File
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
@@ -51,6 +54,7 @@ import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.metadataAs
 import me.rerere.ai.ui.toMetadata
+import me.rerere.ai.util.MAX_INLINE_FILE_SIZE_BYTES
 import me.rerere.ai.util.KeyRoulette
 import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.encodeBase64
@@ -66,6 +70,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.sse.EventSource
@@ -123,6 +128,116 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         }
     }
 
+    private fun buildUploadUrl(providerSetting: ProviderSetting.Google): HttpUrl {
+        val base = ApiEndpointResolver.resolveBaseUrl(providerSetting.baseUrl).toHttpUrl()
+        val versionPath = base.encodedPath.trimEnd('/')
+        return base.newBuilder()
+            .encodedPath("/upload$versionPath/files")
+            .build()
+    }
+
+    private suspend fun uploadFileToGemini(
+        providerSetting: ProviderSetting.Google,
+        file: File,
+        mimeType: String,
+    ): String = withContext(Dispatchers.IO) {
+        if (providerSetting.vertexAI) {
+            throw IllegalArgumentException("Large file upload is not supported for Vertex AI yet")
+        }
+
+        val uploadUrl = buildUploadUrl(providerSetting)
+
+        // 大文件上传耗时可能超过默认 writeTimeout(120s)，派生专用 client 放宽写超时
+        val uploadClient = client.newBuilder()
+            .writeTimeout(30, TimeUnit.MINUTES)
+            .readTimeout(10, TimeUnit.MINUTES)
+            .build()
+
+        // 第一步：开启 resumable 上传会话
+        val startBody = buildJsonObject {
+            put("file", buildJsonObject {
+                put("displayName", file.name)
+            })
+        }.toString().toRequestBody("application/json".toMediaType())
+
+        val startRequest = Request.Builder()
+            .url(uploadUrl)
+            .post(startBody)
+            .addHeader("X-Goog-Upload-Protocol", "resumable")
+            .addHeader("X-Goog-Upload-Command", "start")
+            .addHeader("X-Goog-Upload-Header-Content-Length", file.length().toString())
+            .addHeader("X-Goog-Upload-Header-Content-Type", mimeType)
+            .addHeader("x-goog-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
+            .configureReferHeaders(providerSetting.baseUrl)
+            .build()
+
+        val startResponse = uploadClient.newCall(startRequest).await()
+        if (!startResponse.isSuccessful) {
+            throw Exception("Failed to start file upload: ${startResponse.code} ${startResponse.body?.string()}")
+        }
+        val resumeUrl = startResponse.header("X-Goog-Upload-URL")
+            ?: throw Exception("Missing X-Goog-Upload-URL header in upload response")
+
+        // 第二步：流式上传文件内容（asRequestBody 边读边写，不占内存）
+        val uploadRequest = Request.Builder()
+            .url(resumeUrl)
+            .put(file.asRequestBody(mimeType.toMediaType()))
+            .addHeader("X-Goog-Upload-Command", "upload, finalize")
+            .build()
+
+        val uploadResponse = uploadClient.newCall(uploadRequest).await()
+        if (!uploadResponse.isSuccessful) {
+            throw Exception("Failed to upload file: ${uploadResponse.code} ${uploadResponse.body?.string()}")
+        }
+        val result = uploadResponse.body?.string() ?: throw Exception("Empty upload response")
+        json.parseToJsonElement(result).jsonObject["file"]
+            ?.jsonObject?.get("uri")?.jsonPrimitive?.content
+            ?: throw Exception("No file uri in upload response: $result")
+    }
+
+    private suspend fun preUploadLargeFiles(
+        providerSetting: ProviderSetting.Google,
+        messages: List<UIMessage>,
+    ): Map<String, String> {
+        val result = mutableMapOf<String, String>()
+        messages.forEach { message ->
+            message.parts.forEach { part ->
+                val (url, file, mimeType) = when (part) {
+                    is UIMessagePart.Video -> {
+                        val f = part.url.toLocalFileOrNull()
+                        if (f != null && f.length() > MAX_INLINE_FILE_SIZE_BYTES) {
+                            Triple(part.url, f, "video/mp4")
+                        } else {
+                            null
+                        }
+                    }
+
+                    is UIMessagePart.Audio -> {
+                        val f = part.url.toLocalFileOrNull()
+                        if (f != null && f.length() > MAX_INLINE_FILE_SIZE_BYTES) {
+                            Triple(part.url, f, "audio/mp3")
+                        } else {
+                            null
+                        }
+                    }
+
+                    else -> null
+                } ?: return@forEach
+
+                val fileUri = uploadFileToGemini(providerSetting, file, mimeType)
+                result[url] = fileUri
+            }
+        }
+        return result
+    }
+
+    private fun String.toLocalFileOrNull(): File? {
+        if (!startsWith("file://")) return null
+        val path = toUri().path ?: return null
+        val file = File(path)
+        return if (file.exists()) file else null
+    }
+
     override suspend fun listModels(providerSetting: ProviderSetting.Google): List<Model> =
         withContext(Dispatchers.IO) {
             val url = buildUrl(providerSetting = providerSetting, path = "models?pageSize=100")
@@ -167,7 +282,8 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): TextGenerationResult = withContext(Dispatchers.IO) {
-        val requestBody = buildCompletionRequestBody(messages, params)
+        val largeFileUris = preUploadLargeFiles(providerSetting, messages)
+        val requestBody = buildCompletionRequestBody(messages, params, largeFileUris)
 
         val url = buildUrl(
             providerSetting = providerSetting,
@@ -214,7 +330,8 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): Flow<StreamChunk> = callbackFlow {
-        val requestBody = buildCompletionRequestBody(messages, params)
+        val largeFileUris = preUploadLargeFiles(providerSetting, messages)
+        val requestBody = buildCompletionRequestBody(messages, params, largeFileUris)
 
         val url = buildUrl(
             providerSetting = providerSetting,
@@ -237,7 +354,9 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 .build()
         )
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        if (Log.isLoggable(TAG, Log.INFO)) {
+            Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        }
 
         val responseId = Uuid.random().toString()
         val decoder = GoogleStreamDecoder(responseId, params.model.modelId)
@@ -322,7 +441,8 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
     private fun buildCompletionRequestBody(
         messages: List<UIMessage>,
-        params: TextGenerationParams
+        params: TextGenerationParams,
+        largeFileUris: Map<String, String>,
     ): JsonObject = buildJsonObject {
         // System message if available
         val systemMessage = messages.firstOrNull { it.role == MessageRole.SYSTEM }
@@ -388,7 +508,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         // Contents (user messages)
         put(
             "contents",
-            buildContents(messages)
+            buildContents(messages, largeFileUris)
         )
 
         // Tools
@@ -574,28 +694,28 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         }
     }
 
-    private fun buildContents(messages: List<UIMessage>): JsonArray {
+    private fun buildContents(messages: List<UIMessage>, largeFileUris: Map<String, String>): JsonArray {
         return buildJsonArray {
             messages
                 .filter { it.role != MessageRole.SYSTEM && it.isValidToUpload() }
                 .forEach { message ->
                     if (message.role == MessageRole.ASSISTANT) {
-                        addModelMessage(message)
+                        addModelMessage(message, largeFileUris)
                     } else {
-                        addUserMessage(message)
+                        addUserMessage(message, largeFileUris)
                     }
                 }
         }
     }
 
-    private fun JsonArrayBuilder.addModelMessage(message: UIMessage) {
+    private fun JsonArrayBuilder.addModelMessage(message: UIMessage, largeFileUris: Map<String, String>) {
         val groups = groupPartsByToolBoundary(message.parts)
         val partsBuffer = mutableListOf<JsonObject>()
 
         for (group in groups) {
             when (group) {
                 is PartGroup.Content -> {
-                    group.parts.mapNotNull { it.toGooglePart() }.forEach { partsBuffer.add(it) }
+                    group.parts.mapNotNull { it.toGooglePart(largeFileUris) }.forEach { partsBuffer.add(it) }
                 }
 
                 is PartGroup.Tools -> {
@@ -613,7 +733,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     add(buildJsonObject {
                         put("role", "user")
                         putJsonArray("parts") {
-                            group.tools.forEach { add(it.toFunctionResponsePart()) }
+                            group.tools.forEach { add(it.toFunctionResponsePart(largeFileUris)) }
                         }
                     })
                 }
@@ -629,16 +749,16 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         }
     }
 
-    private fun JsonArrayBuilder.addUserMessage(message: UIMessage) {
+    private fun JsonArrayBuilder.addUserMessage(message: UIMessage, largeFileUris: Map<String, String>) {
         add(buildJsonObject {
             put("role", commonRoleToGoogleRole(message.role))
             putJsonArray("parts") {
-                message.parts.mapNotNull { it.toGooglePart() }.forEach { add(it) }
+                message.parts.mapNotNull { it.toGooglePart(largeFileUris) }.forEach { add(it) }
             }
         })
     }
 
-    private fun UIMessagePart.toGooglePart(): JsonObject? = when (this) {
+    private fun UIMessagePart.toGooglePart(largeFileUris: Map<String, String>): JsonObject? = when (this) {
         is UIMessagePart.Text -> buildJsonObject {
             put("text", text)
         }
@@ -658,23 +778,43 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         }
 
         is UIMessagePart.Video -> {
-            encodeBase64(false).getOrNull()?.let { base64Data ->
+            val fileUri = largeFileUris[this.url]
+            if (fileUri != null) {
                 buildJsonObject {
-                    put("inlineData", buildJsonObject {
+                    put("fileData", buildJsonObject {
                         put("mimeType", "video/mp4")
-                        put("data", base64Data)
+                        put("fileUri", fileUri)
                     })
+                }
+            } else {
+                encodeBase64(false).getOrNull()?.let { base64Data ->
+                    buildJsonObject {
+                        put("inlineData", buildJsonObject {
+                            put("mimeType", "video/mp4")
+                            put("data", base64Data)
+                        })
+                    }
                 }
             }
         }
 
         is UIMessagePart.Audio -> {
-            encodeBase64(false).getOrNull()?.let { base64Data ->
+            val fileUri = largeFileUris[this.url]
+            if (fileUri != null) {
                 buildJsonObject {
-                    put("inlineData", buildJsonObject {
+                    put("fileData", buildJsonObject {
                         put("mimeType", "audio/mp3")
-                        put("data", base64Data)
+                        put("fileUri", fileUri)
                     })
+                }
+            } else {
+                encodeBase64(false).getOrNull()?.let { base64Data ->
+                    buildJsonObject {
+                        put("inlineData", buildJsonObject {
+                            put("mimeType", "audio/mp3")
+                            put("data", base64Data)
+                        })
+                    }
                 }
             }
         }
@@ -692,7 +832,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         }
     }
 
-    private fun UIMessagePart.Tool.toFunctionResponsePart() = buildJsonObject {
+    private fun UIMessagePart.Tool.toFunctionResponsePart(largeFileUris: Map<String, String>) = buildJsonObject {
             put("functionResponse", buildJsonObject {
                 put("name", toolName)
 
@@ -700,11 +840,11 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 val textParts = output.filterIsInstance<UIMessagePart.Text>()
                 
                 // 2. 提取所有的多模态(图片/视频/音频)，并直接转为 Google 要求的格式
-                // 过滤出最终包含 inlineData 的数据块
+                // 过滤出最终包含 inlineData/fileData 的数据块
                 val mediaGoogleParts = output
                     .filter { it !is UIMessagePart.Text }
-                    .mapNotNull { it.toGooglePart() }
-                    .filter { it.containsKey("inlineData") } 
+                    .mapNotNull { it.toGooglePart(largeFileUris) }
+                    .filter { it.containsKey("inlineData") || it.containsKey("fileData") }
 
                 // 3. 构建给模型看的结构化 response 节点
                 put("response", buildJsonObject {
@@ -728,25 +868,24 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     }
                 })
 
-                // 4. 将真实的 Base64 多媒体数据挂载到 parts 中，并建立指针绑定
+                // 4. 将真实的多媒体数据挂载到 parts 中，并建立指针绑定
                 if (mediaGoogleParts.isNotEmpty()) {
                     putJsonArray("parts") {
                         mediaGoogleParts.forEachIndexed { index, googlePart ->
                             val refName = "media_ref_$index"
-                            val inlineData = googlePart["inlineData"]!!.jsonObject
 
                             add(buildJsonObject {
-                                // 重新组装 inlineData，并在内部注入 displayName
-                                put("inlineData", buildJsonObject {
-                                    // 复制原有的 mimeType 和 data
-                                    inlineData.forEach { (k, v) -> put(k, v) }
-                                    // 添加能够让 $ref 认出它的唯一名称
-                                    put("displayName", refName)
-                                })
-                                
-                                // 保留可能存在的其他字段
                                 googlePart.forEach { (k, v) ->
-                                    if (k != "inlineData") put(k, v)
+                                    if (k == "inlineData") {
+                                        // 重新组装 inlineData，并在内部注入 displayName
+                                        put("inlineData", buildJsonObject {
+                                            v.jsonObject.forEach { (ik, iv) -> put(ik, iv) }
+                                            // 添加能够让 $ref 认出它的唯一名称
+                                            put("displayName", refName)
+                                        })
+                                    } else {
+                                        put(k, v)
+                                    }
                                 }
                             })
                         }

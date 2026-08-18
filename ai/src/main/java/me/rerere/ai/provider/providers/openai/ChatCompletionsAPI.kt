@@ -101,7 +101,9 @@ class ChatCompletionsAPI(
                 .configureReferHeaders(providerSetting.baseUrl)
                 .build()
 
-            Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+            if (Log.isLoggable(TAG, Log.INFO)) {
+                Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+            }
 
             val response = client.newCall(request).await()
             if (response.isSuccessful) {
@@ -180,7 +182,9 @@ class ChatCompletionsAPI(
                 .configureReferHeaders(providerSetting.baseUrl)
                 .build()
 
-            Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+            if (Log.isLoggable(TAG, Log.INFO)) {
+                Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+            }
 
             val listener = object : EventSourceListener() {
                 override fun onEvent(

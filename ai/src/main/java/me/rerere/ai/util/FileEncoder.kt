@@ -18,6 +18,14 @@ private val supportedTypes = setOf(
     "image/webp",
 )
 
+/**
+ * 内联 base64 编码的文件大小上限(20MB)。
+ * 视频/音频/GIF 不做压缩、直接整文件 base64 进内存, 超大文件会触发 OOM。
+ * Google Gemini 对内联数据的限制同为 20MB, 超过此大小的文件应由
+ * GoogleProvider 走 Files API 上传(fileData 引用), 而非内联编码。
+ */
+internal const val MAX_INLINE_FILE_SIZE_BYTES = 20L * 1024 * 1024
+
 data class EncodedImage(
     val base64: String,
     val mimeType: String
@@ -196,6 +204,12 @@ private fun applyExifTransform(bitmap: Bitmap, transform: ExifTransformType): Bi
 }
 
 private fun File.encodeToBase64Streaming(): String {
+    val fileSize = length()
+    if (fileSize > MAX_INLINE_FILE_SIZE_BYTES) {
+        throw IllegalArgumentException(
+            "File too large to encode: $fileSize bytes (max $MAX_INLINE_FILE_SIZE_BYTES)"
+        )
+    }
     val byteArrayOutputStream = ByteArrayOutputStream()
     Base64OutputStream(byteArrayOutputStream, Base64.NO_WRAP).use { base64Stream ->
         inputStream().use { input ->
