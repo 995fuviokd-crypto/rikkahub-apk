@@ -45,6 +45,7 @@ import me.rerere.hugeicons.stroke.Stop
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.GroupMessage
 import me.rerere.rikkahub.data.model.GroupRun
+import me.rerere.rikkahub.data.model.MessageKind
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -185,6 +186,21 @@ fun GroupDetailPage(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
+                            }
+                        }
+                        running && messages.none { it.kind != MessageKind.SYSTEM } -> {
+                            item {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                    Text(
+                                        text = "正在等待 AI 成员响应…（超过 45 秒会提示超时）",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
                         }
                         messages.isEmpty() -> {

@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.ai.group
 
+import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -60,24 +61,38 @@ class ProviderGroupMemberCaller(
     private val providerManager: ProviderManager,
     private val settingsStore: SettingsStore,
 ) : GroupMemberCaller {
+    private companion object {
+        const val TAG = "GroupMemberCaller"
+    }
     override suspend fun call(member: GroupMember, prompt: String): String {
+        Log.i(TAG, "group member call start: role=${member.role} modelId=${member.modelId}")
         val settings = settingsStore.settingsFlow.value
         val model = settings.findModelById(member.modelId)
             ?: error("成员「${member.role}」的模型不存在，请重新配置")
         val providerSetting = model.findProvider(settings.providers)
             ?: error("成员「${member.role}」的模型未绑定可用的 Provider")
+        Log.i(TAG, "group member call resolved: model=${model.modelId} provider=$providerSetting")
         val provider = providerManager.getProviderByType(providerSetting)
         val params = TextGenerationParams(model = model)
         val text = StringBuilder()
-        provider.streamText(
-            providerSetting = providerSetting,
-            messages = listOf(UIMessage.user(prompt)),
-            params = params,
-        ).collect { chunk ->
-            if (chunk is StreamChunk.TextDelta) {
-                text.append(chunk.text)
+        var chunkCount = 0
+        val startTime = System.currentTimeMillis()
+        try {
+            provider.streamText(
+                providerSetting = providerSetting,
+                messages = listOf(UIMessage.user(prompt)),
+                params = params,
+            ).collect { chunk ->
+                if (chunk is StreamChunk.TextDelta) {
+                    chunkCount++
+                    text.append(chunk.text)
+                }
             }
+        } catch (e: Throwable) {
+            Log.w(TAG, "group member call failed: role=${member.role} ms=${System.currentTimeMillis() - startTime} chunks=$chunkCount err=${e.message}", e)
+            throw e
         }
+        Log.i(TAG, "group member call done: role=${member.role} ms=${System.currentTimeMillis() - startTime} chunks=$chunkCount len=${text.length}")
         return text.toString()
     }
 
@@ -166,7 +181,8 @@ class GroupRunner(
             appendLine("任务指令：$mission")
             appendLine("请输出一个 JSON 数组（不要输出其他内容），每个元素为 {\"id\":\"t1\",\"goal\":\"...\",\"memberId\":\"成员id\",\"dependsOn\":[\"t1\"]}，dependsOn 为该子任务依赖的前置子任务 id 列表，无依赖可省略。")
         }
-        val planText = callOrNull(orchestrator, planPrompt) ?: error("编排器生成任务计划超时")
+        val planText = callOrNull(orchestrator, planPrompt)
+            ?: error("编排器生成任务计划超时（45 秒无响应），请检查成员的模型与网络配置")
         onProgress(memberMessage(runId, group, orchestrator, planText, MessageKind.PLAN))
         val subtasks = parseSubtasks(planText)
         if (subtasks.isEmpty()) error("编排器未生成有效的子任务计划")
@@ -203,7 +219,7 @@ class GroupRunner(
                         val result = callOrNull(member, prompt)
                         if (result == null) {
                             workerFailed = true
-                            onProgress(systemMessage(runId, group, "成员「${member.role}」执行子任务超时"))
+                            onProgress(systemMessage(runId, group, "成员「${member.role}」执行子任务超时（45 秒无响应），已跳过该子任务"))
                             task.id to "【失败】执行超时"
                         } else {
                             onProgress(memberMessage(runId, group, member, result, MessageKind.SUBTASK))
@@ -256,7 +272,7 @@ class GroupRunner(
             }
             val result = callOrNull(member, prompt)
             if (result == null) {
-                error("成员「${member.role}」执行超时")
+                error("成员「${member.role}」执行超时（45 秒无响应），请检查该成员的模型与网络配置")
             }
             onProgress(memberMessage(runId, group, member, result, MessageKind.RESULT))
             current = result
@@ -292,7 +308,7 @@ class GroupRunner(
                 }
                 val result = callOrNull(member, prompt)
                 if (result == null) {
-                    onProgress(systemMessage(runId, group, "成员「${member.role}」第 $round 轮发言超时，已跳过"))
+                    onProgress(systemMessage(runId, group, "成员「${member.role}」第 $round 轮发言超时（45 秒无响应），已跳过"))
                     continue
                 }
                 onProgress(memberMessage(runId, group, member, result, MessageKind.REPLY))
@@ -385,7 +401,7 @@ class GroupRunner(
 
     companion object {
         const val SYSTEM_MEMBER_ID = "__system__"
-        private const val SINGLE_CALL_TIMEOUT_MILLIS = 120_000L
+        private const val SINGLE_CALL_TIMEOUT_MILLIS = 45_000L
         private const val MAX_CONTEXT_MESSAGES = 20
     }
 }

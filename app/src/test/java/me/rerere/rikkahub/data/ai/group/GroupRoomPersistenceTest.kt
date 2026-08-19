@@ -83,15 +83,11 @@ class GroupRoomPersistenceTest {
 
         val emissions = mutableListOf<List<GroupMessage>>()
         val job = launch { repo.listMessages("run-1").collect { emissions += it } }
-        delay(200)
-        assertTrue(emissions.isNotEmpty())
+        waitUntil { emissions.isNotEmpty() }
         assertTrue(emissions.last().isEmpty())
 
         repo.addMessage("run-1", "m1", "第一条消息", MessageKind.REPLY, "A", "model-A")
-        delay(300)
-
-        assertTrue(emissions.size >= 2)
-        assertTrue(emissions.last().any { it.content == "第一条消息" })
+        waitUntil { emissions.isNotEmpty() && emissions.last().any { it.content == "第一条消息" } }
 
         job.cancel()
     }
@@ -104,7 +100,7 @@ class GroupRoomPersistenceTest {
 
         val emissions = mutableListOf<GroupRun?>()
         val job = launch { repo.getRun("run-1").collect { emissions += it } }
-        delay(200)
+        waitUntil { emissions.isNotEmpty() }
         assertEquals(RunStatus.RUNNING, emissions.last()?.status)
 
         repo.upsertRun(
@@ -114,11 +110,17 @@ class GroupRoomPersistenceTest {
                 endedAt = System.currentTimeMillis(),
             )
         )
-        delay(300)
-
-        assertTrue(emissions.size >= 2)
-        assertEquals(RunStatus.SUCCESS, emissions.last()?.status)
+        waitUntil { emissions.size >= 2 && emissions.last()?.status == RunStatus.SUCCESS }
 
         job.cancel()
+    }
+
+    private suspend fun waitUntil(timeoutMs: Long = 10_000, condition: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (condition()) return
+            delay(50)
+        }
+        assertTrue("condition not met within $timeoutMs ms", condition())
     }
 }
