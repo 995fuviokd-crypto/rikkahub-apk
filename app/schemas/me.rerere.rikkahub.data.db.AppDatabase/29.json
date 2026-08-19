@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 29,
-    "identityHash": "abb6f76aaee8cb7363d3965051601a3d",
+    "identityHash": "4b1e424ff6c4adda100ff6ffab21e125",
     "entities": [
       {
         "tableName": "ConversationEntity",
@@ -611,7 +611,7 @@
       },
       {
         "tableName": "workspaces",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `root` TEXT NOT NULL, `shell_status` TEXT NOT NULL, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `last_access_at` INTEGER, `tool_approvals` TEXT NOT NULL DEFAULT '{}', `android_local_access` INTEGER NOT NULL DEFAULT 1, `local_directory_uri` TEXT DEFAULT null, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `root` TEXT NOT NULL, `shell_status` TEXT NOT NULL, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, `last_access_at` INTEGER, `tool_approvals` TEXT NOT NULL DEFAULT '{}', `android_local_access` INTEGER NOT NULL DEFAULT 1, `local_directory_uri` TEXT, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -671,8 +671,7 @@
           {
             "fieldPath": "localDirectoryUri",
             "columnName": "local_directory_uri",
-            "affinity": "TEXT",
-            "defaultValue": "null"
+            "affinity": "TEXT"
           }
         ],
         "primaryKey": {
@@ -818,7 +817,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'abb6f76aaee8cb7363d3965051601a3d')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '4b1e424ff6c4adda100ff6ffab21e125')"
     ]
   }
 }
