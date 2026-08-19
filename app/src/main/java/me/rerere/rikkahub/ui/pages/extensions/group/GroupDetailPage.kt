@@ -22,14 +22,16 @@ import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,13 +58,22 @@ fun GroupDetailPage(
 ) {
     val navController = LocalNavController.current
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val snackbarHostState = remember { SnackbarHostState() }
     val group by vm.group.collectAsStateWithLifecycle()
     val runs by vm.runs.collectAsStateWithLifecycle()
     val messages by vm.messages.collectAsStateWithLifecycle()
     val running by vm.running.collectAsStateWithLifecycle()
     val inlineMessages by vm.inlineMessages.collectAsStateWithLifecycle()
     val selectedRunId by vm.selectedRunId.collectAsStateWithLifecycle()
+    val launchError by vm.launchError.collectAsStateWithLifecycle()
     var mission by remember { mutableStateOf("") }
+
+    LaunchedEffect(launchError) {
+        launchError?.let { message ->
+            snackbarHostState.showSnackbar(message)
+            vm.consumeLaunchError()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -73,6 +84,7 @@ fun GroupDetailPage(
                 colors = CustomColors.topBarColors,
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = CustomColors.topBarColors.containerColor,
     ) { innerPadding ->
@@ -81,6 +93,16 @@ fun GroupDetailPage(
             contentPadding = innerPadding + PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (group == null) {
+                item {
+                    Text(
+                        text = "群组不存在或正在加载",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                return@LazyColumn
+            }
             group?.let { g ->
                 item {
                     GroupInfoCard(g)
@@ -155,9 +177,29 @@ fun GroupDetailPage(
                             style = MaterialTheme.typography.titleSmall,
                         )
                     }
-                    if (messages.isNotEmpty()) {
-                        items(messages, key = { it.id }) { message ->
-                            GroupMessageItem(message)
+                    when {
+                        selectedRunId == null -> {
+                            item {
+                                Text(
+                                    text = "发布一条指令，群组协作的过程与讨论会显示在这里",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        messages.isEmpty() -> {
+                            item {
+                                Text(
+                                    text = "该次运行暂无消息",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        else -> {
+                            items(messages, key = { it.id }) { message ->
+                                GroupMessageItem(message)
+                            }
                         }
                     }
                 }

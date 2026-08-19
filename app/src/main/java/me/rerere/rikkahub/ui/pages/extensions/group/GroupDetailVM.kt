@@ -43,6 +43,9 @@ class GroupDetailVM(
     private val _running = MutableStateFlow(false)
     val running: StateFlow<Boolean> = _running.asStateFlow()
 
+    private val _launchError = MutableStateFlow<String?>(null)
+    val launchError: StateFlow<String?> = _launchError.asStateFlow()
+
     // 消息展示双模式：true=在详情页内联展示，false=进入独立消息页面查看
     private val _inlineMessages = MutableStateFlow(true)
     val inlineMessages: StateFlow<Boolean> = _inlineMessages.asStateFlow()
@@ -68,9 +71,20 @@ class GroupDetailVM(
         _inlineMessages.value = inline
     }
 
+    fun consumeLaunchError() {
+        _launchError.value = null
+    }
+
     fun launchRun(mission: String) {
-        val group = this.group.value ?: return
-        if (mission.isBlank()) return
+        val group = this.group.value
+        if (group == null) {
+            _launchError.value = "群组尚未加载完成，请稍后再试"
+            return
+        }
+        if (mission.isBlank()) {
+            _launchError.value = "请输入要发布的指令内容"
+            return
+        }
         val runId = Uuid.random().toString()
         _selectedRunId.value = runId
         runJob?.cancel()
