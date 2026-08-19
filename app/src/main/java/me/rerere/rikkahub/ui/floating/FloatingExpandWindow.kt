@@ -397,11 +397,18 @@ private fun TodoContent(
                     CommandLine(command = cmd.command, output = "")
                 }
             } else {
-                Text(
-                    text = "暂无待办",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "暂无待办",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = "生成时让 AI 输出任务清单，如「- [ ] 第一步」，会自动显示在这里",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

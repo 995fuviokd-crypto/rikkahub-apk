@@ -63,6 +63,12 @@ private class FakeGroupDAO : GroupDAO {
     override fun listRuns(groupId: String): Flow<List<GroupRunEntity>> =
         runsState.map { m -> m.values.filter { it.groupId == groupId }.sortedByDescending { it.createdAt } }
 
+    override fun latestRun(groupId: String): Flow<GroupRunEntity?> =
+        runsState.map { m -> m.values.filter { it.groupId == groupId }.maxByOrNull { it.createdAt } }
+
+    override fun latestMessage(runId: String): Flow<GroupMessageEntity?> =
+        messagesState.map { m -> m.values.filter { it.runId == runId }.maxByOrNull { it.createdAt } }
+
     override suspend fun getRun(id: String): GroupRunEntity? = runs[id]
 
     override fun getRunFlow(id: String): Flow<GroupRunEntity?> =
@@ -103,7 +109,13 @@ private class FakeGroupDAO : GroupDAO {
 }
 
 private class FakeCaller : GroupMemberCaller {
-    override suspend fun call(member: GroupMember, prompt: String): String = "${member.role} 的回复"
+    override suspend fun call(
+        group: Group,
+        member: GroupMember,
+        prompt: String,
+        onProgress: suspend (String) -> Unit,
+    ): me.rerere.rikkahub.data.ai.group.MemberCallResult =
+        me.rerere.rikkahub.data.ai.group.MemberCallResult(text = "${member.role} 的回复")
 
     override suspend fun modelName(member: GroupMember): String = "model-${member.role}"
 }
@@ -193,7 +205,7 @@ class GroupDetailVMTest {
                     summary = "ok",
                 )
             )
-            repository.addMessage("run-1", "m1", "第一条消息", MessageKind.REPLY, "A", "model-A")
+            repository.addMessage("run-1", "m1", "第一条消息", MessageKind.REPLY, "A", "model-A", "", "")
             repository.upsertRun(
                 me.rerere.rikkahub.data.model.GroupRun(
                     id = "run-2",
@@ -206,7 +218,7 @@ class GroupDetailVMTest {
                     summary = "ok",
                 )
             )
-            repository.addMessage("run-2", "m1", "第二条消息", MessageKind.REPLY, "A", "model-A")
+            repository.addMessage("run-2", "m1", "第二条消息", MessageKind.REPLY, "A", "model-A", "", "")
 
             val vm = GroupDetailVM("g1", repository, GroupRunner(FakeCaller(), repository))
             val collected = mutableListOf<List<GroupMessage>>()

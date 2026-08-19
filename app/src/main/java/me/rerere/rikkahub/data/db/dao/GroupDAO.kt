@@ -30,6 +30,12 @@ interface GroupDAO {
     @Query("SELECT * FROM group_runs WHERE group_id = :groupId ORDER BY created_at DESC")
     fun listRuns(groupId: String): Flow<List<GroupRunEntity>>
 
+    @Query("SELECT * FROM group_runs WHERE group_id = :groupId ORDER BY created_at DESC LIMIT 1")
+    fun latestRun(groupId: String): Flow<GroupRunEntity?>
+
+    @Query("SELECT * FROM group_messages WHERE run_id = :runId ORDER BY created_at DESC LIMIT 1")
+    fun latestMessage(runId: String): Flow<GroupMessageEntity?>
+
     @Query("SELECT * FROM group_runs WHERE id = :id")
     suspend fun getRun(id: String): GroupRunEntity?
 

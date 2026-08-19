@@ -501,6 +501,11 @@
   <string name="photo">Photo</string>
   <string name="pin_chat">Pin the Chat</string>
   <string name="pinned_chats">Pinned Chats</string>
+  <string name="group_header_title">Groups</string>
+  <string name="group_badge_label">Group</string>
+  <string name="group_status_running">Running</string>
+  <string name="group_status_failed">Failed</string>
+  <string name="group_status_success">Done</string>
   <string name="placeholder_battery_level">Battery Level</string>
   <string name="placeholder_char">Assistant Name</string>
   <string name="placeholder_current_date">Date</string>
@@ -1285,6 +1290,14 @@
   <string name="workspace_terminal_title">Terminal</string>
   <string name="workspace_terminal_title_with_name">%s · Terminal</string>
   <string name="workspace_terminal_not_installed">Please install Rootfs first</string>
+  <string name="workspace_detail_dev_tools">Dev Tools</string>
+  <string name="workspace_detail_dev_tools_desc">Install common dev tools into the workspace with one tap</string>
+  <string name="workspace_detail_dev_tools_need_shell">Install Rootfs to enable Shell before installing dev tools</string>
+  <string name="workspace_detail_install_all">Install All (%1$d)</string>
+  <string name="workspace_detail_installed">Installed</string>
+  <string name="workspace_detail_install">Install</string>
+  <string name="workspace_detail_detect">Detect</string>
+  <string name="workspace_detail_checking">Checking…</string>
   <string name="workspace_terminal_loading">Loading workspace…</string>
   <string name="workspace_terminal_exited">Terminal exited</string>
   <string name="extensions_page_workspace">Workspace</string>

@@ -27,7 +27,12 @@ import org.robolectric.annotation.Config
 import kotlin.uuid.Uuid
 
 private class RoomTestCaller : GroupMemberCaller {
-    override suspend fun call(member: GroupMember, prompt: String): String = "${member.role} 的回复"
+    override suspend fun call(
+        group: Group,
+        member: GroupMember,
+        prompt: String,
+        onProgress: suspend (String) -> Unit,
+    ): MemberCallResult = MemberCallResult(text = "${member.role} 的回复")
 
     override suspend fun modelName(member: GroupMember): String = "model-${member.role}"
 }
@@ -86,7 +91,7 @@ class GroupRoomPersistenceTest {
         waitUntil { emissions.isNotEmpty() }
         assertTrue(emissions.last().isEmpty())
 
-        repo.addMessage("run-1", "m1", "第一条消息", MessageKind.REPLY, "A", "model-A")
+        repo.addMessage("run-1", "m1", "第一条消息", MessageKind.REPLY, "A", "model-A", "", "")
         waitUntil { emissions.isNotEmpty() && emissions.last().any { it.content == "第一条消息" } }
 
         job.cancel()

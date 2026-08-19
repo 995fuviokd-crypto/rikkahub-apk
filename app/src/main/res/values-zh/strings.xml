@@ -468,6 +468,11 @@
   <string name="photo">照片</string>
   <string name="pin_chat">置顶聊天</string>
   <string name="pinned_chats">置顶聊天</string>
+  <string name="group_header_title">群组</string>
+  <string name="group_badge_label">群组</string>
+  <string name="group_status_running">运行中</string>
+  <string name="group_status_failed">失败</string>
+  <string name="group_status_success">已完成</string>
   <string name="placeholder_battery_level">电池电量</string>
   <string name="placeholder_char">助手名称</string>
   <string name="placeholder_current_date">日期</string>
@@ -1238,6 +1243,14 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="workspace_terminal_title">终端</string>
   <string name="workspace_terminal_title_with_name">%s · 终端</string>
   <string name="workspace_terminal_not_installed">请先安装 Rootfs</string>
+  <string name="workspace_detail_dev_tools">开发工具</string>
+  <string name="workspace_detail_dev_tools_desc">在工作区中一键安装常用开发工具</string>
+  <string name="workspace_detail_dev_tools_need_shell">请先安装 Rootfs 启用 Shell 后即可安装开发工具</string>
+  <string name="workspace_detail_install_all">一键安装（%1$d 项）</string>
+  <string name="workspace_detail_installed">已安装</string>
+  <string name="workspace_detail_install">安装</string>
+  <string name="workspace_detail_detect">检测</string>
+  <string name="workspace_detail_checking">检测中…</string>
   <string name="workspace_terminal_loading">正在加载工作区…</string>
   <string name="workspace_terminal_exited">终端已退出</string>
   <string name="extensions_page_workspace">工作区</string>

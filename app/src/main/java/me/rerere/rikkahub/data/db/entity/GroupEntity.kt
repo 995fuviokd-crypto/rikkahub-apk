@@ -24,6 +24,12 @@ data class GroupEntity(
     val orchestratorId: String? = null,
     @ColumnInfo("debate_rounds")
     val debateRounds: Int = 3,
+    @ColumnInfo("reasoning_level")
+    val reasoningLevel: String = "AUTO",
+    @ColumnInfo("enable_tools")
+    val enableTools: Boolean = true,
+    @ColumnInfo("workspace_id")
+    val workspaceId: String? = null,
     @ColumnInfo("created_at")
     val createdAt: Long,
     @ColumnInfo("updated_at")
@@ -76,6 +82,10 @@ data class GroupMessageEntity(
     val content: String,
     @ColumnInfo("kind")
     val kind: String,
+    @ColumnInfo("reasoning")
+    val reasoning: String = "",
+    @ColumnInfo("tools")
+    val tools: String = "",
     @ColumnInfo("created_at")
     val createdAt: Long,
 )

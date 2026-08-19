@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.chat
 
 import androidx.activity.ComponentActivity
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -43,8 +44,10 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -68,6 +71,7 @@ import me.rerere.hugeicons.stroke.InLove
 import me.rerere.hugeicons.stroke.LanguageCircle
 import me.rerere.hugeicons.stroke.LookTop
 import me.rerere.hugeicons.stroke.PencilEdit01
+import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Sparkles
@@ -95,6 +99,7 @@ import me.rerere.rikkahub.ui.hooks.rememberIsPlayStoreVersion
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.modifier.onClick
 import me.rerere.rikkahub.utils.navigateToChatPage
+import me.rerere.rikkahub.utils.openUrl
 import me.rerere.rikkahub.utils.toDp
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -271,6 +276,10 @@ fun ChatDrawerContent(
                 conversations = conversations,
                 conversationJobs = conversationJobs.keys,
                 listState = conversationListState,
+                groups = drawerVm.groups.collectAsStateWithLifecycle().value,
+                onGroupClick = {
+                    navController.navigate(Screen.GroupDetail(it.id))
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
@@ -529,6 +538,53 @@ fun ChatDrawerContent(
                 )
 
                 Spacer(Modifier.weight(1f))
+
+                // 插件扩展能力主界面入口（homeActions）
+                val pluginManager: me.rerere.rikkahub.data.plugin.PluginManager = koinInject()
+                val homeActions = pluginManager.enabledExtensionActions(settings.enabledPlugins, "home")
+                val clipboardManager = LocalClipboardManager.current
+                homeActions.forEach { action ->
+                    Surface(
+                        onClick = {
+                            when (action.target) {
+                                "url" -> context.openUrl(action.payload)
+                                "copy" -> {
+                                    clipboardManager.setText(AnnotatedString(action.payload))
+                                    Toast.makeText(context, "已复制到剪贴板", Toast.LENGTH_SHORT).show()
+                                }
+                                else -> {
+                                    clipboardManager.setText(AnnotatedString(action.payload))
+                                    Toast.makeText(context, "提示词已复制，粘贴到输入框使用", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp),
+                        shape = MaterialTheme.shapes.medium,
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.Puzzle,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = action.label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                }
 
                 DrawerAction(
                     icon = {

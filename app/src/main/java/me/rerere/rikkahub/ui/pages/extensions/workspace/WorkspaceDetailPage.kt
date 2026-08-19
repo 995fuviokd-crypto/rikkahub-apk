@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -21,9 +22,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -38,6 +42,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -52,8 +57,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
@@ -62,7 +69,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowTurnBackward
+import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Bash
 import me.rerere.hugeicons.stroke.ComputerTerminal01
 import me.rerere.hugeicons.stroke.Delete01
@@ -83,6 +92,7 @@ import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.theme.CustomColors
+import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.utils.fileSizeToString
 import me.rerere.rikkahub.utils.hasAllFilesAccessPermission
 import me.rerere.rikkahub.utils.openAllFilesAccessSettings
@@ -102,6 +112,9 @@ fun WorkspaceDetailPage(id: String) {
     val state by vm.state.collectAsStateWithLifecycle()
     val installProgress by vm.installProgress.collectAsStateWithLifecycle()
     val installError by vm.installError.collectAsStateWithLifecycle()
+    val devTools by vm.devTools.collectAsStateWithLifecycle()
+    val devToolsChecking by vm.devToolsChecking.collectAsStateWithLifecycle()
+    val devToolsInstallingAll by vm.devToolsInstallingAll.collectAsStateWithLifecycle()
     val pagerState = rememberPagerState { 2 }
     val scope = rememberCoroutineScope()
     var deleteTarget by remember { mutableStateOf<WorkspaceFileEntry?>(null) }
@@ -199,6 +212,12 @@ fun WorkspaceDetailPage(id: String) {
                     onToolApprovalChange = vm::setToolApproval,
                     onAndroidLocalAccessChange = vm::setAndroidLocalAccess,
                     onLocalDirectoryChange = vm::setLocalDirectory,
+                    devTools = devTools,
+                    devToolsChecking = devToolsChecking,
+                    devToolsInstallingAll = devToolsInstallingAll,
+                    onDetectDevTools = vm::detectDevTools,
+                    onInstallDevTool = vm::installDevTool,
+                    onInstallAllDevTools = vm::installAllDevTools,
                 )
 
                 1 -> WorkspaceFilesPage(
@@ -324,6 +343,12 @@ private fun WorkspaceBasicPage(
     onToolApprovalChange: (String, Boolean) -> Unit,
     onAndroidLocalAccessChange: (Boolean) -> Unit,
     onLocalDirectoryChange: (String?) -> Unit,
+    devTools: List<DevToolState>,
+    devToolsChecking: Boolean,
+    devToolsInstallingAll: Boolean,
+    onDetectDevTools: () -> Unit,
+    onInstallDevTool: (String) -> Unit,
+    onInstallAllDevTools: () -> Unit,
 ) {
     val context = LocalContext.current
     // 手机全部文件访问权限状态, 从系统设置返回后(ON_RESUME)自动刷新
@@ -531,10 +556,198 @@ private fun WorkspaceBasicPage(
         }
 
         item {
+            WorkspaceDevToolsCard(
+                workspace = workspace,
+                devTools = devTools,
+                checking = devToolsChecking,
+                installingAll = devToolsInstallingAll,
+                onDetect = onDetectDevTools,
+                onInstall = onInstallDevTool,
+                onInstallAll = onInstallAllDevTools,
+            )
+        }
+
+        item {
             WorkspaceToolApprovalCard(
                 workspace = workspace,
                 onToolApprovalChange = onToolApprovalChange,
             )
+        }
+    }
+}
+
+@Composable
+private fun WorkspaceDevToolsCard(
+    workspace: WorkspaceEntity?,
+    devTools: List<DevToolState>,
+    checking: Boolean,
+    installingAll: Boolean,
+    onDetect: () -> Unit,
+    onInstall: (String) -> Unit,
+    onInstallAll: () -> Unit,
+) {
+    val rootfsReady = workspace?.shellStatus == WorkspaceShellStatus.READY.name
+    var expanded by remember { mutableStateOf(true) }
+    val anyInstalling = devTools.any { it.installing } || installingAll
+    val missingCount = devTools.count { !it.installed }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { if (rootfsReady) expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.workspace_detail_dev_tools),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        text = stringResource(R.string.workspace_detail_dev_tools_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (rootfsReady) {
+                    Icon(
+                        imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            if (rootfsReady) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(
+                        onClick = onInstallAll,
+                        enabled = missingCount > 0 && !anyInstalling,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(
+                            if (installingAll) {
+                                stringResource(R.string.workspace_detail_installing)
+                            } else {
+                                stringResource(R.string.workspace_detail_install_all, missingCount)
+                            }
+                        )
+                    }
+                    TextButton(
+                        onClick = onDetect,
+                        enabled = !checking && !anyInstalling,
+                    ) {
+                        Text(
+                            if (checking) {
+                                stringResource(R.string.workspace_detail_checking)
+                            } else {
+                                stringResource(R.string.workspace_detail_detect)
+                            }
+                        )
+                    }
+                }
+
+                if (expanded && devTools.isNotEmpty()) {
+                    devTools.forEach { tool ->
+                        HorizontalDivider()
+                        DevToolRow(
+                            state = tool,
+                            onInstall = { onInstall(tool.tool.id) },
+                        )
+                    }
+                }
+            } else {
+                Text(
+                    text = stringResource(R.string.workspace_detail_dev_tools_need_shell),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DevToolRow(
+    state: DevToolState,
+    onInstall: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = state.tool.name,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = state.tool.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            state.error?.let { error ->
+                Text(
+                    text = error,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Spacer(Modifier.size(8.dp))
+        when {
+            state.installed -> {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.extendColors.green6,
+                ) {
+                    Text(
+                        text = stringResource(R.string.workspace_detail_installed),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+            }
+
+            state.installing -> {
+                Box(
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clip(CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                    )
+                }
+            }
+
+            else -> {
+                TextButton(onClick = onInstall) {
+                    Text(stringResource(R.string.workspace_detail_install))
+                }
+            }
         }
     }
 }

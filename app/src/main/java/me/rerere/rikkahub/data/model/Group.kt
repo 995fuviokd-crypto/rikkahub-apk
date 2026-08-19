@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import me.rerere.ai.core.ReasoningLevel
 import kotlin.uuid.Uuid
 
 /**
@@ -41,6 +42,9 @@ data class Group(
     val members: List<GroupMember> = emptyList(),
     val orchestratorId: String? = null,
     val debateRounds: Int = 3,
+    val reasoningLevel: ReasoningLevel = ReasoningLevel.AUTO,
+    val enableTools: Boolean = true,
+    val workspaceId: String? = null,
     val createdAt: Long = 0,
     val updatedAt: Long = 0,
 ) {
@@ -113,5 +117,29 @@ data class GroupMessage(
     val memberModelName: String = "",
     val content: String,
     val kind: MessageKind,
+    val reasoning: String = "",
+    val tools: String = "",
     val createdAt: Long = 0,
+)
+
+/**
+ * 群组运行中成员调用工具的记录（tools 字段以 JSON 数组字符串存储）。
+ */
+@Serializable
+data class GroupToolRecord(
+    val name: String,
+    val input: String = "",
+    val output: String = "",
+    val isExecuted: Boolean = true,
+)
+
+/**
+ * 会话列表群组分区用的群组摘要：展示群组名、最新消息预览与运行状态。
+ */
+data class GroupSummary(
+    val id: String,
+    val name: String,
+    val latestMessage: String? = null,
+    val status: RunStatus? = null,
+    val updatedAt: Long = 0,
 )

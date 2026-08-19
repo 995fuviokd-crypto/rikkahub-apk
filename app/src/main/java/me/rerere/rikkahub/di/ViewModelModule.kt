@@ -89,6 +89,7 @@ val viewModelModule = module {
             id = it.get(),
             repository = get(),
             settingsStore = get(),
+            workspaceRepository = get(),
         )
     }
     viewModel<GroupDetailVM> {
@@ -109,6 +110,7 @@ val viewModelModule = module {
             settingsStore = get(),
             pluginManager = get(),
             marketDataSource = get(),
+            openAIPluginAdapter = get(),
         )
     }
     viewModel<WorkflowEditorVM> {

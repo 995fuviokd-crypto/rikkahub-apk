@@ -31,6 +31,8 @@ private class FakeStore : GroupStore {
         kind: MessageKind,
         memberRole: String,
         memberModelName: String,
+        reasoning: String,
+        tools: String,
     ) {
         messages += GroupMessage(
             id = Uuid.random().toString(),
@@ -40,6 +42,8 @@ private class FakeStore : GroupStore {
             memberModelName = memberModelName,
             content = content,
             kind = kind,
+            reasoning = reasoning,
+            tools = tools,
         )
     }
 }
@@ -49,9 +53,14 @@ private class FakeCaller(
 ) : GroupMemberCaller {
     val calls = mutableListOf<Pair<String, String>>()
 
-    override suspend fun call(member: GroupMember, prompt: String): String {
+    override suspend fun call(
+        group: Group,
+        member: GroupMember,
+        prompt: String,
+        onProgress: suspend (String) -> Unit,
+    ): MemberCallResult {
         calls += member.role to prompt
-        return handler(member, prompt)
+        return MemberCallResult(text = handler(member, prompt))
     }
 
     override suspend fun modelName(member: GroupMember): String = "model-${member.role}"

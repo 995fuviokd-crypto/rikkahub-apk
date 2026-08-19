@@ -91,6 +91,25 @@ class PluginManager(
             .distinctBy { it.label }
     }
 
+    /** 已启用插件的扩展能力入口（按 scope 过滤） */
+    fun enabledExtensionActions(
+        enabledPlugins: Set<String>,
+        scope: String,
+    ): List<PluginExtensionAction> {
+        if (enabledPlugins.isEmpty()) return emptyList()
+        return enabledPlugins
+            .sorted()
+            .mapNotNull { loadInfo(it) }
+            .flatMap { info ->
+                when (scope) {
+                    "settings" -> info.extensionPoints.settingsActions
+                    "home" -> info.extensionPoints.homeActions
+                    else -> emptyList()
+                }
+            }
+            .distinctBy { it.id }
+    }
+
     /** 从插件 zip 字节中提取 plugin.json（用于上传前校验与生成市场条目） */
     fun parseArchive(bytes: ByteArray): Result<PluginInfo> = Companion.extractPluginInfo(bytes)
 

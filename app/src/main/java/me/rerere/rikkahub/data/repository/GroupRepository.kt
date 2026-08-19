@@ -1,6 +1,9 @@
 package me.rerere.rikkahub.data.repository
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.data.db.dao.GroupDAO
 import me.rerere.rikkahub.data.db.entity.GroupEntity
@@ -11,6 +14,7 @@ import me.rerere.rikkahub.data.model.GroupMember
 import me.rerere.rikkahub.data.model.GroupMessage
 import me.rerere.rikkahub.data.model.GroupMode
 import me.rerere.rikkahub.data.model.GroupRun
+import me.rerere.rikkahub.data.model.GroupSummary
 import me.rerere.rikkahub.data.model.MessageKind
 import me.rerere.rikkahub.data.model.RunStatus
 import me.rerere.rikkahub.data.ai.group.GroupStore
@@ -21,6 +25,42 @@ class GroupRepository(
     private val dao: GroupDAO,
 ) : GroupStore {
     fun listGroups(): Flow<List<Group>> = dao.listGroups().map { list -> list.map { it.toGroup() } }
+
+    /**
+     * 会话列表群组分区数据源：每个群组的最新运行状态 + 最新消息预览，实时更新。
+     */
+    fun groupSummaries(): Flow<List<GroupSummary>> = dao.listGroups().flatMapLatest { groups ->
+        if (groups.isEmpty()) {
+            flowOf(emptyList())
+        } else {
+            combine(groups.map { entity -> entity.toSummaryFlow() }) { summaries ->
+                summaries.toList()
+            }
+        }
+    }
+
+    private fun GroupEntity.toSummaryFlow(): Flow<GroupSummary> =
+        dao.latestRun(id).flatMapLatest { run ->
+            if (run == null) {
+                flowOf(
+                    GroupSummary(
+                        id = id,
+                        name = name,
+                        updatedAt = updatedAt,
+                    )
+                )
+            } else {
+                dao.latestMessage(run.id).map { message ->
+                    GroupSummary(
+                        id = id,
+                        name = name,
+                        latestMessage = message?.content,
+                        status = runCatching { RunStatus.valueOf(run.status) }.getOrNull(),
+                        updatedAt = run.createdAt,
+                    )
+                }
+            }
+        }
 
     fun getGroup(id: String): Flow<Group?> = dao.getGroupFlow(id).map { it?.toGroup() }
 
@@ -35,6 +75,9 @@ class GroupRepository(
             membersJson = JsonInstant.encodeToString(group.members),
             orchestratorId = group.orchestratorId,
             debateRounds = group.debateRounds,
+            reasoningLevel = group.reasoningLevel.name,
+            enableTools = group.enableTools,
+            workspaceId = group.workspaceId,
             createdAt = if (group.createdAt > 0) group.createdAt else now,
             updatedAt = now,
         )
@@ -102,6 +145,8 @@ class GroupRepository(
         kind: MessageKind,
         memberRole: String,
         memberModelName: String,
+        reasoning: String,
+        tools: String,
     ) {
         dao.upsertMessage(
             GroupMessageEntity(
@@ -112,6 +157,8 @@ class GroupRepository(
                 memberModelName = memberModelName,
                 content = content,
                 kind = kind.name,
+                reasoning = reasoning,
+                tools = tools,
                 createdAt = System.currentTimeMillis(),
             )
         )
@@ -129,6 +176,10 @@ private fun GroupEntity.toGroup(): Group {
         members = members,
         orchestratorId = orchestratorId,
         debateRounds = debateRounds,
+        reasoningLevel = runCatching { me.rerere.ai.core.ReasoningLevel.valueOf(reasoningLevel) }
+            .getOrDefault(me.rerere.ai.core.ReasoningLevel.AUTO),
+        enableTools = enableTools,
+        workspaceId = workspaceId,
         createdAt = createdAt,
         updatedAt = updatedAt,
     )
@@ -156,6 +207,8 @@ private fun GroupMessageEntity.toMessage(): GroupMessage {
         memberModelName = memberModelName,
         content = content,
         kind = runCatching { MessageKind.valueOf(kind) }.getOrDefault(MessageKind.REPLY),
+        reasoning = reasoning,
+        tools = tools,
         createdAt = createdAt,
     )
 }

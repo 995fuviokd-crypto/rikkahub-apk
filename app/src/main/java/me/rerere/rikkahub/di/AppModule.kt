@@ -118,8 +118,10 @@ val appModule = module {
     single {
         GroupRunner(
             caller = ProviderGroupMemberCaller(
-                providerManager = get(),
                 settingsStore = get(),
+                generationHandler = get(),
+                localTools = get(),
+                workspaceRepository = get(),
             ),
             repository = get(),
         )

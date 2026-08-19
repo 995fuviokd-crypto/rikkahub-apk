@@ -5,14 +5,18 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.model.Group
 import me.rerere.rikkahub.data.model.GroupMember
 import me.rerere.rikkahub.data.model.GroupMode
 import me.rerere.rikkahub.data.repository.GroupRepository
+import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import kotlin.uuid.Uuid
 
 data class ModelInfo(
@@ -24,6 +28,7 @@ class GroupEditorVM(
     id: String?,
     private val repository: GroupRepository,
     private val settingsStore: SettingsStore,
+    private val workspaceRepository: WorkspaceRepository,
 ) : ViewModel() {
     private val groupId: String? = id?.takeIf { it.isNotBlank() }
     val models = MutableStateFlow<List<ModelInfo>>(emptyList())
@@ -32,6 +37,10 @@ class GroupEditorVM(
     val members = MutableStateFlow<List<GroupMember>>(emptyList())
     val orchestratorId = MutableStateFlow<String?>(null)
     val debateRounds = MutableStateFlow(3)
+    val reasoningLevel = MutableStateFlow(ReasoningLevel.AUTO)
+    val enableTools = MutableStateFlow(true)
+    val workspaceId = MutableStateFlow<String?>(null)
+    val workspaces = MutableStateFlow<List<WorkspaceEntity>>(emptyList())
     val loading = MutableStateFlow(true)
     val saved = MutableStateFlow(false)
 
@@ -45,6 +54,8 @@ class GroupEditorVM(
                         .filter { it.type == ModelType.CHAT }
                         .map { ModelInfo(provider.name, it) }
                 }
+            workspaces.value = workspaceRepository.listFlow().first()
+                .filter { it.shellStatus == me.rerere.workspace.WorkspaceShellStatus.READY.name }
             val group = groupId?.let { repository.getGroupById(it) }
             if (group != null) {
                 name.value = group.name
@@ -52,6 +63,9 @@ class GroupEditorVM(
                 members.value = group.members
                 orchestratorId.value = group.orchestratorId
                 debateRounds.value = group.debateRounds
+                reasoningLevel.value = group.reasoningLevel
+                enableTools.value = group.enableTools
+                workspaceId.value = group.workspaceId
             }
             loading.value = false
         }
@@ -99,6 +113,18 @@ class GroupEditorVM(
         debateRounds.value = rounds.coerceIn(1, 10)
     }
 
+    fun setReasoningLevel(level: ReasoningLevel) {
+        reasoningLevel.value = level
+    }
+
+    fun setEnableTools(enabled: Boolean) {
+        enableTools.value = enabled
+    }
+
+    fun setWorkspace(id: String?) {
+        workspaceId.value = id
+    }
+
     fun validationError(): String? {
         if (name.value.isBlank()) return "请输入群组名称"
         if (members.value.isEmpty()) return "请至少选择一个成员"
@@ -119,6 +145,9 @@ class GroupEditorVM(
                 members = members.value,
                 orchestratorId = orchestratorId.value,
                 debateRounds = debateRounds.value,
+                reasoningLevel = reasoningLevel.value,
+                enableTools = enableTools.value,
+                workspaceId = workspaceId.value,
             )
         )
         saved.value = true

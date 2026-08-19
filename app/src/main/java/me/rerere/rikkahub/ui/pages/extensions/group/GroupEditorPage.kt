@@ -60,6 +60,10 @@ fun GroupEditorPage(
     val members by vm.members.collectAsStateWithLifecycle()
     val orchestratorId by vm.orchestratorId.collectAsStateWithLifecycle()
     val debateRounds by vm.debateRounds.collectAsStateWithLifecycle()
+    val reasoningLevel by vm.reasoningLevel.collectAsStateWithLifecycle()
+    val enableTools by vm.enableTools.collectAsStateWithLifecycle()
+    val workspaceId by vm.workspaceId.collectAsStateWithLifecycle()
+    val workspaces by vm.workspaces.collectAsStateWithLifecycle()
     val models by vm.models.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
 
@@ -157,6 +161,75 @@ fun GroupEditorPage(
             }
 
             item {
+                Text("思考过程", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = "开启后成员回复会附带思考过程，并在消息中折叠展示",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    me.rerere.ai.core.ReasoningLevel.entries
+                        .filter { it != me.rerere.ai.core.ReasoningLevel.MAX && it != me.rerere.ai.core.ReasoningLevel.XHIGH }
+                        .forEach { level ->
+                            FilterChip(
+                                selected = reasoningLevel == level,
+                                onClick = { vm.setReasoningLevel(level) },
+                                label = { Text(level.label()) },
+                            )
+                        }
+                }
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("启用工具与工作区", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            text = "成员可调用工具、读取文件、执行命令（需绑定工作区）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    androidx.compose.material3.Switch(
+                        checked = enableTools,
+                        onCheckedChange = { vm.setEnableTools(it) },
+                    )
+                }
+            }
+
+            if (enableTools) {
+                item {
+                    Text("绑定工作区", style = MaterialTheme.typography.titleSmall)
+                    if (workspaces.isEmpty()) {
+                        Text(
+                            text = "没有可用的工作区（Rootfs 未就绪），请先在「工作区」中创建并等待就绪",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = workspaceId == null,
+                                onClick = { vm.setWorkspace(null) },
+                                label = { Text("不绑定") },
+                            )
+                            workspaces.forEach { ws ->
+                                FilterChip(
+                                    selected = workspaceId == ws.id,
+                                    onClick = { vm.setWorkspace(ws.id) },
+                                    label = { Text(ws.name.ifBlank { ws.root }) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
                 OutlinedTextField(
                     value = search,
                     onValueChange = { search = it },
@@ -215,6 +288,16 @@ private fun rememberFiltered(
             }
         }
     }
+}
+
+private fun me.rerere.ai.core.ReasoningLevel.label(): String = when (this) {
+    me.rerere.ai.core.ReasoningLevel.OFF -> "关闭"
+    me.rerere.ai.core.ReasoningLevel.AUTO -> "自动"
+    me.rerere.ai.core.ReasoningLevel.LOW -> "低"
+    me.rerere.ai.core.ReasoningLevel.MEDIUM -> "中"
+    me.rerere.ai.core.ReasoningLevel.HIGH -> "高"
+    me.rerere.ai.core.ReasoningLevel.XHIGH -> "超高"
+    me.rerere.ai.core.ReasoningLevel.MAX -> "最高"
 }
 
 @Composable

@@ -12,6 +12,8 @@ import me.rerere.rikkahub.data.api.PluginMarketDataSource
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.plugin.InstalledPlugin
+import me.rerere.rikkahub.data.plugin.OpenAIPluginAdapter
+import me.rerere.rikkahub.data.plugin.PluginCategories
 import me.rerere.rikkahub.data.plugin.PluginInfo
 import me.rerere.rikkahub.data.plugin.PluginManager
 import me.rerere.rikkahub.data.plugin.PluginMarketEntry
@@ -21,6 +23,7 @@ class PluginMarketVM(
     private val settingsStore: SettingsStore,
     private val pluginManager: PluginManager,
     private val marketDataSource: PluginMarketDataSource,
+    private val openAIPluginAdapter: OpenAIPluginAdapter,
 ) : ViewModel() {
     private val _installed = MutableStateFlow<List<InstalledPlugin>>(emptyList())
     val installed = _installed.asStateFlow()
@@ -144,6 +147,24 @@ class PluginMarketVM(
         }
     }
 
+    /** 从 OpenAI 兼容插件仓库地址安装（读取 /.well-known/ai-plugin.json 自动转换） */
+    fun installOpenAIPlugin(url: String) {
+        if (_downloadingId.value != null) return
+        viewModelScope.launch {
+            _downloadingId.value = "openai"
+            _notice.value = null
+            openAIPluginAdapter.fetchAsZip(url)
+                .onSuccess { bytes ->
+                    pluginManager.installZip(bytes)
+                        .onSuccess { _notice.value = "已安装 ${it.name}（OpenAI 插件）" }
+                        .onFailure { _notice.value = "安装失败: ${it.message}" }
+                }
+                .onFailure { _notice.value = "获取失败: ${it.message}" }
+            _downloadingId.value = null
+            refreshInstalled()
+        }
+    }
+
     fun uninstall(pluginId: String) {
         viewModelScope.launch {
             pluginManager.uninstall(pluginId)
@@ -154,41 +175,57 @@ class PluginMarketVM(
         }
     }
 
-    /** 上传插件 zip 到用户 GitHub 仓库并更新索引 */
-    fun upload(zipBytes: ByteArray, onSuccess: (String) -> Unit) {
+    /** 上传插件/资源 zip 到用户 GitHub 仓库并更新索引。type 为用户选择的资源类型。 */
+    fun upload(zipBytes: ByteArray, type: String, onSuccess: (String) -> Unit) {
         viewModelScope.launch {
             _notice.value = null
-            pluginManager.parseArchive(zipBytes)
-                .onFailure { _notice.value = "解析插件失败: ${it.message}"; return@launch }
-                .onSuccess { info ->
-                    if (_githubToken.value.isBlank()) {
-                        _notice.value = "请先填写 GitHub Token"
-                        return@launch
-                    }
-                    val entry = PluginMarketEntry(
-                        id = info.id,
-                        name = info.name,
-                        version = info.version,
-                        description = info.description,
-                        author = info.author,
-                        category = info.category,
-                        repository = info.repository,
-                        downloadUrl = "https://github.com/${_marketRepo.value}/raw/main/plugins/${info.id}-${info.version}.zip",
-                    )
-                    marketDataSource.uploadPlugin(
-                        token = _githubToken.value,
-                        repo = _marketRepo.value,
-                        zipFileName = "${info.id}-${info.version}.zip",
-                        zipBytes = zipBytes,
-                        entry = entry,
-                    ).onSuccess { url ->
-                        _notice.value = "上传成功"
-                        onSuccess(url)
-                        loadMarket()
-                    }.onFailure {
-                        _notice.value = "上传失败: ${it.message}"
-                    }
-                }
+            if (_githubToken.value.isBlank()) {
+                _notice.value = "请先填写 GitHub Token"
+                return@launch
+            }
+            val parsed = pluginManager.parseArchive(zipBytes).getOrNull()
+            val entry = if (parsed != null) {
+                PluginMarketEntry(
+                    id = parsed.id,
+                    name = parsed.name,
+                    version = parsed.version,
+                    description = parsed.description,
+                    author = parsed.author,
+                    category = parsed.category,
+                    repository = parsed.repository,
+                    downloadUrl = "https://github.com/${_marketRepo.value}/raw/main/plugins/${parsed.id}-${parsed.version}.zip",
+                    type = parsed.type.ifBlank { type },
+                    tags = (parsed.tags + type).distinct(),
+                )
+            } else {
+                // 非插件包（skill/mcp/json/其他）：按用户选择的类型登记
+                val base = "resource-${System.currentTimeMillis()}"
+                PluginMarketEntry(
+                    id = base,
+                    name = base,
+                    version = "1.0.0",
+                    description = "通过本地上传的资源包（${PluginCategories.typeLabel(type)}）",
+                    author = "",
+                    category = "general",
+                    repository = "",
+                    downloadUrl = "https://github.com/${_marketRepo.value}/raw/main/plugins/$base-1.0.0.zip",
+                    type = type,
+                    tags = listOf(type),
+                )
+            }
+            marketDataSource.uploadPlugin(
+                token = _githubToken.value,
+                repo = _marketRepo.value,
+                zipFileName = "${entry.id}-${entry.version}.zip",
+                zipBytes = zipBytes,
+                entry = entry,
+            ).onSuccess { url ->
+                _notice.value = "上传成功"
+                onSuccess(url)
+                loadMarket()
+            }.onFailure {
+                _notice.value = "上传失败: ${it.message}"
+            }
         }
     }
 

@@ -73,12 +73,14 @@ import me.rerere.rikkahub.data.datastore.isNotConfigured
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
+import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.Select
 import me.rerere.rikkahub.ui.components.ui.icons.DiscordIcon
 import me.rerere.rikkahub.ui.components.ui.icons.TencentQQIcon
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.hooks.rememberColorMode
+import me.rerere.rikkahub.ui.pages.extensions.plugin.PluginExtensionsCard
 import me.rerere.rikkahub.ui.theme.ColorMode
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.joinQQGroup
@@ -378,6 +380,14 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         headlineContent = { Text(stringResource(R.string.setting_page_share)) },
                     )
                 }
+            }
+
+            item("pluginExtensions") {
+                PluginExtensionsCard(
+                    enabledPlugins = settings.enabledPlugins,
+                    pluginManager = koinInject(),
+                    scope = "settings",
+                )
             }
         }
     }

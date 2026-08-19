@@ -24,8 +24,10 @@ import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.model.Folder
+import me.rerere.rikkahub.data.model.GroupSummary
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
+import me.rerere.rikkahub.data.repository.GroupRepository
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.utils.toLocalString
 import java.time.LocalDate
@@ -37,6 +39,7 @@ class ChatDrawerVM(
     private val settingsStore: SettingsStore,
     conversationRepo: ConversationRepository,
     private val folderRepo: FolderRepository,
+    private val groupRepo: GroupRepository,
     private val chatService: ChatService,
     private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
@@ -52,6 +55,10 @@ class ChatDrawerVM(
     // 当前助手的文件夹列表（Room Flow，增删改自动刷新）
     val folders: StateFlow<List<Folder>> = assistantIdFlow
         .flatMapLatest { folderRepo.getFoldersOfAssistant(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // 群组分区：群组列表 + 最新运行状态 + 最新消息预览（实时更新）
+    val groups: StateFlow<List<GroupSummary>> = groupRepo.groupSummaries()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val conversations: Flow<PagingData<ConversationListItem>> =

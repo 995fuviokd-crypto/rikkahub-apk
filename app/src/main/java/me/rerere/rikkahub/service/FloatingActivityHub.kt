@@ -64,7 +64,12 @@ class FloatingActivityHub(
     private val _state = MutableStateFlow(FloatingActivityState())
     val state: StateFlow<FloatingActivityState> = _state.asStateFlow()
 
-    private val todoRegex = Regex("""^\s*[-*+]\s*\[([ xX])\]\s*(.+)$""", RegexOption.MULTILINE)
+    private val todoRegex = Regex(
+        """(?m)^\s*(?:[-*+]|\d+[.、)])?\s*[\[［]\s*([ xX✓✔☐☑☒])\s*[\]］]\s*(.+)$"""
+    )
+    private val symbolTodoRegex = Regex(
+        """(?m)^\s*(?:[-*+]|\d+[.、)])?\s*([☐☑☒✅])\s*(.+)$"""
+    )
 
     init {
         appScope.launch(Dispatchers.Default) {
@@ -144,9 +149,21 @@ class FloatingActivityHub(
     }
 
     private fun extractTodos(text: String): List<TodoItem> {
-        return todoRegex.findAll(text).map { match ->
-            val done = match.groupValues[1].equals("x", ignoreCase = true)
-            TodoItem(text = match.groupValues[2].trim(), done = done)
-        }.toList()
+        if (text.isBlank()) return emptyList()
+        val map = LinkedHashMap<String, TodoItem>()
+        todoRegex.findAll(text).forEach { match ->
+            val label = match.groupValues[2].trim()
+            val done = match.groupValues[1].equals("x", ignoreCase = true) ||
+                match.groupValues[1].firstOrNull()?.let { it in "✓✔☑☒" } == true
+            map[label] = TodoItem(text = label, done = done)
+        }
+        symbolTodoRegex.findAll(text).forEach { match ->
+            val label = match.groupValues[2].trim()
+            map[label] = TodoItem(
+                text = label,
+                done = match.groupValues[1].firstOrNull()?.let { it in "☑☒✅" } == true,
+            )
+        }
+        return map.values.toList()
     }
 }

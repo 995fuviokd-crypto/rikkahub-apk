@@ -7,13 +7,16 @@ import me.rerere.hugeicons.stroke.Pin
 import me.rerere.hugeicons.stroke.PinOff
 import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.UserGroup
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -51,6 +54,8 @@ import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemKey
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.GroupSummary
+import me.rerere.rikkahub.data.model.RunStatus
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.utils.toLocalString
 import java.time.LocalDate
@@ -78,6 +83,8 @@ fun ColumnScope.ConversationList(
     conversationJobs: Collection<Uuid>,
     listState: LazyListState,
     modifier: Modifier = Modifier,
+    groups: List<GroupSummary> = emptyList(),
+    onGroupClick: (GroupSummary) -> Unit = {},
     onClick: (Conversation) -> Unit = {},
     onDelete: (Conversation) -> Unit = {},
     onRegenerateTitle: (Conversation) -> Unit = {},
@@ -169,6 +176,160 @@ fun ColumnScope.ConversationList(
                 }
             }
         }
+
+        if (groups.isNotEmpty()) {
+            item {
+                GroupHeader()
+            }
+            items(
+                count = groups.size,
+                key = { index -> "group_${groups[index].id}" },
+            ) { index ->
+                GroupItem(
+                    summary = groups[index],
+                    onClick = { onGroupClick(groups[index]) },
+                    modifier = Modifier.animateItem()
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GroupHeader() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = HugeIcons.UserGroup,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.size(8.dp))
+        Text(
+            text = stringResource(R.string.group_header_title),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
+}
+
+@Composable
+private fun GroupItem(
+    summary: GroupSummary,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(50f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.secondaryContainer,
+        ) {
+            Box(
+                modifier = Modifier.size(28.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = HugeIcons.UserGroup,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
+        }
+        Spacer(Modifier.size(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = summary.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                ) {
+                    Text(
+                        text = stringResource(R.string.group_badge_label),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                    )
+                }
+            }
+            val preview = summary.latestMessage
+            if (!preview.isNullOrBlank()) {
+                Text(
+                    text = preview,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Spacer(Modifier.size(8.dp))
+        GroupStatusIndicator(status = summary.status)
+    }
+}
+
+@Composable
+private fun GroupStatusIndicator(status: RunStatus?) {
+    when (status) {
+        RunStatus.RUNNING -> {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(MaterialTheme.extendColors.green6)
+                        .size(6.dp)
+                )
+                Text(
+                    text = stringResource(R.string.group_status_running),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        RunStatus.FAILED -> {
+            Text(
+                text = stringResource(R.string.group_status_failed),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        RunStatus.SUCCESS -> {
+            Text(
+                text = stringResource(R.string.group_status_success),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        else -> {}
     }
 }
 

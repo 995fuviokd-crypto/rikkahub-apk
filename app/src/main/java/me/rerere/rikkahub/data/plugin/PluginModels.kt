@@ -16,12 +16,39 @@ data class PluginInfo(
     val systemPrompt: String = "",
     /** 聊天输入栏快捷操作 */
     val actions: List<PluginAction> = emptyList(),
+    /** 资源类型：plugin/skill/mcp/json/other */
+    val type: String = "plugin",
+    /** 自定义标签（用于市场分类与搜索） */
+    val tags: List<String> = emptyList(),
+    /** 扩展能力：主界面/设置页等处的新增功能与图标入口 */
+    val extensionPoints: PluginExtensionPoints = PluginExtensionPoints(),
 )
 
 @Serializable
 data class PluginAction(
     val label: String,
     val prompt: String,
+)
+
+/**
+ * 插件扩展能力声明。消费端按 scope 渲染动态入口，无需修改宿主代码。
+ * target 取值：prompt（填入输入框/对话框提示词）、url（打开链接）、copy（复制到剪贴板）。
+ */
+@Serializable
+data class PluginExtensionPoints(
+    /** 设置页扩展区块 */
+    val settingsActions: List<PluginExtensionAction> = emptyList(),
+    /** 主界面入口 */
+    val homeActions: List<PluginExtensionAction> = emptyList(),
+)
+
+@Serializable
+data class PluginExtensionAction(
+    val id: String,
+    val label: String,
+    val description: String = "",
+    val target: String = "prompt",
+    val payload: String = "",
 )
 
 /** 插件市场条目（索引仓库 plugins.json） */
@@ -35,6 +62,10 @@ data class PluginMarketEntry(
     val category: String = "general",
     val repository: String = "",
     val downloadUrl: String = "",
+    /** 资源类型：plugin/skill/mcp/json/other */
+    val type: String = "plugin",
+    /** 自定义标签（用于市场分类与搜索） */
+    val tags: List<String> = emptyList(),
 )
 
 /** 插件目录中的插件文件 */
@@ -48,8 +79,36 @@ data class PluginArchive(
 
 object PluginCategories {
     const val ALL = "全部"
+    const val TYPE_PLUGIN = "plugin"
+    const val TYPE_SKILL = "skill"
+    const val TYPE_MCP = "mcp"
+    const val TYPE_JSON = "json"
+
+    /** 资源类型预设（上传时可选） */
+    val types = listOf(
+        TYPE_PLUGIN,
+        TYPE_SKILL,
+        TYPE_MCP,
+        TYPE_JSON,
+        "other",
+    )
+
+    /** 类型标签的默认展示名 */
+    fun typeLabel(type: String): String = when (type) {
+        TYPE_PLUGIN -> "插件"
+        TYPE_SKILL -> "技能"
+        TYPE_MCP -> "MCP"
+        TYPE_JSON -> "JSON 配置"
+        else -> type.ifBlank { "其他" }
+    }
+
+    /** 市场筛选维度：全部 + 类型 + 常见分类 */
     val known = listOf(
         ALL,
+        TYPE_PLUGIN,
+        TYPE_SKILL,
+        TYPE_MCP,
+        TYPE_JSON,
         "development",
         "productivity",
         "creative",

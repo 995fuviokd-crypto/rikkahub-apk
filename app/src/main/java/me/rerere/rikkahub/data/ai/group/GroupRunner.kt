@@ -9,22 +9,29 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlin.coroutines.coroutineContext
-import me.rerere.ai.provider.ProviderManager
-import me.rerere.ai.provider.TextGenerationParams
-import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.ai.GenerationChunk
+import me.rerere.rikkahub.data.ai.GenerationHandler
+import me.rerere.rikkahub.data.ai.tools.createWorkspaceTools
+import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
+import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Group
 import me.rerere.rikkahub.data.model.GroupMember
 import me.rerere.rikkahub.data.model.GroupMessage
 import me.rerere.rikkahub.data.model.GroupMode
 import me.rerere.rikkahub.data.model.GroupRun
+import me.rerere.rikkahub.data.model.GroupToolRecord
 import me.rerere.rikkahub.data.model.MessageKind
 import me.rerere.rikkahub.data.model.RunStatus
 import me.rerere.rikkahub.data.repository.GroupRepository
+import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.utils.JsonInstant
+import me.rerere.workspace.WorkspaceShellStatus
 import kotlin.uuid.Uuid
 
 /**
@@ -42,29 +49,61 @@ interface GroupStore {
         kind: MessageKind,
         memberRole: String = "",
         memberModelName: String = "",
+        reasoning: String = "",
+        tools: String = "",
     )
 }
 
 /**
- * 成员模型调用器：统一按 modelId 解析 Provider 并生成文本。
+ * 成员单次调用的完整结果：正文 + 思考过程 + 工具调用记录。
+ */
+data class MemberCallResult(
+    val text: String,
+    val reasoning: String = "",
+    val tools: List<GroupToolRecord> = emptyList(),
+)
+
+/**
+ * 成员模型调用器：按 modelId 解析 Provider 并走完整生成管线
+ * （流式输出、思考过程、工具调用循环、工作区执行）。
  */
 interface GroupMemberCaller {
-    suspend fun call(member: GroupMember, prompt: String): String
+    suspend fun call(
+        group: Group,
+        member: GroupMember,
+        prompt: String,
+        onProgress: suspend (String) -> Unit = {},
+    ): MemberCallResult
 
     suspend fun modelName(member: GroupMember): String = ""
 }
 
 /**
- * 基于 ProviderManager + SettingsStore 的真实成员调用器。
+ * 基于 GenerationHandler 的真实成员调用器。
+ *
+ * 群组成员以临时 [Assistant]（携带成员 systemPrompt / 群组思考深度 / 工作区绑定）
+ * 复用普通聊天的完整执行管线：reasoning 思考过程、tools 工具循环、workspace 工作区
+ * 执行，并自动放行工具审批（群组无人工审批界面）。首 token 45 秒无响应即视为失败。
  */
 class ProviderGroupMemberCaller(
-    private val providerManager: ProviderManager,
     private val settingsStore: SettingsStore,
+    private val generationHandler: GenerationHandler,
+    private val localTools: LocalTools,
+    private val workspaceRepository: WorkspaceRepository,
 ) : GroupMemberCaller {
     private companion object {
         const val TAG = "GroupMemberCaller"
+        const val FIRST_TOKEN_TIMEOUT_MILLIS = 45_000L
+        const val TOOL_OUTPUT_PREVIEW_LENGTH = 500
+        val DEFAULT_GROUP_LOCAL_TOOLS = listOf(LocalToolOption.TimeInfo, LocalToolOption.DeviceInfo)
     }
-    override suspend fun call(member: GroupMember, prompt: String): String {
+
+    override suspend fun call(
+        group: Group,
+        member: GroupMember,
+        prompt: String,
+        onProgress: suspend (String) -> Unit,
+    ): MemberCallResult {
         Log.i(TAG, "group member call start: role=${member.role} modelId=${member.modelId}")
         val settings = settingsStore.settingsFlow.value
         val model = settings.findModelById(member.modelId)
@@ -72,28 +111,87 @@ class ProviderGroupMemberCaller(
         val providerSetting = model.findProvider(settings.providers)
             ?: error("成员「${member.role}」的模型未绑定可用的 Provider")
         Log.i(TAG, "group member call resolved: model=${model.modelId} provider=$providerSetting")
-        val provider = providerManager.getProviderByType(providerSetting)
-        val params = TextGenerationParams(model = model)
-        val text = StringBuilder()
-        var chunkCount = 0
-        val startTime = System.currentTimeMillis()
-        try {
-            provider.streamText(
-                providerSetting = providerSetting,
-                messages = listOf(UIMessage.user(prompt)),
-                params = params,
-            ).collect { chunk ->
-                if (chunk is StreamChunk.TextDelta) {
-                    chunkCount++
-                    text.append(chunk.text)
+
+        val workspaceUuid = group.workspaceId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
+        val assistant = Assistant(
+            name = member.role,
+            systemPrompt = member.systemPrompt ?: "",
+            reasoningLevel = group.reasoningLevel,
+            localTools = DEFAULT_GROUP_LOCAL_TOOLS,
+            workspaceId = workspaceUuid,
+            streamOutput = true,
+        )
+
+        val tools = buildList {
+            addAll(localTools.getTools(assistant.localTools))
+            if (group.enableTools && group.workspaceId != null) {
+                val workspace = workspaceRepository.getById(group.workspaceId)
+                if (workspace != null && workspace.shellStatus == WorkspaceShellStatus.READY.name) {
+                    Log.i(TAG, "group member call: attach workspace tools for workspace=${group.workspaceId}")
+                    addAll(createWorkspaceTools(group.workspaceId, workspaceRepository))
                 }
             }
+        }
+
+        var snapshotText = ""
+        var snapshotReasoning = ""
+        var snapshotTools = emptyList<GroupToolRecord>()
+        val notifiedToolIds = mutableSetOf<String>()
+        val startTime = System.currentTimeMillis()
+
+        val generation = generationHandler.generateText(
+            settings = settings.copy(autoApproveTools = true),
+            model = model,
+            messages = listOf(UIMessage.user(prompt)),
+            assistant = assistant,
+            tools = tools,
+            workspaceCwd = null,
+        )
+
+        val completed = try {
+            withTimeoutOrNull(FIRST_TOKEN_TIMEOUT_MILLIS) {
+                generation.collect { chunk ->
+                    if (chunk is GenerationChunk.Messages) {
+                        val last = chunk.messages.lastOrNull()
+                        if (last != null) {
+                            snapshotText = last.parts.filterIsInstance<UIMessagePart.Text>()
+                                .joinToString("\n") { it.text }
+                            snapshotReasoning = last.parts.filterIsInstance<UIMessagePart.Reasoning>()
+                                .joinToString("\n") { it.reasoning }
+                            snapshotTools = last.parts.filterIsInstance<UIMessagePart.Tool>()
+                                .map { tool ->
+                                    GroupToolRecord(
+                                        name = tool.toolName,
+                                        input = tool.input,
+                                        output = tool.output.filterIsInstance<UIMessagePart.Text>()
+                                            .joinToString("\n") { it.text }
+                                            .take(TOOL_OUTPUT_PREVIEW_LENGTH),
+                                        isExecuted = tool.isExecuted,
+                                    )
+                                }
+                            last.parts.filterIsInstance<UIMessagePart.Tool>()
+                                .filter { it.isExecuted && notifiedToolIds.add(it.toolCallId) }
+                                .forEach { onProgress("成员已调用工具「${it.toolName}」") }
+                        }
+                    }
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Throwable) {
-            Log.w(TAG, "group member call failed: role=${member.role} ms=${System.currentTimeMillis() - startTime} chunks=$chunkCount err=${e.message}", e)
+            Log.w(TAG, "group member call failed: role=${member.role} ms=${System.currentTimeMillis() - startTime} err=${e.message}", e)
             throw e
         }
-        Log.i(TAG, "group member call done: role=${member.role} ms=${System.currentTimeMillis() - startTime} chunks=$chunkCount len=${text.length}")
-        return text.toString()
+
+        if (completed == null) {
+            error("成员「${member.role}」45 秒内无响应，请检查该成员的模型与网络配置")
+        }
+        Log.i(TAG, "group member call done: role=${member.role} ms=${System.currentTimeMillis() - startTime} len=${snapshotText.length} reasoning=${snapshotReasoning.length} tools=${snapshotTools.size}")
+        return MemberCallResult(
+            text = snapshotText,
+            reasoning = snapshotReasoning,
+            tools = snapshotTools,
+        )
     }
 
     override suspend fun modelName(member: GroupMember): String =
@@ -155,9 +253,13 @@ class GroupRunner(
         return finished
     }
 
-    /** 带超时的成员调用，返回 null 表示超时。 */
-    private suspend fun callOrNull(member: GroupMember, prompt: String): String? =
-        withTimeoutOrNull(SINGLE_CALL_TIMEOUT_MILLIS) { caller.call(member, prompt) }
+    /** 成员调用：失败/超时以异常形式传播，由 run() 统一标记失败。 */
+    private suspend fun callOrNull(
+        group: Group,
+        member: GroupMember,
+        prompt: String,
+        onProgress: suspend (String) -> Unit = {},
+    ): MemberCallResult = caller.call(group, member, prompt, onProgress)
 
     // ---------- 编排器-工作者 ----------
 
@@ -181,15 +283,16 @@ class GroupRunner(
             appendLine("任务指令：$mission")
             appendLine("请输出一个 JSON 数组（不要输出其他内容），每个元素为 {\"id\":\"t1\",\"goal\":\"...\",\"memberId\":\"成员id\",\"dependsOn\":[\"t1\"]}，dependsOn 为该子任务依赖的前置子任务 id 列表，无依赖可省略。")
         }
-        val planText = callOrNull(orchestrator, planPrompt)
-            ?: error("编排器生成任务计划超时（45 秒无响应），请检查成员的模型与网络配置")
-        onProgress(memberMessage(runId, group, orchestrator, planText, MessageKind.PLAN))
+        val planResult = callOrNull(group, orchestrator, planPrompt) { note ->
+            onProgress(systemMessage(runId, group, note))
+        }
+        val planText = planResult.text
+        onProgress(memberMessage(runId, group, orchestrator, planResult, MessageKind.PLAN))
         val subtasks = parseSubtasks(planText)
         if (subtasks.isEmpty()) error("编排器未生成有效的子任务计划")
 
         val outputs = mutableMapOf<String, String>()
         val executed = mutableSetOf<String>()
-        var workerFailed = false
 
         while (subtasks.any { it.id !in executed }) {
             if (!coroutineContext.isActive) return "（已停止）"
@@ -216,15 +319,11 @@ class GroupRunner(
                             appendLine("整体任务指令：$mission")
                             appendLine("请直接输出结果，不要解释过程。")
                         }
-                        val result = callOrNull(member, prompt)
-                        if (result == null) {
-                            workerFailed = true
-                            onProgress(systemMessage(runId, group, "成员「${member.role}」执行子任务超时（45 秒无响应），已跳过该子任务"))
-                            task.id to "【失败】执行超时"
-                        } else {
-                            onProgress(memberMessage(runId, group, member, result, MessageKind.SUBTASK))
-                            task.id to result
+                        val result = callOrNull(group, member, prompt) { note ->
+                            onProgress(systemMessage(runId, group, note))
                         }
+                        onProgress(memberMessage(runId, group, member, result, MessageKind.SUBTASK))
+                        task.id to result.text
                     }
                 }.awaitAll()
             }
@@ -237,16 +336,17 @@ class GroupRunner(
         val summaryPrompt = buildString {
             appendLine("你是主编排器「${orchestrator.role}」，请汇总群组针对任务的执行结果，输出最终结论。")
             appendLine("任务指令：$mission")
-            if (workerFailed) appendLine("注意：部分成员执行失败或超时，请如实说明。")
             outputs.forEach { (id, result) ->
                 val task = subtasks.find { it.id == id }
                 appendLine("- 子任务「${task?.goal ?: id}」：${result.take(3000)}")
             }
             appendLine("请输出结构化的最终结论。")
         }
-        val summary = callOrNull(orchestrator, summaryPrompt) ?: "（汇总超时，以上子任务结果即为最终成果）"
-        onProgress(memberMessage(runId, group, orchestrator, summary, MessageKind.SYSTEM))
-        return summary
+        val summaryResult = callOrNull(group, orchestrator, summaryPrompt) { note ->
+            onProgress(systemMessage(runId, group, note))
+        }
+        onProgress(memberMessage(runId, group, orchestrator, summaryResult, MessageKind.SYSTEM))
+        return summaryResult.text
     }
 
     // ---------- 流水线 ----------
@@ -270,12 +370,11 @@ class GroupRunner(
                     appendLine("你是第一个环节，请直接处理任务并输出结果。")
                 }
             }
-            val result = callOrNull(member, prompt)
-            if (result == null) {
-                error("成员「${member.role}」执行超时（45 秒无响应），请检查该成员的模型与网络配置")
+            val result = callOrNull(group, member, prompt) { note ->
+                onProgress(systemMessage(runId, group, note))
             }
             onProgress(memberMessage(runId, group, member, result, MessageKind.RESULT))
-            current = result
+            current = result.text
         }
         return current
     }
@@ -306,13 +405,11 @@ class GroupRunner(
                     }
                     appendLine("请给出你的观点、分析或补充，直接输出内容。")
                 }
-                val result = callOrNull(member, prompt)
-                if (result == null) {
-                    onProgress(systemMessage(runId, group, "成员「${member.role}」第 $round 轮发言超时（45 秒无响应），已跳过"))
-                    continue
+                val result = callOrNull(group, member, prompt) { note ->
+                    onProgress(systemMessage(runId, group, note))
                 }
                 onProgress(memberMessage(runId, group, member, result, MessageKind.REPLY))
-                history += member to result
+                history += member to result.text
             }
         }
 
@@ -322,9 +419,11 @@ class GroupRunner(
             appendLine("请输出结构化的最终结论。")
         }
         val lead = group.members.firstOrNull() ?: error("群组没有成员")
-        val conclusion = callOrNull(lead, conclusionPrompt) ?: "（生成结论超时，以上讨论即为成果）"
-        onProgress(memberMessage(runId, group, lead, conclusion, MessageKind.SYSTEM))
-        return conclusion
+        val conclusionResult = callOrNull(group, lead, conclusionPrompt) { note ->
+            onProgress(systemMessage(runId, group, note))
+        }
+        onProgress(memberMessage(runId, group, lead, conclusionResult, MessageKind.SYSTEM))
+        return conclusionResult.text
     }
 
     // ---------- 工具 ----------
@@ -333,27 +432,32 @@ class GroupRunner(
         runId: String,
         group: Group,
         member: GroupMember,
-        content: String,
+        result: MemberCallResult,
         kind: MessageKind,
     ): GroupMessage {
         val modelName = runCatching { caller.modelName(member) }.getOrDefault("")
+        val toolsJson = if (result.tools.isEmpty()) "" else JsonInstant.encodeToString(result.tools)
         val message = GroupMessage(
             id = Uuid.random().toString(),
             runId = runId,
             memberId = member.id,
             memberRole = member.role,
             memberModelName = modelName,
-            content = content,
+            content = result.text,
             kind = kind,
+            reasoning = result.reasoning,
+            tools = toolsJson,
             createdAt = System.currentTimeMillis(),
         )
         repository.addMessage(
             runId = runId,
             memberId = member.id,
-            content = content,
+            content = result.text,
             kind = kind,
             memberRole = member.role,
             memberModelName = modelName,
+            reasoning = result.reasoning,
+            tools = toolsJson,
         )
         return message
     }
@@ -401,7 +505,6 @@ class GroupRunner(
 
     companion object {
         const val SYSTEM_MEMBER_ID = "__system__"
-        private const val SINGLE_CALL_TIMEOUT_MILLIS = 45_000L
         private const val MAX_CONTEXT_MESSAGES = 20
     }
 }
