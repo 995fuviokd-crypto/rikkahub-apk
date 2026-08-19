@@ -35,6 +35,7 @@ import me.rerere.rikkahub.data.db.migrations.Migration_25_26
 import me.rerere.rikkahub.data.db.migrations.Migration_26_27
 import me.rerere.rikkahub.data.db.migrations.Migration_27_28
 import me.rerere.rikkahub.data.db.migrations.Migration_28_29
+import me.rerere.rikkahub.data.db.migrations.Migration_29_30
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.sync.webdav.WebDavSync
 import me.rerere.search.SearchService
@@ -59,7 +60,7 @@ val dataSourceModule = module {
         val context: Context = get()
         Room.databaseBuilder(context, AppDatabase::class.java, "rikka_hub")
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
-            .addMigrations(Migration_6_7, Migration_11_12, Migration_13_14, Migration_14_15, Migration_15_16, Migration_24_25, Migration_25_26, Migration_26_27, Migration_27_28, Migration_28_29)
+            .addMigrations(Migration_6_7, Migration_11_12, Migration_13_14, Migration_14_15, Migration_15_16, Migration_24_25, Migration_25_26, Migration_26_27, Migration_27_28, Migration_28_29, Migration_29_30)
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
                     // WAL 模式下 NORMAL 安全，减少每次提交的 fsync 开销
