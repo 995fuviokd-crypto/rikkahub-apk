@@ -13,12 +13,13 @@ import me.rerere.rikkahub.data.model.GroupMode
 import me.rerere.rikkahub.data.model.GroupRun
 import me.rerere.rikkahub.data.model.MessageKind
 import me.rerere.rikkahub.data.model.RunStatus
+import me.rerere.rikkahub.data.ai.group.GroupStore
 import me.rerere.rikkahub.utils.JsonInstant
 import kotlin.uuid.Uuid
 
 class GroupRepository(
     private val dao: GroupDAO,
-) {
+) : GroupStore {
     fun listGroups(): Flow<List<Group>> = dao.listGroups().map { list -> list.map { it.toGroup() } }
 
     fun getGroup(id: String): Flow<Group?> = dao.getGroupFlow(id).map { it?.toGroup() }
@@ -71,9 +72,9 @@ class GroupRepository(
 
     fun getRun(id: String): Flow<GroupRun?> = dao.getRunFlow(id).map { it?.toRun() }
 
-    suspend fun getRunById(id: String): GroupRun? = dao.getRun(id)?.toRun()
+    override suspend fun getRunById(id: String): GroupRun? = dao.getRun(id)?.toRun()
 
-    suspend fun upsertRun(run: GroupRun) {
+    override suspend fun upsertRun(run: GroupRun) {
         dao.upsertRun(
             GroupRunEntity(
                 id = run.id,
@@ -94,13 +95,13 @@ class GroupRepository(
     suspend fun getMessages(runId: String): List<GroupMessage> =
         dao.getMessages(runId).map { it.toMessage() }
 
-    suspend fun addMessage(
+    override suspend fun addMessage(
         runId: String,
         memberId: String,
         content: String,
         kind: MessageKind,
-        memberRole: String = "",
-        memberModelName: String = "",
+        memberRole: String,
+        memberModelName: String,
     ) {
         dao.upsertMessage(
             GroupMessageEntity(

@@ -21,10 +21,11 @@ data class ModelInfo(
 )
 
 class GroupEditorVM(
-    private val id: String?,
+    id: String?,
     private val repository: GroupRepository,
     private val settingsStore: SettingsStore,
 ) : ViewModel() {
+    private val groupId: String? = id?.takeIf { it.isNotBlank() }
     val models = MutableStateFlow<List<ModelInfo>>(emptyList())
     val name = MutableStateFlow("")
     val mode = MutableStateFlow(GroupMode.DEBATE)
@@ -44,7 +45,7 @@ class GroupEditorVM(
                         .filter { it.type == ModelType.CHAT }
                         .map { ModelInfo(provider.name, it) }
                 }
-            val group = id?.let { repository.getGroupById(it) }
+            val group = groupId?.let { repository.getGroupById(it) }
             if (group != null) {
                 name.value = group.name
                 mode.value = group.mode
@@ -112,7 +113,7 @@ class GroupEditorVM(
         if (error != null) return false
         repository.save(
             Group(
-                id = id ?: Uuid.random().toString(),
+                id = groupId ?: Uuid.random().toString(),
                 name = name.value,
                 mode = mode.value,
                 members = members.value,

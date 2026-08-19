@@ -47,7 +47,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun GroupEditorPage(
     id: String?,
-    vm: GroupEditorVM = koinViewModel(parameters = { parametersOf(id) }),
+    vm: GroupEditorVM = koinViewModel(parameters = { parametersOf(id ?: "") }),
 ) {
     val navController = LocalNavController.current
     val scope = rememberCoroutineScope()

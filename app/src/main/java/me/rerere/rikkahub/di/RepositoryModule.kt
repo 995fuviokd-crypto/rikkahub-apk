@@ -101,6 +101,10 @@ val repositoryModule = module {
         GroupRepository(get())
     }
 
+    single<me.rerere.rikkahub.data.ai.group.GroupStore> {
+        get<GroupRepository>()
+    }
+
     single {
         me.rerere.rikkahub.data.plugin.PluginManager(get())
     }
