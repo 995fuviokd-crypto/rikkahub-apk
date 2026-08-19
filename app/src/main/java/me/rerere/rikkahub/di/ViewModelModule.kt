@@ -15,6 +15,7 @@ import me.rerere.rikkahub.ui.pages.extensions.PromptVM
 import me.rerere.rikkahub.ui.pages.extensions.QuickMessagesVM
 import me.rerere.rikkahub.ui.pages.extensions.skills.SkillDetailVM
 import me.rerere.rikkahub.ui.pages.extensions.skills.SkillsVM
+import me.rerere.rikkahub.ui.pages.extensions.plugin.PluginMarketVM
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceDetailVM
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceVM
 import me.rerere.rikkahub.ui.pages.extensions.workflow.WorkflowEditorVM
@@ -76,6 +77,13 @@ val viewModelModule = module {
         )
     }
     viewModelOf(::WorkflowListVM)
+    viewModel<PluginMarketVM> {
+        PluginMarketVM(
+            settingsStore = get(),
+            pluginManager = get(),
+            marketDataSource = get(),
+        )
+    }
     viewModel<WorkflowEditorVM> {
         WorkflowEditorVM(
             id = it.get(),
