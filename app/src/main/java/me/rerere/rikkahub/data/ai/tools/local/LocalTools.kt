@@ -34,6 +34,10 @@ class LocalTools(
 
     val powerTools by lazy { buildPowerTools(context) }
 
+    val adbTools by lazy { buildAdbTools(context) }
+
+    val rootTools by lazy { buildRootTools(context) }
+
     fun getTools(options: List<LocalToolOption>): List<Tool> {
         val tools = mutableListOf<Tool>()
         if (options.contains(LocalToolOption.JavascriptEngine)) {
@@ -66,6 +70,12 @@ class LocalTools(
         }
         if (options.contains(LocalToolOption.PowerManagement)) {
             tools.addAll(powerTools)
+        }
+        if (options.contains(LocalToolOption.Adb)) {
+            tools.addAll(adbTools)
+        }
+        if (options.contains(LocalToolOption.Root)) {
+            tools.addAll(rootTools)
         }
         return tools
     }

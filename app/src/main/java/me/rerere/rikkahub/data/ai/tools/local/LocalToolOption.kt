@@ -44,4 +44,12 @@ sealed class LocalToolOption {
     @Serializable
     @SerialName("power_management")
     data object PowerManagement : LocalToolOption()
+
+    @Serializable
+    @SerialName("adb")
+    data object Adb : LocalToolOption()
+
+    @Serializable
+    @SerialName("root")
+    data object Root : LocalToolOption()
 }

@@ -10,6 +10,10 @@ import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.service.ChatNotificationManager
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.data.ai.workflow.WorkflowRunner
+import me.rerere.rikkahub.data.ai.group.GroupRunner
+import me.rerere.rikkahub.data.ai.group.ProviderGroupMemberCaller
+import me.rerere.rikkahub.data.permission.HeadlessController
+import me.rerere.rikkahub.data.permission.PermissionManager
 import me.rerere.rikkahub.service.FloatingActivityHub
 import me.rerere.rikkahub.utils.EmojiData
 import me.rerere.rikkahub.utils.EmojiUtils
@@ -109,6 +113,24 @@ val appModule = module {
             settingsStore = get(),
             httpClient = get(),
         )
+    }
+
+    single {
+        GroupRunner(
+            caller = ProviderGroupMemberCaller(
+                providerManager = get(),
+                settingsStore = get(),
+            ),
+            repository = get(),
+        )
+    }
+
+    single {
+        PermissionManager(get())
+    }
+
+    single {
+        HeadlessController(get())
     }
 
     single {

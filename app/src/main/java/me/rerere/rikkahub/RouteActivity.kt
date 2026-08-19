@@ -101,6 +101,11 @@ import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceFileEditorPage
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceTerminalPage
 import me.rerere.rikkahub.ui.pages.extensions.workflow.WorkflowListPage
 import me.rerere.rikkahub.ui.pages.extensions.workflow.WorkflowEditorPage
+import me.rerere.rikkahub.ui.pages.extensions.group.GroupDetailPage
+import me.rerere.rikkahub.ui.pages.extensions.group.GroupEditorPage
+import me.rerere.rikkahub.ui.pages.extensions.group.GroupListPage
+import me.rerere.rikkahub.ui.pages.extensions.group.GroupRunPage
+import me.rerere.rikkahub.ui.pages.extensions.permission.PermissionPage
 import me.rerere.rikkahub.ui.pages.extensions.plugin.PluginMarketPage
 import me.rerere.workspace.WorkspaceStorageArea
 import me.rerere.rikkahub.ui.pages.favorite.FavoritePage
@@ -550,6 +555,26 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.Plugins> {
                                 PluginMarketPage()
                             }
+
+                            entry<Screen.Groups> {
+                                GroupListPage()
+                            }
+
+                            entry<Screen.GroupEditor> { key ->
+                                GroupEditorPage(id = key.id)
+                            }
+
+                            entry<Screen.GroupDetail> { key ->
+                                GroupDetailPage(id = key.id)
+                            }
+
+                            entry<Screen.GroupRun> { key ->
+                                GroupRunPage(runId = key.runId)
+                            }
+
+                            entry<Screen.Permissions> {
+                                PermissionPage()
+                            }
                         }
                     )
                     AnimatedVisibility(
@@ -751,4 +776,19 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object Plugins : Screen
+
+    @Serializable
+    data object Groups : Screen
+
+    @Serializable
+    data class GroupEditor(val id: String?) : Screen
+
+    @Serializable
+    data class GroupDetail(val id: String) : Screen
+
+    @Serializable
+    data class GroupRun(val runId: String) : Screen
+
+    @Serializable
+    data object Permissions : Screen
 }

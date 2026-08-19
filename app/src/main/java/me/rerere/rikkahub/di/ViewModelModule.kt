@@ -20,6 +20,11 @@ import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceDetailVM
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceVM
 import me.rerere.rikkahub.ui.pages.extensions.workflow.WorkflowEditorVM
 import me.rerere.rikkahub.ui.pages.extensions.workflow.WorkflowListVM
+import me.rerere.rikkahub.ui.pages.extensions.group.GroupDetailVM
+import me.rerere.rikkahub.ui.pages.extensions.group.GroupEditorVM
+import me.rerere.rikkahub.ui.pages.extensions.group.GroupListVM
+import me.rerere.rikkahub.ui.pages.extensions.group.GroupRunVM
+import me.rerere.rikkahub.ui.pages.extensions.permission.PermissionVM
 import me.rerere.rikkahub.ui.pages.setting.SettingVM
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerVM
 import me.rerere.rikkahub.ui.pages.translator.TranslatorVM
@@ -77,6 +82,28 @@ val viewModelModule = module {
         )
     }
     viewModelOf(::WorkflowListVM)
+    viewModelOf(::GroupListVM)
+    viewModelOf(::PermissionVM)
+    viewModel<GroupEditorVM> {
+        GroupEditorVM(
+            id = it.get(),
+            repository = get(),
+            settingsStore = get(),
+        )
+    }
+    viewModel<GroupDetailVM> {
+        GroupDetailVM(
+            id = it.get(),
+            repository = get(),
+            runner = get(),
+        )
+    }
+    viewModel<GroupRunVM> {
+        GroupRunVM(
+            runId = it.get(),
+            repository = get(),
+        )
+    }
     viewModel<PluginMarketVM> {
         PluginMarketVM(
             settingsStore = get(),
