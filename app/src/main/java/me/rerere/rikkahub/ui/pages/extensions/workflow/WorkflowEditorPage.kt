@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.pages.extensions.workflow
 
+import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -41,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -54,12 +57,15 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
@@ -72,6 +78,8 @@ import me.rerere.hugeicons.stroke.Flowchart02
 import me.rerere.hugeicons.stroke.GitBranch
 import me.rerere.hugeicons.stroke.GitMerge
 import me.rerere.hugeicons.stroke.Globe
+import me.rerere.hugeicons.stroke.FitToScreen
+import me.rerere.hugeicons.stroke.MinusSign
 import me.rerere.hugeicons.stroke.Play
 import me.rerere.hugeicons.stroke.Repeat
 import me.rerere.hugeicons.stroke.Sparkles
@@ -118,6 +126,7 @@ fun WorkflowEditorPage(
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var showAddNodeSheet by remember { mutableStateOf(false) }
     val graph = workflow?.effectiveGraph
+    val context = LocalContext.current
 
     Scaffold(
         topBar = {
@@ -157,7 +166,13 @@ fun WorkflowEditorPage(
                     selectedNodeId = selectedNodeId,
                     onSelectNode = vm::selectNode,
                     onMoveNode = vm::moveNode,
-                    onAddEdge = vm::addEdge,
+                    onAddEdge = { fromId, fromPort, toId ->
+                        val ok = vm.addEdge(fromId, fromPort, toId)
+                        if (!ok) {
+                            Toast.makeText(context, "无法连接：重复连线或会产生循环", Toast.LENGTH_SHORT).show()
+                        }
+                        ok
+                    },
                     onDeselectNode = { vm.selectNode(null) },
                 )
                 if (runSucceeded != null) {
@@ -219,6 +234,8 @@ private fun WorkflowGraphCanvas(
     val scaleState = remember { mutableFloatStateOf(1f) }
     val offsetState = remember { mutableStateOf(Offset(40f, 40f)) }
     var dragOverride by remember { mutableStateOf<Pair<String, Offset>?>(null) }
+    var linkPreview by remember { mutableStateOf<Pair<Offset, Offset>?>(null) }
+    val canvasSize = remember { mutableStateOf(IntSize.Zero) }
 
     val progressById = runProgress.associateBy { it.nodeId }
     val colorScheme = MaterialTheme.colorScheme
@@ -241,6 +258,11 @@ private fun WorkflowGraphCanvas(
         }
     }
 
+    fun portScreen(node: WorkflowNode, port: String): Offset {
+        val p = portWorld(node, port)
+        return Offset(p.x * scaleState.floatValue + offsetState.value.x, p.y * scaleState.floatValue + offsetState.value.y)
+    }
+
     fun hitTest(screen: Offset): Pair<WorkflowNode?, String?> {
         val s = scaleState.floatValue
         val o = offsetState.value
@@ -261,161 +283,234 @@ private fun WorkflowGraphCanvas(
         return null to null
     }
 
-    Canvas(
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(graph) {
-                awaitEachGesture {
-                    val down = awaitFirstDown()
-                    val downScreen = down.position
-                    val (hitNode, hitPort) = hitTest(downScreen)
-                    var mode: GestureMode = GestureMode.NONE
-                    var dragNodeId: String? = null
-                    var dragAccum = Offset.Zero
-                    if (hitPort != null) {
-                        mode = GestureMode.LINK
-                    } else if (hitNode != null) {
-                        mode = GestureMode.DRAG_NODE
-                        dragNodeId = hitNode.id
-                        onSelectNode(hitNode.id)
-                    } else {
-                        mode = GestureMode.PAN
-                        onDeselectNode()
-                    }
-                    var wasMultiTouch = false
-                    var lastEvent: androidx.compose.ui.input.pointer.PointerInputChange? = null
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val changed = event.changes.firstOrNull() ?: break
-                        lastEvent = changed
-                        if (event.changes.size >= 2) {
-                            wasMultiTouch = true
-                            mode = GestureMode.NONE
-                            dragOverride = null
-                            val p1 = event.changes[0].position
-                            val p2 = event.changes[1].position
-                            val prevP1 = event.changes[0].previousPosition
-                            val prevP2 = event.changes[1].previousPosition
-                            val newDist = (p2 - p1).getDistance()
-                            val oldDist = (prevP2 - prevP1).getDistance()
-                            if (oldDist > 0f && newDist > 0f) {
-                                val newScale = (scaleState.floatValue * newDist / oldDist).coerceIn(0.3f, 3f)
-                                val centroid = (p1 + p2) / 2f
-                                val prevCentroid = (prevP1 + prevP2) / 2f
-                                offsetState.value = centroid - (centroid - offsetState.value) * (newScale / scaleState.floatValue)
-                                scaleState.floatValue = newScale
-                            }
-                            offsetState.value += (p1 + p2) / 2f - (prevP1 + prevP2) / 2f
+    fun zoomTo(newScale: Float) {
+        val cs = canvasSize.value
+        if (cs.width == 0 || cs.height == 0) return
+        val center = Offset(cs.width / 2f, cs.height / 2f)
+        val s = newScale.coerceIn(0.2f, 3f)
+        offsetState.value = center - (center - offsetState.value) * (s / scaleState.floatValue)
+        scaleState.floatValue = s
+    }
+
+    fun zoomBy(factor: Float) = zoomTo(scaleState.floatValue * factor)
+
+    fun fitToContent() {
+        if (graph.nodes.isEmpty()) return
+        val cs = canvasSize.value
+        if (cs.width == 0 || cs.height == 0) return
+        val minX = graph.nodes.minOf { it.x }
+        val maxX = graph.nodes.maxOf { it.x } + nodeW
+        val minY = graph.nodes.minOf { it.y }
+        val maxY = graph.nodes.maxOf { it.y } + nodeH
+        val pad = 56f
+        val contentW = (maxX - minX).coerceAtLeast(1f)
+        val contentH = (maxY - minY).coerceAtLeast(1f)
+        val s = minOf((cs.width - pad * 2) / contentW, (cs.height - pad * 2) / contentH, 1f).coerceAtLeast(0.2f)
+        scaleState.floatValue = s
+        offsetState.value = Offset(
+            (cs.width - contentW * s) / 2f - minX * s,
+            (cs.height - contentH * s) / 2f - minY * s,
+        )
+    }
+
+    Box {
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .onSizeChanged { canvasSize.value = it }
+                .pointerInput(graph) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        val downScreen = down.position
+                        val (hitNode, hitPort) = hitTest(downScreen)
+                        var mode: GestureMode = GestureMode.NONE
+                        var dragNodeId: String? = null
+                        var dragAccum = Offset.Zero
+                        if (hitPort != null) {
+                            mode = GestureMode.LINK
+                            linkPreview = portScreen(hitNode!!, hitPort) to downScreen
+                        } else if (hitNode != null) {
+                            mode = GestureMode.DRAG_NODE
+                            dragNodeId = hitNode.id
+                            onSelectNode(hitNode.id)
                         } else {
-                            if (wasMultiTouch) {
+                            mode = GestureMode.PAN
+                            onDeselectNode()
+                        }
+                        var wasMultiTouch = false
+                        var lastEvent: androidx.compose.ui.input.pointer.PointerInputChange? = null
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val changed = event.changes.firstOrNull() ?: break
+                            lastEvent = changed
+                            if (event.changes.size >= 2) {
+                                wasMultiTouch = true
                                 mode = GestureMode.NONE
-                                wasMultiTouch = false
-                            }
-                            when (mode) {
-                                GestureMode.PAN -> offsetState.value += changed.positionChange()
-                                GestureMode.DRAG_NODE -> {
-                                    val node = hitNode ?: break
-                                    val delta = changed.positionChange() / scaleState.floatValue
-                                    dragAccum += delta
-                                    dragOverride = node.id to Offset(
-                                        snap(node.x + dragAccum.x),
-                                        snap(node.y + dragAccum.y),
-                                    )
+                                dragOverride = null
+                                linkPreview = null
+                                val p1 = event.changes[0].position
+                                val p2 = event.changes[1].position
+                                val prevP1 = event.changes[0].previousPosition
+                                val prevP2 = event.changes[1].previousPosition
+                                val newDist = (p2 - p1).getDistance()
+                                val oldDist = (prevP2 - prevP1).getDistance()
+                                if (oldDist > 0f && newDist > 0f) {
+                                    val newScale = (scaleState.floatValue * newDist / oldDist).coerceIn(0.2f, 3f)
+                                    val centroid = (p1 + p2) / 2f
+                                    val prevCentroid = (prevP1 + prevP2) / 2f
+                                    offsetState.value = centroid - (centroid - offsetState.value) * (newScale / scaleState.floatValue)
+                                    scaleState.floatValue = newScale
                                 }
-                                GestureMode.LINK -> Unit
-                                GestureMode.NONE -> Unit
-                            }
-                        }
-                        changed.consume()
-                        if (event.changes.all { it.changedToUp() }) break
-                    }
-                    when (mode) {
-                        GestureMode.DRAG_NODE -> {
-                            val node = hitNode
-                            if (node != null) {
-                                onMoveNode(node.id, snap(node.x + dragAccum.x), snap(node.y + dragAccum.y))
-                            }
-                            dragOverride = null
-                        }
-                        GestureMode.LINK -> {
-                            val up = lastEvent
-                            if (up != null) {
-                                val (targetNode, _) = hitTest(up.position)
-                                if (targetNode != null && targetNode.id != hitNode?.id) {
-                                    onAddEdge(hitNode!!.id, hitPort!!, targetNode.id)
+                                offsetState.value += (p1 + p2) / 2f - (prevP1 + prevP2) / 2f
+                            } else {
+                                if (wasMultiTouch) {
+                                    mode = GestureMode.NONE
+                                    wasMultiTouch = false
+                                }
+                                when (mode) {
+                                    GestureMode.PAN -> offsetState.value += changed.positionChange()
+                                    GestureMode.DRAG_NODE -> {
+                                        val node = hitNode ?: break
+                                        val delta = changed.positionChange() / scaleState.floatValue
+                                        dragAccum += delta
+                                        dragOverride = node.id to Offset(
+                                            snap(node.x + dragAccum.x),
+                                            snap(node.y + dragAccum.y),
+                                        )
+                                    }
+                                    GestureMode.LINK -> {
+                                        linkPreview = linkPreview?.copy(second = changed.position)
+                                    }
+                                    GestureMode.NONE -> Unit
                                 }
                             }
+                            changed.consume()
+                            if (event.changes.all { it.changedToUp() }) break
                         }
-                        else -> Unit
+                        when (mode) {
+                            GestureMode.DRAG_NODE -> {
+                                val node = hitNode
+                                if (node != null) {
+                                    onMoveNode(node.id, snap(node.x + dragAccum.x), snap(node.y + dragAccum.y))
+                                }
+                                dragOverride = null
+                            }
+                            GestureMode.LINK -> {
+                                linkPreview = null
+                                val up = lastEvent
+                                if (up != null) {
+                                    val (targetNode, _) = hitTest(up.position)
+                                    if (targetNode != null && targetNode.id != hitNode?.id) {
+                                        onAddEdge(hitNode!!.id, hitPort!!, targetNode.id)
+                                    }
+                                }
+                            }
+                            else -> Unit
+                        }
                     }
+                },
+        ) {
+            drawGrid(scaleState.floatValue, offsetState.value)
+
+            val edgeColor = { status: StepStatus? ->
+                when (status) {
+                    StepStatus.FAILED -> colorScheme.error
+                    StepStatus.SUCCESS -> Color(0xFF2E7D32)
+                    StepStatus.SKIPPED -> colorScheme.outlineVariant
+                    else -> colorScheme.outline
                 }
-            },
-    ) {
-        drawGrid(scaleState.floatValue, offsetState.value)
-
-        val edgeColor = { status: StepStatus? ->
-            when (status) {
-                StepStatus.FAILED -> colorScheme.error
-                StepStatus.SUCCESS -> Color(0xFF2E7D32)
-                StepStatus.SKIPPED -> colorScheme.outlineVariant
-                else -> colorScheme.outline
             }
-        }
 
-        for (edge in graph.edges) {
-            val from = graph.nodes.find { it.id == edge.fromNodeId } ?: continue
-            val to = graph.nodes.find { it.id == edge.toNodeId } ?: continue
-            val start = portWorld(from, edge.fromPort)
-            val end = portWorld(to, edge.toPort)
-            val startScreen = Offset(start.x * scaleState.floatValue + offsetState.value.x, start.y * scaleState.floatValue + offsetState.value.y)
-            val endScreen = Offset(end.x * scaleState.floatValue + offsetState.value.x, end.y * scaleState.floatValue + offsetState.value.y)
-            drawEdge(startScreen, endScreen, edgeColor(progressById[to.id]?.status))
-        }
+            for (edge in graph.edges) {
+                val from = graph.nodes.find { it.id == edge.fromNodeId } ?: continue
+                val to = graph.nodes.find { it.id == edge.toNodeId } ?: continue
+                val start = portWorld(from, edge.fromPort)
+                val end = portWorld(to, edge.toPort)
+                val startScreen = Offset(start.x * scaleState.floatValue + offsetState.value.x, start.y * scaleState.floatValue + offsetState.value.y)
+                val endScreen = Offset(end.x * scaleState.floatValue + offsetState.value.x, end.y * scaleState.floatValue + offsetState.value.y)
+                drawEdge(startScreen, endScreen, edgeColor(progressById[to.id]?.status))
+            }
 
-        for (node in graph.nodes) {
-            val p = nodeScreen(node)
-            val status = progressById[node.id]?.status
-            val isSelected = node.id == selectedNodeId
-            val borderColor = when {
-                isSelected -> colorScheme.primary
-                status == StepStatus.SUCCESS -> Color(0xFF2E7D32)
-                status == StepStatus.FAILED -> colorScheme.error
-                status == StepStatus.RUNNING -> colorScheme.primary
-                status == StepStatus.SKIPPED -> colorScheme.outlineVariant
-                else -> colorScheme.outlineVariant
+            val preview = linkPreview
+            if (preview != null) {
+                drawEdge(preview.first, preview.second, colorScheme.primary)
             }
-            val fillColor = when {
-                node.type == NodeType.START -> colorScheme.primaryContainer
-                node.type == NodeType.END -> colorScheme.tertiaryContainer
-                status == StepStatus.FAILED -> colorScheme.errorContainer.copy(alpha = 0.4f)
-                status == StepStatus.SUCCESS -> Color(0xFFE8F5E9)
-                else -> colorScheme.surface
+
+            for (node in graph.nodes) {
+                val p = nodeScreen(node)
+                val status = progressById[node.id]?.status
+                val isSelected = node.id == selectedNodeId
+                val borderColor = when {
+                    isSelected -> colorScheme.primary
+                    status == StepStatus.SUCCESS -> Color(0xFF2E7D32)
+                    status == StepStatus.FAILED -> colorScheme.error
+                    status == StepStatus.RUNNING -> colorScheme.primary
+                    status == StepStatus.SKIPPED -> colorScheme.outlineVariant
+                    else -> colorScheme.outlineVariant
+                }
+                val fillColor = when {
+                    node.type == NodeType.START -> colorScheme.primaryContainer
+                    node.type == NodeType.END -> colorScheme.tertiaryContainer
+                    status == StepStatus.FAILED -> colorScheme.errorContainer.copy(alpha = 0.4f)
+                    status == StepStatus.SUCCESS -> Color(0xFFE8F5E9)
+                    else -> colorScheme.surface
+                }
+                drawNode(
+                    node = node,
+                    topLeft = p,
+                    nodeW = nodeW,
+                    nodeH = nodeH,
+                    borderColor = borderColor,
+                    fillColor = fillColor,
+                    titleStyle = titleStyle,
+                    subStyle = subStyle,
+                    isSelected = isSelected,
+                    textMeasurer = textMeasurer,
+                )
+                drawPorts(node, p, nodeW, nodeH, portRadius, edgeColor(status))
             }
-            drawNode(
-                node = node,
-                topLeft = p,
+
+            drawMinimap(
+                graph = graph,
                 nodeW = nodeW,
                 nodeH = nodeH,
-                borderColor = borderColor,
-                fillColor = fillColor,
-                titleStyle = titleStyle,
-                subStyle = subStyle,
-                isSelected = isSelected,
-                textMeasurer = textMeasurer,
+                scale = scaleState.floatValue,
+                offset = offsetState.value,
+                canvasSize = size,
+                nodeColor = colorScheme.primary,
+                viewportColor = colorScheme.onPrimary,
             )
-            drawPorts(node, p, nodeW, nodeH, portRadius, edgeColor(status))
         }
 
-        drawMinimap(
-            graph = graph,
-            nodeW = nodeW,
-            nodeH = nodeH,
-            scale = scaleState.floatValue,
-            offset = offsetState.value,
-            canvasSize = size,
-            nodeColor = colorScheme.primary,
-            viewportColor = colorScheme.onPrimary,
-        )
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            ZoomControlButton(HugeIcons.FitToScreen, "适应全部") { fitToContent() }
+            ZoomControlButton(HugeIcons.Add01, "放大") { zoomBy(1.25f) }
+            ZoomControlButton(HugeIcons.MinusSign, "缩小") { zoomBy(0.8f) }
+        }
+    }
+}
+
+@Composable
+private fun ZoomControlButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surface)
+            .shadow(2.dp),
+    ) {
+        Icon(icon, contentDescription = contentDescription, tint = MaterialTheme.colorScheme.primary)
     }
 }
 
