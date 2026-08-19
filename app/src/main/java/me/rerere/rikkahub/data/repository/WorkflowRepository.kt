@@ -5,7 +5,9 @@ import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.data.db.dao.WorkflowDAO
 import me.rerere.rikkahub.data.db.entity.WorkflowEntity
 import me.rerere.rikkahub.data.model.Workflow
+import me.rerere.rikkahub.data.model.WorkflowGraph
 import me.rerere.rikkahub.data.model.WorkflowStep
+import me.rerere.rikkahub.data.model.legacyStepsToGraph
 import me.rerere.rikkahub.utils.JsonInstant
 import kotlin.uuid.Uuid
 
@@ -31,7 +33,8 @@ class WorkflowRepository(
             id = workflow.id,
             name = workflow.name.trim().ifBlank { "未命名工作流" },
             description = workflow.description,
-            stepsJson = JsonInstant.encodeToString(workflow.steps),
+            stepsJson = "[]",
+            graphJson = JsonInstant.encodeToString(workflow.effectiveGraph),
             createdAt = if (workflow.createdAt > 0) workflow.createdAt else now,
             updatedAt = now,
         )
@@ -39,13 +42,20 @@ class WorkflowRepository(
         return entity.toWorkflow()
     }
 
-    suspend fun create(name: String, steps: List<WorkflowStep> = emptyList()): Workflow {
+    suspend fun create(
+        name: String,
+        steps: List<WorkflowStep> = emptyList(),
+        graph: WorkflowGraph? = null,
+        description: String = "",
+    ): Workflow {
         val id = Uuid.random().toString()
         return save(
             Workflow(
                 id = id,
                 name = name,
+                description = description,
                 steps = steps,
+                graph = graph,
             )
         )
     }
@@ -56,14 +66,24 @@ class WorkflowRepository(
 }
 
 private fun WorkflowEntity.toWorkflow(): Workflow {
-    val steps = runCatching {
-        JsonInstant.decodeFromString<List<WorkflowStep>>(stepsJson)
-    }.getOrDefault(emptyList())
+    val graph = runCatching {
+        val json = graphJson.trim()
+        if (json.isEmpty() || json == "{}" || json == "null") null
+        else JsonInstant.decodeFromString<WorkflowGraph>(json)
+    }.getOrNull()
+    val steps = if (graph != null) {
+        emptyList()
+    } else {
+        runCatching {
+            JsonInstant.decodeFromString<List<WorkflowStep>>(stepsJson)
+        }.getOrDefault(emptyList())
+    }
     return Workflow(
         id = id,
         name = name,
         description = description,
         steps = steps,
+        graph = graph,
         createdAt = createdAt,
         updatedAt = updatedAt,
     )

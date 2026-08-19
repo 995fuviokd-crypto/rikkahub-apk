@@ -282,26 +282,26 @@ private fun RunResultDialog(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                result.steps.forEach { step ->
-                    val statusText = when (step.status) {
+                result.nodes.forEach { node ->
+                    val statusText = when (node.status) {
                         StepStatus.SUCCESS -> "✓"
                         StepStatus.FAILED -> "✗"
                         else -> "·"
                     }
-                    val color = when (step.status) {
+                    val color = when (node.status) {
                         StepStatus.SUCCESS -> MaterialTheme.colorScheme.primary
                         StepStatus.FAILED -> MaterialTheme.colorScheme.error
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
-                            text = "$statusText ${step.stepIndex + 1}. ${step.stepName}",
+                            text = "$statusText ${node.nodeName}",
                             style = MaterialTheme.typography.bodyMedium,
                             color = color,
                         )
-                        if (step.output.isNotBlank()) {
+                        if (node.output.isNotBlank()) {
                             Text(
-                                text = step.output.take(200),
+                                text = node.output.take(200),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

@@ -12,10 +12,14 @@ data class Workflow(
     val name: String,
     val description: String = "",
     val steps: List<WorkflowStep> = emptyList(),
+    val graph: WorkflowGraph? = null,
     val createdAt: Long = 0,
     val updatedAt: Long = 0,
 ) {
-    val stepCount: Int get() = steps.size
+    val stepCount: Int get() = graph?.nodeCount ?: steps.size
+
+    /** 图结构为空时回退到旧 steps 转换的图。 */
+    val effectiveGraph: WorkflowGraph get() = graph ?: legacyStepsToGraph(steps)
 }
 
 /**
@@ -87,4 +91,36 @@ data class HttpStepConfig(
 @SerialName("delay")
 data class DelayStepConfig(
     val seconds: Int = 1,
+) : StepConfig
+
+@Serializable
+@SerialName("start")
+data class StartStepConfig(val _unused: Boolean = false) : StepConfig
+
+@Serializable
+@SerialName("end")
+data class EndStepConfig(val _unused: Boolean = false) : StepConfig
+
+@Serializable
+@SerialName("if")
+data class IfStepConfig(
+    val condition: String = "",
+) : StepConfig
+
+@Serializable
+@SerialName("for")
+data class ForStepConfig(
+    val itemsSource: String = "",
+    val prompt: String = "",
+    val assistantId: String = "",
+) : StepConfig
+
+@Serializable
+@SerialName("merge")
+data class MergeStepConfig(val _unused: Boolean = false) : StepConfig
+
+@Serializable
+@SerialName("output")
+data class OutputStepConfig(
+    val template: String = "",
 ) : StepConfig

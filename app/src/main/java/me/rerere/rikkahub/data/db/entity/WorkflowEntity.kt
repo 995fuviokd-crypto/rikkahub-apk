@@ -20,6 +20,8 @@ data class WorkflowEntity(
     val description: String = "",
     @ColumnInfo("steps_json")
     val stepsJson: String = "[]",
+    @ColumnInfo("graph_json")
+    val graphJson: String = "{}",
     @ColumnInfo("created_at")
     val createdAt: Long,
     @ColumnInfo("updated_at")

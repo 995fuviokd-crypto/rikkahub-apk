@@ -23,7 +23,9 @@ import me.rerere.rikkahub.data.model.ShellStepConfig
 import me.rerere.rikkahub.data.model.StepConfig
 import me.rerere.rikkahub.data.model.StepType
 import me.rerere.rikkahub.data.model.TextStepConfig
+import me.rerere.rikkahub.data.model.WorkflowGraph
 import me.rerere.rikkahub.data.model.WorkflowStep
+import me.rerere.rikkahub.data.model.validate
 import me.rerere.rikkahub.data.repository.WorkflowRepository
 import me.rerere.rikkahub.utils.JsonInstantPretty
 import kotlin.uuid.Uuid
@@ -51,9 +53,9 @@ fun createWorkflowTools(
                         put("id", workflow.id)
                         put("name", workflow.name)
                         put("description", workflow.description)
-                        put("step_count", workflow.steps.size)
+                        put("step_count", workflow.stepCount)
                         put("step_types", buildJsonArray {
-                            workflow.steps.forEach { step -> add(JsonPrimitive(step.type.name.lowercase())) }
+                            workflow.effectiveGraph.nodes.forEach { node -> add(JsonPrimitive(node.type.name.lowercase())) }
                         })
                     })
                 }
@@ -96,13 +98,13 @@ fun createWorkflowTools(
             val payload = buildJsonObject {
                 put("workflow_id", result.workflowId)
                 put("succeeded", result.succeeded)
-                put("steps", buildJsonArray {
-                    result.steps.forEach { step ->
+                put("nodes", buildJsonArray {
+                    result.nodes.forEach { node ->
                         add(buildJsonObject {
-                            put("step", step.stepIndex + 1)
-                            put("name", step.stepName)
-                            put("status", step.status.name.lowercase())
-                            put("output", step.output.take(2000))
+                            put("node_id", node.nodeId)
+                            put("name", node.nodeName)
+                            put("status", node.status.name.lowercase())
+                            put("output", node.output.take(2000))
                         })
                     }
                 })
@@ -163,12 +165,76 @@ fun createWorkflowTools(
                 val id = it.jsonObject["id"]!!.jsonPrimitive.content
                 val existing = workflowRepository.loadWorkflow(id)
                     ?: error("Workflow not found: $id")
-                workflowRepository.save(existing.copy(name = name, description = description, steps = steps))
+                workflowRepository.save(existing.copy(name = name, description = description, graph = null, steps = steps))
             }
             val payload = buildJsonObject {
                 put("id", workflow.id)
                 put("name", workflow.name)
-                put("step_count", workflow.steps.size)
+                put("step_count", workflow.stepCount)
+                put("message", "Workflow saved")
+            }
+            listOf(UIMessagePart.Text(JsonInstantPretty.encodeToString(payload)))
+        }
+    ),
+    Tool(
+        name = "workflow_generate",
+        description = """
+            Generate a workflow as a graph (DAG) from a description. Provide a graph object:
+            {"nodes": [{"id": "n1", "type": "start"|"end"|"text"|"ai"|"shell"|"http"|"delay"|"if"|"for"|"merge"|"output", "name": string, "config": {...}, "x": number, "y": number}],
+             "edges": [{"fromNodeId": string, "fromPort": "out"|"true"|"false", "toNodeId": string}]}.
+            Config shapes:
+            - text: {"content": string} (supports {{node.<id>.output}} and {{input.NAME}} variables)
+            - ai: {"assistantId": string, "prompt": string}
+            - shell: {"command": string, "timeoutMillis": number}
+            - http: {"method": "GET", "url": string, "headers": object, "body": string, "timeoutMillis": number}
+            - delay: {"seconds": number}
+            - if: {"condition": string, e.g. "{{node.n1.output}} > 10"} (outgoing edges use fromPort "true"/"false")
+            - for: {"itemsSource": string, "prompt": string, "assistantId": string} (prompt uses {{item}} and {{index}})
+            - merge: {} / output: {"template": string} / start|end: {}
+            The graph must be acyclic. node ids must be unique strings.
+        """.trimIndent().replace("\n", " "),
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("name", buildJsonObject {
+                        put("type", "string")
+                        put("description", "Workflow name")
+                    })
+                    put("description", buildJsonObject {
+                        put("type", "string")
+                        put("description", "Optional workflow description")
+                    })
+                    put("graph", buildJsonObject {
+                        put("type", "object")
+                        put("description", "Workflow graph with nodes and edges")
+                    })
+                },
+                required = listOf("name", "graph")
+            )
+        },
+        needsApproval = { true },
+        execute = {
+            val name = it.jsonObject["name"]?.jsonPrimitive?.contentOrNull
+                ?: error("name is required")
+            val description = it.jsonObject["description"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val graphJson = it.jsonObject["graph"]
+                ?: error("graph is required")
+            val graph = JsonInstantPretty.decodeFromString<WorkflowGraph>(graphJson.toString())
+            val issues = graph.validate()
+            if (issues.isNotEmpty()) {
+                error("图校验失败：${issues.joinToString("；")}")
+            }
+            if (graph.nodes.none { n -> n.type.name == "start" }) {
+                error("图中缺少 start 节点")
+            }
+            if (graph.nodes.none { n -> n.type.name == "end" }) {
+                error("图中缺少 end 节点")
+            }
+            val workflow = workflowRepository.create(name = name, description = description, graph = graph)
+            val payload = buildJsonObject {
+                put("id", workflow.id)
+                put("name", workflow.name)
+                put("node_count", workflow.effectiveGraph.nodes.size)
                 put("message", "Workflow saved")
             }
             listOf(UIMessagePart.Text(JsonInstantPretty.encodeToString(payload)))

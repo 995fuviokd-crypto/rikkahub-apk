@@ -11,13 +11,23 @@ import me.rerere.rikkahub.data.ai.workflow.RunProgress
 import me.rerere.rikkahub.data.ai.workflow.WorkflowRunner
 import me.rerere.rikkahub.data.model.AiStepConfig
 import me.rerere.rikkahub.data.model.DelayStepConfig
+import me.rerere.rikkahub.data.model.EndStepConfig
+import me.rerere.rikkahub.data.model.ForStepConfig
 import me.rerere.rikkahub.data.model.HttpStepConfig
+import me.rerere.rikkahub.data.model.IfStepConfig
+import me.rerere.rikkahub.data.model.MergeStepConfig
+import me.rerere.rikkahub.data.model.NodeType
+import me.rerere.rikkahub.data.model.OutputStepConfig
 import me.rerere.rikkahub.data.model.ShellStepConfig
+import me.rerere.rikkahub.data.model.StartStepConfig
 import me.rerere.rikkahub.data.model.StepConfig
-import me.rerere.rikkahub.data.model.StepType
 import me.rerere.rikkahub.data.model.TextStepConfig
 import me.rerere.rikkahub.data.model.Workflow
-import me.rerere.rikkahub.data.model.WorkflowStep
+import me.rerere.rikkahub.data.model.WorkflowEdge
+import me.rerere.rikkahub.data.model.WorkflowGraph
+import me.rerere.rikkahub.data.model.WorkflowNode
+import me.rerere.rikkahub.data.model.legacyStepsToGraph
+import me.rerere.rikkahub.data.model.validate
 import me.rerere.rikkahub.data.repository.WorkflowRepository
 import kotlin.uuid.Uuid
 
@@ -37,6 +47,9 @@ class WorkflowEditorVM(
     private val _runSucceeded = MutableStateFlow<Boolean?>(null)
     val runSucceeded: StateFlow<Boolean?> = _runSucceeded.asStateFlow()
 
+    private val _selectedNodeId = MutableStateFlow<String?>(null)
+    val selectedNodeId: StateFlow<String?> = _selectedNodeId.asStateFlow()
+
     init {
         viewModelScope.launch {
             workflow.value = repository.loadWorkflow(id)
@@ -53,51 +66,87 @@ class WorkflowEditorVM(
         save()
     }
 
-    fun addStep(type: StepType) {
-        val current = workflow.value ?: return
-        val step = WorkflowStep(
-            id = Uuid.random().toString(),
-            name = defaultStepName(type, current.steps.size),
-            type = type,
-            config = defaultConfig(type),
-        )
-        workflow.update { it?.copy(steps = it.steps + step) }
-        save()
+    fun selectNode(nodeId: String?) {
+        _selectedNodeId.value = nodeId
     }
 
-    fun updateStep(stepId: String, name: String, config: StepConfig) {
-        workflow.update { w ->
-            w?.copy(
-                steps = w.steps.map { step ->
-                    if (step.id == stepId) step.copy(name = name, config = config) else step
+    fun addNode(type: NodeType, worldX: Float, worldY: Float) {
+        withGraph { g ->
+            val node = WorkflowNode(
+                id = Uuid.random().toString(),
+                type = type,
+                name = defaultNodeName(type, g.nodes.size),
+                config = defaultConfig(type),
+                x = worldX,
+                y = worldY,
+            )
+            g.copy(nodes = g.nodes + node)
+        }
+    }
+
+    fun updateNode(nodeId: String, name: String, config: StepConfig) {
+        withGraph { g ->
+            g.copy(
+                nodes = g.nodes.map { n ->
+                    if (n.id == nodeId) n.copy(name = name, config = config) else n
                 }
             )
         }
-        save()
     }
 
-    fun removeStep(stepId: String) {
-        workflow.update { w ->
-            w?.copy(steps = w.steps.filterNot { it.id == stepId })
-        }
-        save()
-    }
-
-    fun moveStep(fromIndex: Int, toIndex: Int) {
-        if (fromIndex == toIndex) return
-        workflow.update { w ->
-            w?.copy(steps = w.steps.toMutableList().apply {
-                if (fromIndex in indices && toIndex in indices) {
-                    add(toIndex, removeAt(fromIndex))
+    fun moveNode(nodeId: String, worldX: Float, worldY: Float) {
+        withGraph { g ->
+            g.copy(
+                nodes = g.nodes.map { n ->
+                    if (n.id == nodeId) n.copy(x = worldX, y = worldY) else n
                 }
-            })
+            )
         }
-        save()
+    }
+
+    fun removeNode(nodeId: String) {
+        withGraph { g ->
+            g.copy(
+                nodes = g.nodes.filterNot { it.id == nodeId },
+                edges = g.edges.filterNot { it.fromNodeId == nodeId || it.toNodeId == nodeId },
+            )
+        }
+        if (_selectedNodeId.value == nodeId) {
+            _selectedNodeId.value = null
+        }
+    }
+
+    /**
+     * 添加连线。防自环、防重复；若产生环则拒绝并返回 false。
+     */
+    fun addEdge(fromId: String, fromPort: String, toId: String): Boolean {
+        if (fromId == toId) return false
+        val g = workflow.value?.effectiveGraph ?: return false
+        val duplicate = g.edges.any { it.fromNodeId == fromId && it.fromPort == fromPort && it.toNodeId == toId }
+        if (duplicate) return false
+        val candidate = g.copy(
+            edges = g.edges + WorkflowEdge(
+                id = Uuid.random().toString(),
+                fromNodeId = fromId,
+                fromPort = fromPort,
+                toNodeId = toId,
+            )
+        )
+        if (candidate.validate().any { it.contains("循环") }) return false
+        withGraph { it.copy(edges = candidate.edges) }
+        return true
+    }
+
+    fun removeEdge(edgeId: String) {
+        withGraph { g ->
+            g.copy(edges = g.edges.filterNot { it.id == edgeId })
+        }
     }
 
     fun run() {
         val current = workflow.value ?: return
         if (_running.value) return
+        if (current.effectiveGraph.validate().isNotEmpty()) return
         viewModelScope.launch {
             _running.value = true
             _runSucceeded.value = null
@@ -105,7 +154,7 @@ class WorkflowEditorVM(
             val result = runner.run(workflow = current) { progress ->
                 _runProgress.update { list ->
                     val updated = list.toMutableList()
-                    val idx = updated.indexOfFirst { it.stepId == progress.stepId }
+                    val idx = updated.indexOfFirst { it.nodeId == progress.nodeId }
                     if (idx >= 0) {
                         updated[idx] = progress
                     } else {
@@ -124,6 +173,14 @@ class WorkflowEditorVM(
         _runProgress.value = emptyList()
     }
 
+    private fun withGraph(silent: Boolean = false, transform: (WorkflowGraph) -> WorkflowGraph) {
+        val current = workflow.value ?: return
+        val base = current.effectiveGraph
+        val newGraph = transform(base)
+        workflow.update { it?.copy(graph = newGraph, steps = emptyList()) }
+        if (!silent) save()
+    }
+
     private fun save() {
         val current = workflow.value ?: return
         viewModelScope.launch {
@@ -131,19 +188,31 @@ class WorkflowEditorVM(
         }
     }
 
-    private fun defaultStepName(type: StepType, index: Int): String = when (type) {
-        StepType.TEXT -> "文本步骤"
-        StepType.AI -> "AI 生成步骤"
-        StepType.SHELL -> "命令步骤"
-        StepType.HTTP -> "HTTP 请求步骤"
-        StepType.DELAY -> "延迟步骤"
+    private fun defaultNodeName(type: NodeType, index: Int): String = when (type) {
+        NodeType.START -> "开始"
+        NodeType.END -> "结束"
+        NodeType.TEXT -> "文本节点"
+        NodeType.AI -> "AI 节点"
+        NodeType.SHELL -> "命令节点"
+        NodeType.HTTP -> "HTTP 节点"
+        NodeType.DELAY -> "延迟节点"
+        NodeType.IF -> "条件节点"
+        NodeType.FOR -> "循环节点"
+        NodeType.MERGE -> "汇聚节点"
+        NodeType.OUTPUT -> "输出节点"
     }
 
-    private fun defaultConfig(type: StepType): StepConfig = when (type) {
-        StepType.TEXT -> TextStepConfig(content = "这是一段固定输出")
-        StepType.AI -> AiStepConfig(assistantId = "", prompt = "请总结以下内容：\n{{step.1.output}}")
-        StepType.SHELL -> ShellStepConfig(command = "echo hello")
-        StepType.HTTP -> HttpStepConfig(url = "https://example.com")
-        StepType.DELAY -> DelayStepConfig(seconds = 1)
+    private fun defaultConfig(type: NodeType): StepConfig = when (type) {
+        NodeType.START -> StartStepConfig()
+        NodeType.END -> EndStepConfig()
+        NodeType.TEXT -> TextStepConfig(content = "这是一段固定输出")
+        NodeType.AI -> AiStepConfig(assistantId = "", prompt = "请根据 {{input.topic}} 生成内容")
+        NodeType.SHELL -> ShellStepConfig(command = "echo hello")
+        NodeType.HTTP -> HttpStepConfig(url = "https://example.com")
+        NodeType.DELAY -> DelayStepConfig(seconds = 1)
+        NodeType.IF -> IfStepConfig(condition = "{{node.xxx.output}} != \"\"")
+        NodeType.FOR -> ForStepConfig(itemsSource = "[1,2,3]", prompt = "处理 {{item}}", assistantId = "")
+        NodeType.MERGE -> MergeStepConfig()
+        NodeType.OUTPUT -> OutputStepConfig(template = "{{node.start.output}}")
     }
 }
