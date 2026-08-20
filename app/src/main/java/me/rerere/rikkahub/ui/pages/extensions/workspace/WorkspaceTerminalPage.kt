@@ -27,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +49,7 @@ import me.rerere.rikkahub.ui.theme.ColorMode
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
@@ -74,6 +76,8 @@ fun WorkspaceTerminalPage(id: String) {
         ) { innerPadding ->
             WorkspaceTerminalContent(
                 root = state.workspace?.root,
+                androidLocalAccess = state.workspace?.androidLocalAccess ?: true,
+                localDirectoryUri = state.workspace?.localDirectoryUri,
                 contentPadding = innerPadding,
             )
         }
@@ -83,9 +87,12 @@ fun WorkspaceTerminalPage(id: String) {
 @Composable
 private fun WorkspaceTerminalContent(
     root: String?,
+    androidLocalAccess: Boolean,
+    localDirectoryUri: String?,
     contentPadding: PaddingValues,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val terminalTextSizePx = with(LocalDensity.current) { 12.sp.roundToPx() }
     val terminalTypeface = remember(context) {
         ResourcesCompat.getFont(context, R.font.jetbrains_mono) ?: Typeface.MONOSPACE
@@ -107,6 +114,8 @@ private fun WorkspaceTerminalContent(
     val sessionState by produceState<TerminalSessionUiState>(
         initialValue = TerminalSessionUiState.Loading,
         root,
+        androidLocalAccess,
+        localDirectoryUri,
         sessionClient,
     ) {
         val current = root
@@ -119,7 +128,7 @@ private fun WorkspaceTerminalContent(
                 if (!workspaceRootfsReady(context, current)) {
                     false
                 } else {
-                    prepareWorkspaceTerminalSession(context, current)
+                    prepareWorkspaceTerminalSession(context, current, androidLocalAccess, localDirectoryUri)
                     true
                 }
             }
@@ -127,7 +136,13 @@ private fun WorkspaceTerminalContent(
                 TerminalSessionUiState.NotInstalled
             } else {
                 if (!isActive) return@produceState
-                val created = createWorkspaceTerminalSession(context, current, sessionClient)
+                val created = createWorkspaceTerminalSession(
+                    context,
+                    current,
+                    androidLocalAccess,
+                    localDirectoryUri,
+                    sessionClient,
+                )
                 // 创建后若组合已离开, 主动回收以免泄漏 proot 进程, 且不再把已 finish 的 session 暴露为 Ready
                 if (!isActive) {
                     created.finishIfRunning()
@@ -166,6 +181,13 @@ private fun WorkspaceTerminalContent(
             sessionClient.terminalView = null
             viewClient.terminalView = null
             session.finishIfRunning()
+            // 终端关闭后把 /local 镜像变更写回 Android 本地目录
+            val rootId = root
+            if (rootId != null) {
+                scope.launch(Dispatchers.IO) {
+                    syncTerminalLocalMirrorBack(context, rootId, localDirectoryUri)
+                }
+            }
         }
     }
 

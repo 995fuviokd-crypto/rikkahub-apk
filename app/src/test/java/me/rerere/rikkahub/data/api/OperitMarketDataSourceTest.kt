@@ -99,6 +99,21 @@ class OperitMarketDataSourceTest {
         assertEquals("全部", OperitMarketDataSource.typeLabel("all"))
     }
 
+    @Test
+    fun `item author accepts object and string forms`() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val asObject = json.decodeFromString<OperitListItem>(
+            """{"id":"x","title":"t","source":{"kind":"script","url":"https://example.com/a"},
+                "author":{"id":"gh_88519250","login":"youssef"},"publisher":"pub"}"""
+        )
+        assertEquals("youssef", asObject.displayAuthor)
+
+        val asString = json.decodeFromString<OperitListItem>(
+            """{"id":"x","title":"t","source":{"kind":"script","url":"https://example.com/a"},"author":"legacy-author","publisher":"pub"}"""
+        )
+        assertEquals("legacy-author", asString.displayAuthor)
+    }
+
     // ---- helpers ----
 
     private fun tarGz(

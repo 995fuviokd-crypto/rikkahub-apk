@@ -6,6 +6,11 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.rikkahub.data.plugin.PluginJson
 import me.rerere.rikkahub.data.plugin.PluginManager
 import okhttp3.MediaType.Companion.toMediaType
@@ -41,11 +46,20 @@ data class OperitListItem(
     @SerialName("stateCode") val stateCode: String = "",
     @SerialName("source") val source: OperitSource = OperitSource(),
     @SerialName("latestVersion") val latestVersion: OperitVersion = OperitVersion(),
-    val author: String = "",
+    val author: JsonElement? = null,
     val publisher: String = "",
 ) {
     val displayAuthor: String
-        get() = source.repoOwner.ifBlank { author.ifBlank { publisher } }
+        get() = source.repoOwner.ifBlank {
+            when (val a = author) {
+                is JsonPrimitive -> a.content
+                is JsonObject -> listOf("login", "name", "id")
+                    .mapNotNull { (a[it] as? JsonPrimitive)?.contentOrNull }
+                    .firstOrNull()
+                    .orEmpty()
+                else -> ""
+            }.ifBlank { publisher }
+        }
 
     val sourceKind: String get() = source.kind
 }

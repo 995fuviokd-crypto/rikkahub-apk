@@ -193,6 +193,7 @@ class SettingsStore(
         val ENABLED_PLUGINS = stringPreferencesKey("enabled_plugins")
         val PLUGIN_MARKET_REPO = stringPreferencesKey("plugin_market_repo")
         val GITHUB_TOKEN = stringPreferencesKey("github_token")
+        val BUILTIN_MAKER_SKILL_CLEANUP = booleanPreferencesKey("builtin_maker_skill_cleanup")
     }
 
     private val dataStore = context.settingsStore
@@ -319,6 +320,7 @@ class SettingsStore(
                     ?.takeIf { it != Settings.LEGACY_BROKEN_MARKET_REPO }
                     ?: Settings.DEFAULT_PLUGIN_MARKET_REPO,
                 githubToken = preferences[GITHUB_TOKEN] ?: "",
+                builtinMakerSkillCleanupDone = preferences[BUILTIN_MAKER_SKILL_CLEANUP] ?: false,
             )
         }
         .map {
@@ -523,6 +525,7 @@ class SettingsStore(
             preferences[ENABLED_PLUGINS] = JsonInstant.encodeToString(settings.enabledPlugins)
             preferences[PLUGIN_MARKET_REPO] = settings.pluginMarketRepo
             preferences[GITHUB_TOKEN] = settings.githubToken
+            preferences[BUILTIN_MAKER_SKILL_CLEANUP] = settings.builtinMakerSkillCleanupDone
         }
     }
 
@@ -702,6 +705,8 @@ data class Settings(
     val enabledPlugins: Set<String> = emptySet(),
     // 插件市场索引仓库（owner/repo，根目录放 plugins.json）
     val pluginMarketRepo: String = DEFAULT_PLUGIN_MARKET_REPO,
+    // 内置「插件包制作技能」默认启用残留的一次性清理标记（旧版本自动启用过，新版本仅预置不启用）
+    val builtinMakerSkillCleanupDone: Boolean = false,
     // GitHub 访问令牌（PAT），用于上传插件到自己的仓库
     val githubToken: String = "",
     // 后台保活常驻通知：进应用即在消息栏常驻显示"正在运行中"

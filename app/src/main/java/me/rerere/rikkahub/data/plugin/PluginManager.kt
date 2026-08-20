@@ -134,7 +134,7 @@ class PluginManager(
 
     /** 内置插件包制作技能 id（随 App 预置，可在已安装列表卸载） */
     suspend fun ensureBuiltinSkill(): Boolean {
-        val skillId = "builtin-plugin-maker"
+        val skillId = BUILTIN_PLUGIN_MAKER_ID
         if (getPluginDir(skillId).exists()) return false
         val bytes = runCatching { context.assets.open("plugin-maker-skill.zip").readBytes() }.getOrNull() ?: return false
         return runCatching { installZip(bytes) }.getOrNull()?.isSuccess == true
@@ -218,6 +218,7 @@ class PluginManager(
         private const val TAG = "PluginManager"
         const val PLUGIN_DIR_NAME = "plugins"
         const val METADATA_FILE = "plugin.json"
+        const val BUILTIN_PLUGIN_MAKER_ID = "builtin-plugin-maker"
         private const val MAX_SYSTEM_PROMPT_LEN = 30000
 
         /**

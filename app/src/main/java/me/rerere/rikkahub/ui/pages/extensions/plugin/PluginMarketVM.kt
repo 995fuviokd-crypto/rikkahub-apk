@@ -62,9 +62,18 @@ class PluginMarketVM(
             _enabledPlugins = settings.enabledPlugins
             _githubToken.value = settings.githubToken
             _marketRepo.value = settings.pluginMarketRepo
-            // 内置"插件包制作技能"：随 App 预置并默认启用，可在已安装列表关闭/卸载
-            if (pluginManager.ensureBuiltinSkill()) {
-                autoEnablePlugin("builtin-plugin-maker")
+            // 内置「插件包制作技能」：仅随 App 预置（出现在已安装列表），不自动启用。
+            // 启用后才注入其 systemPrompt，按需使用，避免污染原 AI。
+            pluginManager.ensureBuiltinSkill()
+            // 一次性清理旧版本自动启用的残留：v2.4.12 之前首次打开插件页会自动启用该技能，
+            // 升级后把内置 skill 从 enabledPlugins 移除，此后用户手动启用不受影响。
+            if (!settings.builtinMakerSkillCleanupDone) {
+                val cleaned = _enabledPlugins - PluginManager.BUILTIN_PLUGIN_MAKER_ID
+                if (cleaned != _enabledPlugins) {
+                    _enabledPlugins = cleaned
+                    settingsStore.update { it.copy(enabledPlugins = cleaned) }
+                }
+                settingsStore.update { it.copy(builtinMakerSkillCleanupDone = true) }
             }
             refreshInstalled()
             loadMarket()

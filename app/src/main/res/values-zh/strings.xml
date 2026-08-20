@@ -103,6 +103,8 @@
   <string name="assistant_page_message_template">聊天内容模板</string>
   <string name="assistant_page_message_template_desc">控制聊天消息在发送给LLM之前的内容格式，通常不需要修改</string>
   <string name="assistant_page_message_template_missing_message">模板不包含 {{ message }}，用户消息将不会被发送</string>
+  <string name="assistant_page_deepseek_anchor">DeepSeek 条件复制锚点</string>
+  <string name="assistant_page_deepseek_anchor_desc">以精简工具集、Beyond 级提示词与预热回放复现 DeepSeek V4 训练条件，稳定「我们需要」协作语气。仅适用于 DeepSeek 系列模型</string>
   <string name="assistant_page_name">助手名称</string>
   <string name="assistant_page_preset_messages">预设聊天消息</string>
   <string name="assistant_page_preset_messages_desc">设置对话初始消息</string>
@@ -807,6 +809,10 @@
   <string name="setting_model_page_memory_model_desc">用于记忆摘要与向量嵌入的模型。留空则跟随对话模型</string>
   <string name="setting_model_page_self_hosted_model">自托管模型</string>
   <string name="setting_model_page_self_hosted_model_desc">用于自托管服务的模型。从已有服务中选择，或在「服务商」设置中新增</string>
+  <string name="setting_model_page_image_model">生图模型</string>
+  <string name="setting_model_page_image_model_desc">用于图片生成的模型</string>
+  <string name="setting_model_page_video_model">生成视频模型</string>
+  <string name="setting_model_page_video_model_desc">用于视频生成的模型</string>
   <string name="setting_model_page_compress_prompt_vars">变量：{content}、{target_tokens}、{additional_context}</string>
   <string name="setting_model_page_ocr_group">图片转文字（OCR）</string>
   <string name="setting_model_page_enable_ocr">启用图片转文字</string>
@@ -1010,6 +1016,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_provider_page_tool">工具</string>
   <string name="setting_provider_page_use_service_account">使用服务账号</string>
   <string name="setting_provider_page_vertex_ai">Vertex AI</string>
+  <string name="setting_provider_page_video_model">视频</string>
   <string name="setting_tts_page_add">添加</string>
   <string name="setting_tts_page_add_provider">添加TTS提供商</string>
   <string name="setting_tts_page_add_provider_content_description">添加TTS提供商</string>
@@ -1216,6 +1223,12 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="workspace_detail_shell_status">Shell 状态</string>
   <string name="workspace_detail_android_local_access">Android 本地读写工作区与本地互通</string>
   <string name="workspace_detail_android_local_access_desc">允许工作区 shell 读写 Android 本地目录。关闭后工作区与 Android 本地文件系统隔离</string>
+  <string name="workspace_detail_local_directory">本地目录</string>
+  <string name="workspace_detail_local_directory_desc">选择手机上的一个文件夹同步到工作区作为 /local。无需所有文件权限</string>
+  <string name="workspace_detail_local_directory_set">已同步到工作区作为 /local</string>
+  <string name="workspace_detail_local_directory_pick">选择文件夹</string>
+  <string name="workspace_detail_local_directory_clear">移除</string>
+  <string name="workspace_detail_local_directory_note">文件夹与 /local 之间会在命令执行前后进行同步</string>
   <string name="workspace_detail_loading">加载中</string>
   <string name="workspace_detail_enable_shell">启用 Shell</string>
   <string name="workspace_detail_enable_shell_desc">允许此工作区使用本地Rootfs运行终端环境</string>
@@ -1420,4 +1433,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="steward_mode_status_completed">任务已完成</string>
   <string name="steward_mode_status_stopped">已停止</string>
   <string name="steward_mode_max_loops">自动循环轮数上限：%1$d</string>
+  <string name="steward_mode_unlimited_loops">自动循环无上限</string>
+  <string name="steward_mode_unlimited_loops_desc">忽略轮数限制，直到 AI 判断任务完成</string>
+  <string name="steward_mode_unlimited_loops_hint">无上限：AI 将持续工作直到报告任务完成。请确保模型能可靠判断完成状态，避免无限循环。</string>
 </resources>

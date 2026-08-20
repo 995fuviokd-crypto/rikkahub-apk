@@ -15,14 +15,28 @@ import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
 import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
-import me.rerere.rikkahub.data.files.FileFolders
+import me.rerere.rikkahub.data.files.WorkspaceMounts
+import me.rerere.rikkahub.data.repository.LocalDirectorySync
 import me.rerere.workspace.RootfsPatchOptions
 import me.rerere.workspace.RootfsPatcher
+import me.rerere.workspace.WorkspaceBindMount
+import me.rerere.workspace.WorkspaceManager
+import me.rerere.workspace.buildBindMountArgs
 import java.io.File
 
+/**
+ * 为交互式终端创建 PRoot 会话。
+ *
+ * 与 AI 命令执行（[WorkspaceManager.executeCommand]）共用同一份 Android 本地挂载表，
+ * 保证 /skills、/tool_outputs、/upload、/sdcard 与 /local 在终端与工具中行为一致：
+ * - [androidLocalAccess] 关闭时不挂载任何 Android 本地目录，实现隔离；
+ * - [localDirectoryUri] 已授权时把镜像目录挂载为 /local（创建前经 [prepareWorkspaceTerminalSession] 拉取）。
+ */
 internal fun createWorkspaceTerminalSession(
     context: Context,
     root: String,
+    androidLocalAccess: Boolean = true,
+    localDirectoryUri: String? = null,
     client: TerminalSessionClient,
 ): TerminalSession {
     val appContext = context.applicationContext
@@ -30,7 +44,6 @@ internal fun createWorkspaceTerminalSession(
     val filesDir = File(workspaceDir, "files")
     val linuxDir = File(workspaceDir, "linux")
     val tempDir = File(workspaceDir, "tmp")
-    val skillsDir = File(appContext.filesDir, FileFolders.SKILLS).apply { mkdirs() }
     val nativeLibraryDir = File(appContext.applicationInfo.nativeLibraryDir)
     val proot = File(nativeLibraryDir, "libproot_exec.so")
     val loader = File(nativeLibraryDir, "libproot_loader.so")
@@ -45,9 +58,15 @@ internal fun createWorkspaceTerminalSession(
         WORKSPACE_DIR,
         "-b",
         "${filesDir.absolutePath}:$WORKSPACE_DIR",
-        "-b",
-        "${skillsDir.absolutePath}:$SKILLS_DIR",
     )
+
+    if (androidLocalAccess) {
+        args += buildBindMountArgs(WorkspaceMounts.androidLocalMounts(appContext))
+        localDirMirror(appContext, root, localDirectoryUri)?.let { mirror ->
+            args += buildBindMountArgs(listOf(WorkspaceBindMount(mirror, WorkspaceManager.LOCAL_DIR)))
+        }
+    }
+
     listOf("/dev", "/proc", "/sys").forEach { path ->
         if (File(path).exists()) {
             args += "-b"
@@ -85,21 +104,62 @@ internal fun createWorkspaceTerminalSession(
     }
 }
 
-internal fun prepareWorkspaceTerminalSession(context: Context, root: String) {
+/** 终端会话挂载 /local 前拉取本地目录到镜像 */
+internal suspend fun prepareWorkspaceTerminalSession(
+    context: Context,
+    root: String,
+    androidLocalAccess: Boolean = true,
+    localDirectoryUri: String? = null,
+) {
     val appContext = context.applicationContext
     val workspaceDir = File(File(appContext.filesDir, "workspaces"), root)
     val linuxDir = File(workspaceDir, "linux")
     File(workspaceDir, "files").mkdirs()
     File(workspaceDir, "tmp").mkdirs()
-    File(appContext.filesDir, FileFolders.SKILLS).mkdirs()
+    WorkspaceMounts.androidLocalMounts(appContext)
     RootfsPatcher().patch(
         linuxDir,
         RootfsPatchOptions(nameservers = appContext.activeDnsServers())
     )
+    val mirror = localDirMirror(appContext, root, localDirectoryUri)
+    if (mirror != null && androidLocalAccess) {
+        mirror.mkdirs()
+        val treeUri = runCatching { localDirectoryUri!!.toUri() }.getOrNull()
+        if (treeUri != null && LocalDirectorySync.hasPersistedPermission(appContext, treeUri)) {
+            runCatching { LocalDirectorySync.syncToMirror(appContext, treeUri, mirror) }
+        }
+    }
+}
+
+/** 终端会话关闭后把 /local 镜像变更写回本地目录 */
+internal suspend fun syncTerminalLocalMirrorBack(
+    context: Context,
+    root: String,
+    localDirectoryUri: String?,
+) {
+    if (localDirectoryUri.isNullOrBlank()) return
+    val appContext = context.applicationContext
+    val mirror = localDirMirror(appContext, root, localDirectoryUri) ?: return
+    if (!mirror.exists()) return
+    val treeUri = runCatching { localDirectoryUri.toUri() }.getOrNull() ?: return
+    if (!LocalDirectorySync.hasPersistedPermission(appContext, treeUri)) return
+    runCatching { LocalDirectorySync.syncMirrorBack(appContext, treeUri, mirror) }
+}
+
+/** 与 [WorkspaceManager.localDir] 保持一致的镜像目录路径 */
+private fun localDirMirror(
+    context: Context,
+    root: String,
+    localDirectoryUri: String?,
+): File? {
+    if (localDirectoryUri.isNullOrBlank()) return null
+    val appContext = context.applicationContext
+    val workspaceDir = File(File(appContext.filesDir, "workspaces"), root)
+    return File(workspaceDir, WorkspaceManager.LOCAL_DIR.trimStart('/'))
 }
 
 internal fun workspaceRootfsReady(context: Context, root: String): Boolean {
-    val linuxDir = File(File(File(context.applicationContext.filesDir, "workspaces"), root), "linux")
+    val linuxDir = File(File(context.applicationContext.filesDir, "workspaces"), root).let { File(it, "linux") }
     return linuxDir.isDirectory && File(linuxDir, "bin/sh").isFile
 }
 
@@ -314,7 +374,6 @@ internal class WorkspaceTerminalViewClient(
 }
 
 private const val WORKSPACE_DIR = "/workspace"
-private const val SKILLS_DIR = "/skills"
 
 // 一个 URL 最多还原跨越的软换行行数(向上/向下各算), 足够覆盖任意真实 URL
 private const val URL_MAX_WRAP_ROWS = 50

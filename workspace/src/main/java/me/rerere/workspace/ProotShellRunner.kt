@@ -11,6 +11,11 @@ data class WorkspaceBindMount(
     }
 }
 
+/** 把挂载表转换为 PRoot 的 -b 参数序列，AI 命令执行与交互式终端共用同一份逻辑 */
+fun buildBindMountArgs(bindMounts: List<WorkspaceBindMount>): List<String> =
+    bindMounts.filter { it.source.exists() }
+        .flatMap { listOf("-b", "${it.source.absolutePath}:${it.target.trimEnd('/')}") }
+
 class ProotShellRunner(
     private val nativeLibraryDir: File,
     private val patcher: RootfsPatcher = RootfsPatcher(),
@@ -73,18 +78,8 @@ class ProotShellRunner(
             "${context.filesDir.absolutePath}:$WORKSPACE_DIR",
         )
 
-        context.bindMounts.forEach { mount ->
-            if (mount.source.exists()) {
-                command += "-b"
-                command += "${mount.source.absolutePath}:${mount.target.trimEnd('/')}"
-            }
-        }
-        context.extraBindMounts.forEach { mount ->
-            if (mount.source.exists()) {
-                command += "-b"
-                command += "${mount.source.absolutePath}:${mount.target.trimEnd('/')}"
-            }
-        }
+        command += buildBindMountArgs(context.bindMounts)
+        command += buildBindMountArgs(context.extraBindMounts)
 
         WorkspaceManager.KERNEL_FS_MOUNTS.forEach { path ->
             if (File(path).exists()) {

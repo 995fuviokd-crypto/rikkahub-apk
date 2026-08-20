@@ -108,7 +108,7 @@ fun WorkspaceFileEditorPage(
                             },
                             enabled = !saving,
                         ) {
-                            Text("Save")
+                            Text("保存")
                         }
                     }
                 },
