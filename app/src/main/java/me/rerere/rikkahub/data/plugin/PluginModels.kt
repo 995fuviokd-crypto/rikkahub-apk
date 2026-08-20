@@ -32,7 +32,8 @@ data class PluginAction(
 
 /**
  * 插件扩展能力声明。消费端按 scope 渲染动态入口，无需修改宿主代码。
- * target 取值：prompt（填入输入框/对话框提示词）、url（打开链接）、copy（复制到剪贴板）。
+ * target 取值：prompt（填入输入框/对话框提示词）、url（打开链接）、copy（复制到剪贴板）、
+ * webview（打开插件页面，payload 为 http(s):// 链接或 plugin://<插件id>/<web路径>）。
  */
 @Serializable
 data class PluginExtensionPoints(
@@ -40,6 +41,8 @@ data class PluginExtensionPoints(
     val settingsActions: List<PluginExtensionAction> = emptyList(),
     /** 主界面入口 */
     val homeActions: List<PluginExtensionAction> = emptyList(),
+    /** 侧边栏入口 */
+    val sidebarActions: List<PluginExtensionAction> = emptyList(),
 )
 
 @Serializable

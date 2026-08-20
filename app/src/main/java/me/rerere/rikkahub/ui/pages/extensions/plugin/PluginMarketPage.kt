@@ -1,7 +1,9 @@
 package me.rerere.rikkahub.ui.pages.extensions.plugin
 
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -55,6 +57,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.io.File
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.BookOpen01
 import me.rerere.hugeicons.stroke.CloudDownload
@@ -65,16 +68,19 @@ import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.data.plugin.InstalledPlugin
 import me.rerere.rikkahub.data.plugin.PluginCategories
+import me.rerere.rikkahub.data.plugin.PluginManager
 import me.rerere.rikkahub.data.plugin.PluginMarketEntry
 import me.rerere.rikkahub.data.plugin.PluginStatus
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.theme.CustomColors
 import org.koin.androidx.compose.koinViewModel
+import org.koin.compose.koinInject
 
 @Composable
 fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val pluginManager: PluginManager = koinInject()
     val installed by vm.installed.collectAsStateWithLifecycle()
     val marketEntries by vm.marketEntries.collectAsStateWithLifecycle()
     val marketLoading by vm.marketLoading.collectAsStateWithLifecycle()
@@ -95,6 +101,7 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
     var uploadType by remember { mutableStateOf(PluginCategories.TYPE_PLUGIN) }
     var deleteTarget by remember { mutableStateOf<InstalledPlugin?>(null) }
     var selectedEntry by remember { mutableStateOf<PluginMarketEntry?>(null) }
+    var selectedInstalled by remember { mutableStateOf<InstalledPlugin?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -109,13 +116,29 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
         }
     }
 
-    // 选择本地插件 zip 上传
+    // 选择本地插件 zip 上传/导出
     val uploadZipLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let {
             context.contentResolver.openInputStream(uri)?.use { input ->
-                vm.upload(input.readBytes(), uploadType) {}
+                val bytes = input.readBytes()
+                val token = vm.githubToken.value
+                if (token.isBlank()) {
+                    // 未配置 Token：不强制必填，导出 zip 到本地并分享
+                    val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
+                    val file = File(exportDir, "rikkahub-plugin-${System.currentTimeMillis()}.zip")
+                    file.writeBytes(bytes)
+                    val fileUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "application/zip"
+                        putExtra(Intent.EXTRA_STREAM, fileUri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(Intent.createChooser(intent, "导出插件包"))
+                } else {
+                    vm.upload(bytes, uploadType) {}
+                }
             }
         }
     }
@@ -224,6 +247,7 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
                     onToggle = vm::toggleEnabled,
                     onUninstall = { deleteTarget = it },
                     onInstallLocal = { localZipLauncher.launch(arrayOf("application/zip", "*/*")) },
+                    onSelect = { selectedInstalled = it },
                 )
 
                 1 -> MarketTab(
@@ -267,7 +291,6 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
             selectedType = uploadType,
             onTypeChange = { uploadType = it },
             onTokenChange = vm::setGithubToken,
-            onRepoChange = vm::setMarketRepo,
             onPickFile = { uploadZipLauncher.launch(arrayOf("application/zip", "*/*")) },
             onDismiss = { showUploadDialog = false },
         )
@@ -306,6 +329,19 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
             onDismiss = { selectedEntry = null },
         )
     }
+
+    selectedInstalled?.let { plugin ->
+        InstalledPluginDetailDialog(
+            plugin = plugin,
+            installDir = pluginManager.getPluginDir(plugin.id).absolutePath,
+            onToggle = { vm.toggleEnabled(plugin.id) },
+            onUninstall = {
+                deleteTarget = plugin
+                selectedInstalled = null
+            },
+            onDismiss = { selectedInstalled = null },
+        )
+    }
 }
 
 @Composable
@@ -314,6 +350,7 @@ private fun InstalledTab(
     onToggle: (String) -> Unit,
     onUninstall: (InstalledPlugin) -> Unit,
     onInstallLocal: () -> Unit,
+    onSelect: (InstalledPlugin) -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -353,6 +390,7 @@ private fun InstalledTab(
         items(installed, key = { it.id }) { plugin ->
             InstalledPluginCard(
                 plugin = plugin,
+                onClick = { onSelect(plugin) },
                 onToggle = { onToggle(plugin.id) },
                 onUninstall = { onUninstall(plugin) },
             )
@@ -363,11 +401,29 @@ private fun InstalledTab(
 @Composable
 private fun InstalledPluginCard(
     plugin: InstalledPlugin,
+    onClick: () -> Unit,
     onToggle: () -> Unit,
     onUninstall: () -> Unit,
 ) {
+    val info = plugin.info
+    val hasCapability = info != null && (
+        info.systemPrompt.isNotBlank() ||
+            info.actions.isNotEmpty() ||
+            info.extensionPoints.homeActions.isNotEmpty() ||
+            info.extensionPoints.settingsActions.isNotEmpty() ||
+            info.extensionPoints.sidebarActions.isNotEmpty()
+        )
+    val statusLabel = when {
+        plugin.status == PluginStatus.BROKEN -> "损坏"
+        plugin.status == PluginStatus.ENABLED && !hasCapability -> "资源包"
+        plugin.status == PluginStatus.ENABLED -> "已生效"
+        hasCapability -> "未生效"
+        else -> "已安装"
+    }
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
         colors = CustomColors.cardColorsOnSurfaceContainer,
     ) {
         Row(
@@ -389,11 +445,7 @@ private fun InstalledPluginCard(
                         onClick = {},
                         label = {
                             Text(
-                                when (plugin.status) {
-                                    PluginStatus.ENABLED -> "已生效"
-                                    PluginStatus.INSTALLED -> "未生效"
-                                    PluginStatus.BROKEN -> "损坏"
-                                },
+                                statusLabel,
                                 style = MaterialTheme.typography.labelSmall,
                             )
                         },
@@ -672,25 +724,116 @@ private fun PluginDetailDialog(
 }
 
 @Composable
+private fun InstalledPluginDetailDialog(
+    plugin: InstalledPlugin,
+    installDir: String,
+    onToggle: () -> Unit,
+    onUninstall: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val uriHandler = LocalUriHandler.current
+    val info = plugin.info
+    val hasCapability = info != null && (
+        info.systemPrompt.isNotBlank() ||
+            info.actions.isNotEmpty() ||
+            info.extensionPoints.homeActions.isNotEmpty() ||
+            info.extensionPoints.settingsActions.isNotEmpty() ||
+            info.extensionPoints.sidebarActions.isNotEmpty()
+        )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(info?.name ?: plugin.id) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "状态：${when {
+                        plugin.status == PluginStatus.BROKEN -> "损坏"
+                        plugin.status == PluginStatus.ENABLED && !hasCapability -> "资源包（仅提供文件，无运行能力）"
+                        plugin.status == PluginStatus.ENABLED -> "已生效"
+                        hasCapability -> "未生效"
+                        else -> "已安装"
+                    }}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                info?.let { i ->
+                    if (i.description.isNotBlank()) {
+                        Text(i.description, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AssistChip(
+                            onClick = {},
+                            label = { Text(PluginCategories.typeLabel(i.type), style = MaterialTheme.typography.labelSmall) },
+                        )
+                        if (i.version.isNotBlank()) {
+                            AssistChip(
+                                onClick = {},
+                                label = { Text("v${i.version}", style = MaterialTheme.typography.labelSmall) },
+                            )
+                        }
+                    }
+                    if (i.author.isNotBlank()) {
+                        Text("作者：${i.author}", style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (i.repository.isNotBlank() && (i.repository.startsWith("https://") || i.repository.startsWith("http://"))) {
+                        Text(
+                            text = "GitHub 仓库",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.clickable { uriHandler.openUri(i.repository) },
+                        )
+                    }
+                    if (i.tags.isNotEmpty()) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            i.tags.take(4).forEach { tag ->
+                                AssistChip(
+                                    onClick = {},
+                                    label = { Text(tag, style = MaterialTheme.typography.labelSmall) },
+                                )
+                            }
+                        }
+                    }
+                }
+                Text(
+                    text = "安装位置：$installDir",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (info != null && plugin.status != PluginStatus.BROKEN) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("启用", style = MaterialTheme.typography.bodyMedium)
+                        Switch(checked = plugin.status == PluginStatus.ENABLED, onCheckedChange = { onToggle() })
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onUninstall) { Text("卸载") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        },
+    )
+}
+
+@Composable
 private fun UploadDialog(
     token: String,
     repo: String,
     selectedType: String,
     onTypeChange: (String) -> Unit,
     onTokenChange: (String) -> Unit,
-    onRepoChange: (String) -> Unit,
     onPickFile: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var tokenInput by remember { mutableStateOf(token) }
-    var repoInput by remember { mutableStateOf(repo) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("提交插件") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = "使用 GitHub Token（PAT，需 contents:write 权限）将插件提交到市场的待审核队列，管理员审核通过后才会在市场上架。",
+                    text = "将插件 zip 提交到官方市场（$repo）的待审核队列，管理员审核通过后上架。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -705,27 +848,26 @@ private fun UploadDialog(
                     }
                 }
                 OutlinedTextField(
-                    value = repoInput,
-                    onValueChange = { repoInput = it },
-                    label = { Text("目标仓库 owner/repo") },
-                    singleLine = true,
-                )
-                OutlinedTextField(
                     value = tokenInput,
                     onValueChange = { tokenInput = it },
-                    label = { Text("GitHub Token (PAT)") },
+                    label = { Text("GitHub Token (PAT，可选)") },
+                    supportingText = {
+                        Text(
+                            if (tokenInput.isBlank()) "不填则仅本地导出插件包，不提交。" else "Token 将持久化保存，下次无需再填。",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
                     singleLine = true,
                 )
                 TextButton(
                     onClick = {
-                        onRepoChange(repoInput)
                         onTokenChange(tokenInput)
                         onPickFile()
                         onDismiss()
                     },
                 ) {
                     Icon(HugeIcons.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Text("选择文件并提交", modifier = Modifier.padding(start = 4.dp))
+                    Text("选择文件", modifier = Modifier.padding(start = 4.dp))
                 }
             }
         },

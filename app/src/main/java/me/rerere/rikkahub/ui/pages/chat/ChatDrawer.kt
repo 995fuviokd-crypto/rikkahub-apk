@@ -2,6 +2,11 @@ package me.rerere.rikkahub.ui.pages.chat
 
 import androidx.activity.ComponentActivity
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -57,6 +62,9 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import com.composables.icons.lucide.ChevronDown
+import com.composables.icons.lucide.ChevronUp
+import com.composables.icons.lucide.Lucide
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.Store02
@@ -170,6 +178,9 @@ fun ChatDrawerContent(
 
     // Menu popup 状态
     var showMenuPopup by remember { mutableStateOf(false) }
+
+    // 扩展功能入口折叠状态（工作流/插件市场/群组/权限管理）
+    var extensionsExpanded by remember { mutableStateOf(false) }
 
     val updateCheckDisabledUntil = settings.displaySetting.updateCheckDisabledUntilEpochMillis
     var updateChecksEnabled by remember(updateCheckDisabledUntil) {
@@ -311,6 +322,48 @@ fun ChatDrawerContent(
                 }
             )
 
+            // 扩展功能折叠组：工作流 / 插件市场 / 群组 / 权限管理
+            Surface(
+                onClick = { extensionsExpanded = !extensionsExpanded },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.FlowSquare,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = "扩展功能",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(
+                        imageVector = if (extensionsExpanded) Lucide.ChevronUp else Lucide.ChevronDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            AnimatedVisibility(
+                visible = extensionsExpanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+            ) {
+                Column {
             // 工作流入口：会话历史列表下方、助手选择器上方
             Surface(
                 onClick = { navController.navigate(Screen.Workflows) },
@@ -431,6 +484,18 @@ fun ChatDrawerContent(
                 }
             }
 
+            // 插件侧边栏入口（sidebarActions）
+            val sidebarPluginManager: me.rerere.rikkahub.data.plugin.PluginManager = koinInject()
+            me.rerere.rikkahub.ui.pages.extensions.plugin.PluginExtensionsCard(
+                enabledPlugins = settings.enabledPlugins,
+                pluginManager = sidebarPluginManager,
+                scope = "sidebar",
+            ) { url, contentId ->
+                navController.navigate(Screen.WebView(url = url, contentId = contentId))
+            }
+                }
+            }
+
             // 助手选择器
             AssistantPicker(
                 settings = settings,
@@ -542,21 +607,19 @@ fun ChatDrawerContent(
                 // 插件扩展能力主界面入口（homeActions）
                 val pluginManager: me.rerere.rikkahub.data.plugin.PluginManager = koinInject()
                 val homeActions = pluginManager.enabledExtensionActions(settings.enabledPlugins, "home")
-                val clipboardManager = LocalClipboardManager.current
+                var homePromptAction by remember { mutableStateOf<me.rerere.rikkahub.data.plugin.PluginExtensionAction?>(null) }
                 homeActions.forEach { action ->
                     Surface(
                         onClick = {
-                            when (action.target) {
-                                "url" -> context.openUrl(action.payload)
-                                "copy" -> {
-                                    clipboardManager.setText(AnnotatedString(action.payload))
-                                    Toast.makeText(context, "已复制到剪贴板", Toast.LENGTH_SHORT).show()
-                                }
-                                else -> {
-                                    clipboardManager.setText(AnnotatedString(action.payload))
-                                    Toast.makeText(context, "提示词已复制，粘贴到输入框使用", Toast.LENGTH_SHORT).show()
-                                }
-                            }
+                            me.rerere.rikkahub.ui.pages.extensions.plugin.performExtensionAction(
+                                action = action,
+                                pluginManager = pluginManager,
+                                context = context,
+                                onOpenWebView = { url, contentId ->
+                                    navController.navigate(Screen.WebView(url = url, contentId = contentId))
+                                },
+                                onPromptAction = { homePromptAction = it },
+                            )
                         },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -595,6 +658,13 @@ fun ChatDrawerContent(
                         navController.navigate(Screen.Setting)
                     },
                 )
+
+                homePromptAction?.let { promptAction ->
+                    me.rerere.rikkahub.ui.pages.extensions.plugin.PluginActionPromptDialog(
+                        action = promptAction,
+                        onDismiss = { homePromptAction = null },
+                    )
+                }
             }
         }
     }

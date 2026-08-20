@@ -104,10 +104,33 @@ class PluginManager(
                 when (scope) {
                     "settings" -> info.extensionPoints.settingsActions
                     "home" -> info.extensionPoints.homeActions
+                    "sidebar" -> info.extensionPoints.sidebarActions
                     else -> emptyList()
                 }
             }
             .distinctBy { it.id }
+    }
+
+    /**
+     * 读取插件包内 web/ 目录下的页面资源文本（用于 webview 扩展入口）。
+     * relativePath 相对插件目录下的 web/，防路径穿越。
+     */
+    fun loadWebResource(pluginId: String, relativePath: String): String? {
+        val webRoot = File(getPluginDir(pluginId), "web")
+        val file = File(webRoot, relativePath)
+        val canonicalRoot = runCatching { webRoot.canonicalPath }.getOrNull() ?: return null
+        val canonicalFile = runCatching { file.canonicalPath }.getOrNull() ?: return null
+        if (!canonicalFile.startsWith(canonicalRoot)) return null
+        if (!file.isFile) return null
+        return runCatching { file.readText() }.getOrNull()
+    }
+
+    /** 内置插件包制作技能 id（随 App 预置，可在已安装列表卸载） */
+    suspend fun ensureBuiltinSkill(): Boolean {
+        val skillId = "builtin-plugin-maker"
+        if (getPluginDir(skillId).exists()) return false
+        val bytes = runCatching { context.assets.open("plugin-maker-skill.zip").readBytes() }.getOrNull() ?: return false
+        return runCatching { installZip(bytes) }.getOrNull()?.isSuccess == true
     }
 
     /** 从插件 zip 字节中提取 plugin.json（用于上传前校验与生成市场条目） */

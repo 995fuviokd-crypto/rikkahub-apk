@@ -58,6 +58,10 @@ class PluginMarketVM(
             _enabledPlugins = settings.enabledPlugins
             _githubToken.value = settings.githubToken
             _marketRepo.value = settings.pluginMarketRepo
+            // 内置"插件包制作技能"：随 App 预置并默认启用，可在已安装列表关闭/卸载
+            if (pluginManager.ensureBuiltinSkill()) {
+                autoEnablePlugin("builtin-plugin-maker")
+            }
             refreshInstalled()
             loadMarket()
         }
