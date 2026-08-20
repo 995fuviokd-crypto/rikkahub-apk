@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.api
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.serialization.json.jsonObject
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.zip.GZIPOutputStream
@@ -233,6 +234,30 @@ class OperitMarketDataSourceTest {
     @Test
     fun `parseOperitScriptMetadata tolerates non-json body`() {
         assertEquals(emptyMap<String, String>(), parseOperitScriptMetadata("function run() {}".toByteArray()))
+    }
+
+    @Test
+    fun `parseOperitScriptMetaObject returns json object`() {
+        val script = "/* METADATA {\"name\":\"x\",\"display_name\":{\"zh\":\"名\"}} */\nfunction run(){}".toByteArray()
+        val meta = parseOperitScriptMetaObject(script)
+        assertEquals("名", jsonLocalizedString(meta, "display_name"))
+        assertEquals("x", jsonLocalizedString(meta, "name"))
+        assertEquals(null, parseOperitScriptMetaObject("function run(){}".toByteArray()))
+    }
+
+    @Test
+    fun `jsonLocalizedString handles object string and missing values`() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; explicitNulls = false }
+        val obj = json.parseToJsonElement(
+            """{"display_name":{"zh":"一起看电视","en":"Watch Together"},"description":{"zh":"和AI一起看","en":"Watch with chat"},"author":"清裴"}"""
+        ).jsonObject
+        assertEquals("一起看电视", jsonLocalizedString(obj, "display_name"))
+        assertEquals("和AI一起看", jsonLocalizedString(obj, "description"))
+        assertEquals("清裴", jsonLocalizedString(obj, "author"))
+        assertEquals(null, jsonLocalizedString(obj, "missing"))
+
+        val strObj = json.parseToJsonElement("""{"name":"plain"}""").jsonObject
+        assertEquals("plain", jsonLocalizedString(strObj, "name"))
     }
 
     @Test

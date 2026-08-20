@@ -233,12 +233,10 @@ class OperitMarketDataSource(
         val manifest = manifestFile
             ?.readText()
             ?.let { runCatching { Json.parseToJsonElement(it).jsonObject }.getOrNull() }
-        val pkgName = manifest?.get("name")?.jsonPrimitive?.contentOrNull
+        val pkgName = jsonLocalizedString(manifest, "display_name", "name", "toolpkg_id")
             ?.takeIf { it.isNotBlank() }
             ?: entry.title.ifBlank { entry.id.substringAfter("package-") }
-        val desc = manifest?.get("description")?.jsonPrimitive?.contentOrNull
-            ?.ifBlank { entry.description }
-            ?: entry.description
+        val desc = jsonLocalizedString(manifest, "description") ?: entry.description
         val systemPrompt = buildString {
             append("这是来自 Operit 市场的 ToolPkg 工具包「$pkgName」。")
             if (desc.isNotBlank()) append("简介：$desc\n")
@@ -262,19 +260,10 @@ class OperitMarketDataSource(
         outDir.mkdirs()
         val scriptName = handle.assetName.ifBlank { entry.id.substringAfter("script-").ifBlank { "script.js" } }
         outDir.resolve(scriptName).writeBytes(bytes)
-        val metadata = parseOperitScriptMetadata(bytes)
-        val displayName = metadata["display_name"]?.let { raw ->
-            runCatching { Json.parseToJsonElement(raw).jsonObject }
-                .getOrNull()
-                ?.let { (it["zh"] ?: it["en"])?.jsonPrimitive?.contentOrNull }
-        } ?: metadata["name"]
-        val name = displayName?.takeIf { it.isNotBlank() }
+        val metadata = parseOperitScriptMetaObject(bytes)
+        val name = jsonLocalizedString(metadata, "display_name", "name")
             ?: entry.title.ifBlank { scriptName.substringBeforeLast('.') }
-        val desc = metadata["description"]?.let { raw ->
-            runCatching { Json.parseToJsonElement(raw).jsonObject }
-                .getOrNull()
-                ?.let { (it["zh"] ?: it["en"])?.jsonPrimitive?.contentOrNull }
-        } ?: entry.description
+        val desc = jsonLocalizedString(metadata, "description") ?: entry.description
         val systemPrompt = buildString {
             append("这是来自 Operit 市场的脚本「$name」。")
             if (desc.isNotBlank()) append("简介：$desc\n")
@@ -312,8 +301,16 @@ class OperitMarketDataSource(
     private fun ensureAdapted(dir: File, entry: OperitListItem) {
         val infoFile = dir.resolve("plugin.json")
         if (infoFile.exists()) {
-            PluginManager.ensurePluginJson(dir)
-            return
+            // 第三方自带 plugin.json 字段未必兼容 RikkaHub 格式，解析失败则忽略并重新适配
+            val compatible = runCatching {
+                val info = PluginJson.fromJson(infoFile.readText())
+                info.id.isNotBlank() && info.name.isNotBlank()
+            }.getOrDefault(false)
+            if (compatible) {
+                PluginManager.ensurePluginJson(dir)
+                return
+            }
+            infoFile.delete()
         }
         PluginManager.autoAdapt(dir)?.let { adapted ->
             infoFile.writeText(PluginJson.toJson(adapted))
@@ -589,11 +586,30 @@ internal fun detectOperitAssetFormat(bytes: ByteArray): OperitAssetFormat = when
 
 /** 解析 Operit 脚本头部 /* METADATA {…} */ 的 JSON 字段，字符串值去引号、对象值保留原文 */
 internal fun parseOperitScriptMetadata(bytes: ByteArray): Map<String, String> {
+    return extractOperitScriptMetadata(bytes)
+        ?.let { raw ->
+            runCatching {
+                val obj = Json.parseToJsonElement(raw).jsonObject
+                obj.entries.associate { (k, v) ->
+                    k to ((v as? JsonPrimitive)?.contentOrNull ?: v.toString())
+                }
+            }.getOrDefault(emptyMap())
+        } ?: emptyMap()
+}
+
+/** 解析 Operit 脚本头部 METADATA 为 JsonObject，无法解析返回 null */
+internal fun parseOperitScriptMetaObject(bytes: ByteArray): JsonObject? {
+    return extractOperitScriptMetadata(bytes)
+        ?.let { raw -> runCatching { Json.parseToJsonElement(raw).jsonObject }.getOrNull() }
+}
+
+/** 提取 Operit 脚本头部 /* METADATA {…} */ 的 JSON 原文 */
+internal fun extractOperitScriptMetadata(bytes: ByteArray): String? {
     val head = String(bytes, 0, minOf(bytes.size, 8192), Charsets.UTF_8)
     val start = head.indexOf("METADATA")
-    if (start < 0) return emptyMap()
+    if (start < 0) return null
     val brace = head.indexOf('{', start)
-    if (brace < 0) return emptyMap()
+    if (brace < 0) return null
     var depth = 0
     var end = -1
     for (i in brace until head.length) {
@@ -605,13 +621,26 @@ internal fun parseOperitScriptMetadata(bytes: ByteArray): Map<String, String> {
             }
         }
     }
-    if (end < 0) return emptyMap()
-    return runCatching {
-        val obj = Json.parseToJsonElement(head.substring(brace, end)).jsonObject
-        obj.entries.associate { (k, v) ->
-            k to ((v as? JsonPrimitive)?.contentOrNull ?: v.toString())
+    if (end < 0) return null
+    return head.substring(brace, end)
+}
+
+/** 从 Operit 元数据（manifest.json / script METADATA）安全提取字符串字段：
+ *  支持多语言对象 {zh,en,name} 与纯字符串，避免 JsonObject 被当 JsonPrimitive 崩溃 */
+internal fun jsonLocalizedString(obj: JsonObject?, vararg keys: String): String? {
+    for (key in keys) {
+        val v = obj?.get(key) ?: continue
+        val s = when (v) {
+            is JsonPrimitive -> v.contentOrNull
+            is JsonObject -> listOf("zh", "en")
+                .mapNotNull { (v[it] as? JsonPrimitive)?.contentOrNull }
+                .firstOrNull { it.isNotBlank() }
+                ?: (v["name"] as? JsonPrimitive)?.contentOrNull
+            else -> null
         }
-    }.getOrDefault(emptyMap())
+        if (!s.isNullOrBlank()) return s
+    }
+    return null
 }
 
 /** 从条目 id 内嵌的 slug 化链接还原 owner/repo（如 skill-https-github-com-owner-repo-...）。
