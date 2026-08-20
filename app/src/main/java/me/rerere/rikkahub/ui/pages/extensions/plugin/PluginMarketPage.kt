@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.pages.extensions.plugin
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -49,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -92,6 +94,7 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
     var showOpenAIDialog by remember { mutableStateOf(false) }
     var uploadType by remember { mutableStateOf(PluginCategories.TYPE_PLUGIN) }
     var deleteTarget by remember { mutableStateOf<InstalledPlugin?>(null) }
+    var selectedEntry by remember { mutableStateOf<PluginMarketEntry?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -147,7 +150,7 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
                         }
                         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                             DropdownMenuItem(
-                                text = { Text("上传插件") },
+                                text = { Text("提交插件") },
                                 leadingIcon = {
                                     Icon(HugeIcons.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
                                 },
@@ -234,6 +237,7 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
                     category = category,
                     onCategoryChange = { category = it },
                     onInstall = vm::install,
+                    onSelect = { selectedEntry = it },
                     onRetry = vm::loadMarket,
                     onRefresh = vm::loadMarket,
                     onEditRepo = { showRepoDialog = true },
@@ -286,6 +290,20 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
             installing = downloadingId == "openai",
             onImport = vm::installOpenAIPlugin,
             onDismiss = { showOpenAIDialog = false },
+        )
+    }
+
+    selectedEntry?.let { entry ->
+        val installedIds = installed.map { it.id }.toSet()
+        PluginDetailDialog(
+            entry = entry,
+            installed = entry.id in installedIds,
+            downloading = downloadingId == entry.id,
+            onInstall = {
+                vm.install(entry)
+                selectedEntry = null
+            },
+            onDismiss = { selectedEntry = null },
         )
     }
 }
@@ -425,6 +443,7 @@ private fun MarketTab(
     category: String,
     onCategoryChange: (String) -> Unit,
     onInstall: (PluginMarketEntry) -> Unit,
+    onSelect: (PluginMarketEntry) -> Unit,
     onRetry: () -> Unit,
     onRefresh: () -> Unit,
     onEditRepo: () -> Unit,
@@ -510,6 +529,7 @@ private fun MarketTab(
                             entry = entry,
                             installed = entry.id in installedIds,
                             downloading = downloadingId == entry.id,
+                            onClick = { onSelect(entry) },
                             onInstall = { onInstall(entry) },
                         )
                     }
@@ -524,10 +544,13 @@ private fun MarketEntryCard(
     entry: PluginMarketEntry,
     installed: Boolean,
     downloading: Boolean,
+    onClick: () -> Unit,
     onInstall: () -> Unit,
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
         colors = CustomColors.cardColorsOnSurfaceContainer,
     ) {
         Row(
@@ -573,6 +596,82 @@ private fun MarketEntryCard(
 }
 
 @Composable
+private fun PluginDetailDialog(
+    entry: PluginMarketEntry,
+    installed: Boolean,
+    downloading: Boolean,
+    onInstall: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val uriHandler = LocalUriHandler.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(entry.name)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AssistChip(
+                        onClick = {},
+                        label = { Text(PluginCategories.typeLabel(entry.type), style = MaterialTheme.typography.labelSmall) },
+                    )
+                    if (entry.version.isNotBlank()) {
+                        AssistChip(
+                            onClick = {},
+                            label = { Text("v${entry.version}", style = MaterialTheme.typography.labelSmall) },
+                        )
+                    }
+                }
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (entry.description.isNotBlank()) {
+                    Text(entry.description, style = MaterialTheme.typography.bodyMedium)
+                }
+                if (entry.author.isNotBlank()) {
+                    Text(
+                        text = "作者：${entry.author}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                val repoUrl = entry.repository
+                if (repoUrl.isNotBlank() && (repoUrl.startsWith("https://") || repoUrl.startsWith("http://"))) {
+                    Text(
+                        text = "GitHub 仓库",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable { uriHandler.openUri(repoUrl) },
+                    )
+                }
+                if (entry.tags.isNotEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        entry.tags.take(4).forEach { tag ->
+                            AssistChip(
+                                onClick = {},
+                                label = { Text(tag, style = MaterialTheme.typography.labelSmall) },
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (downloading) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+            } else if (installed) {
+                TextButton(onClick = onDismiss) { Text("关闭") }
+            } else {
+                TextButton(onClick = onInstall) { Text("安装") }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
+}
+
+@Composable
 private fun UploadDialog(
     token: String,
     repo: String,
@@ -587,11 +686,11 @@ private fun UploadDialog(
     var repoInput by remember { mutableStateOf(repo) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("上传插件") },
+        title = { Text("提交插件") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = "使用 GitHub Token（PAT，需 contents:write 权限）将插件上传到仓库 plugins/ 目录并更新索引。",
+                    text = "使用 GitHub Token（PAT，需 contents:write 权限）将插件提交到市场的待审核队列，管理员审核通过后才会在市场上架。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -626,7 +725,7 @@ private fun UploadDialog(
                     },
                 ) {
                     Icon(HugeIcons.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Text("选择文件并上传", modifier = Modifier.padding(start = 4.dp))
+                    Text("选择文件并提交", modifier = Modifier.padding(start = 4.dp))
                 }
             }
         },
@@ -748,7 +847,7 @@ private fun PluginTutorialDialog(
                 Text(
                     "1. 新建目录，放入 plugin.json 及附属文件\n" +
                         "2. 将目录内容压缩为 zip（zip 根目录需直接含 plugin.json）\n" +
-                        "3. 在「已安装」页选择「安装本地包」，或用「上传」分享到市场",
+                        "3. 在「已安装」页选择「安装本地包」，或用「提交插件」分享到市场（审核通过后上架）",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text("资源类型", style = MaterialTheme.typography.titleSmall)

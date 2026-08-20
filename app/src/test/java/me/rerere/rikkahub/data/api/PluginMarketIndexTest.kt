@@ -15,6 +15,11 @@ class PluginMarketIndexTest {
         override suspend fun getPluginIndex(owner: String, repo: String, accept: String): ResponseBody =
             indexJson.toResponseBody("application/json; charset=utf-8".toMediaType())
 
+        override suspend fun getSubmissions(owner: String, repo: String, accept: String): ResponseBody =
+            "[]".toResponseBody("application/json; charset=utf-8".toMediaType())
+
+        override suspend fun getUser(authorization: String): GitHubUser = GitHubUser(login = "test")
+
         override suspend fun getContent(
             owner: String, repo: String, path: String, authorization: String?,
         ): GitHubContent = GitHubContent()

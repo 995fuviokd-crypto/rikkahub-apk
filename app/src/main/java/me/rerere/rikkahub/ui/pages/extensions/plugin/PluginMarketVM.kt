@@ -126,7 +126,10 @@ class PluginMarketVM(
                     marketDataSource.downloadZip(entry.downloadUrl)
                 }
                 pluginManager.installZip(bytes)
-                    .onSuccess { _notice.value = "已安装 ${it.name} ${it.version}" }
+                    .onSuccess { info ->
+                        autoEnablePlugin(info.id)
+                        _notice.value = "已安装并启用 ${info.name} ${info.version}"
+                    }
                     .onFailure { _notice.value = "安装失败: ${it.message}" }
             } catch (e: Throwable) {
                 _notice.value = "下载失败: ${e.message}"
@@ -141,7 +144,10 @@ class PluginMarketVM(
         viewModelScope.launch {
             _notice.value = null
             pluginManager.installZip(bytes)
-                .onSuccess { _notice.value = "已安装 ${it.name} ${it.version}" }
+                .onSuccess { info ->
+                    autoEnablePlugin(info.id)
+                    _notice.value = "已安装并启用 ${info.name} ${info.version}"
+                }
                 .onFailure { _notice.value = "安装失败: ${it.message}" }
             refreshInstalled()
         }
@@ -156,12 +162,25 @@ class PluginMarketVM(
             openAIPluginAdapter.fetchAsZip(url)
                 .onSuccess { bytes ->
                     pluginManager.installZip(bytes)
-                        .onSuccess { _notice.value = "已安装 ${it.name}（OpenAI 插件）" }
+                        .onSuccess { info ->
+                            autoEnablePlugin(info.id)
+                            _notice.value = "已安装并启用 ${info.name}（OpenAI 插件）"
+                        }
                         .onFailure { _notice.value = "安装失败: ${it.message}" }
                 }
                 .onFailure { _notice.value = "获取失败: ${it.message}" }
             _downloadingId.value = null
             refreshInstalled()
+        }
+    }
+
+    /** 安装成功后自动启用插件，避免"装了但没生效" */
+    private fun autoEnablePlugin(pluginId: String) {
+        viewModelScope.launch {
+            val settings = settingsStore.settingsFlow.first()
+            val enabled = settings.enabledPlugins + pluginId
+            _enabledPlugins = enabled
+            settingsStore.update { it.copy(enabledPlugins = enabled) }
         }
     }
 
@@ -175,7 +194,7 @@ class PluginMarketVM(
         }
     }
 
-    /** 上传插件/资源 zip 到用户 GitHub 仓库并更新索引。type 为用户选择的资源类型。 */
+    /** 提交插件/资源 zip 到市场仓库待审核队列，审核通过后才上架。type 为用户选择的资源类型。 */
     fun upload(zipBytes: ByteArray, type: String, onSuccess: (String) -> Unit) {
         viewModelScope.launch {
             _notice.value = null
@@ -213,18 +232,17 @@ class PluginMarketVM(
                     tags = listOf(type),
                 )
             }
-            marketDataSource.uploadPlugin(
+            marketDataSource.submitPlugin(
                 token = _githubToken.value,
                 repo = _marketRepo.value,
                 zipFileName = "${entry.id}-${entry.version}.zip",
                 zipBytes = zipBytes,
                 entry = entry,
             ).onSuccess { url ->
-                _notice.value = "上传成功"
+                _notice.value = "已提交，等待管理员审核通过后上架"
                 onSuccess(url)
-                loadMarket()
             }.onFailure {
-                _notice.value = "上传失败: ${it.message}"
+                _notice.value = "提交失败: ${it.message}"
             }
         }
     }
