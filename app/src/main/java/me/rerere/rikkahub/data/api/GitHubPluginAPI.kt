@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.ResponseBody
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.http.Body
@@ -23,13 +24,13 @@ import java.util.Base64
  * plugins/<id>-<version>.zip。未登录可读（浏览/下载），上传需要 PAT。
  */
 interface GitHubPluginAPI {
-    /** 获取仓库根目录下的 plugins.json 原始内容 */
+    /** 获取仓库根目录下的 plugins.json 原始内容（raw 响应为裸 JSON，用 ResponseBody 手动读取避免 kotlinx 字符串解码） */
     @GET("/repos/{owner}/{repo}/contents/plugins.json")
     suspend fun getPluginIndex(
         @Path("owner") owner: String,
         @Path("repo") repo: String,
         @Header("Accept") accept: String = "application/vnd.github.raw+json",
-    ): String
+    ): ResponseBody
 
     /** 获取仓库内插件 zip 的元数据（含 sha 与 download_url） */
     @GET("/repos/{owner}/{repo}/contents/{path}")
@@ -116,7 +117,7 @@ class PluginMarketDataSource(
         val (owner, repoName) = splitRepo(repo)
             ?: return Result.failure(IllegalArgumentException("仓库格式应为 owner/repo"))
         return runCatching {
-            val raw = api.getPluginIndex(owner, repoName)
+            val raw = api.getPluginIndex(owner, repoName).string()
             marketJson.decodeFromString(marketEntrySerializer, raw)
         }
     }
@@ -153,7 +154,7 @@ class PluginMarketDataSource(
 
             // 更新 plugins.json 索引：读现有 -> 合并 -> 写回
             val existingIndex = try {
-                api.getPluginIndex(owner, repoName)
+                api.getPluginIndex(owner, repoName).string()
             } catch (e: Throwable) {
                 "[]"
             }
