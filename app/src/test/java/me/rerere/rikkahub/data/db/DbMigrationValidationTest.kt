@@ -85,6 +85,25 @@ class DbMigrationValidationTest {
     }
 
     @Test
+    fun import_backup_with_new_schema_does_not_crash() {
+        // 模拟导入备份：数据库 version 仍为 28，但 workspaces 已含 local_directory_uri 列，
+        // 直接 ALTER 会抛 duplicate column name，必须防御性跳过。
+        helper.createDatabase("mig28dup", 28).apply {
+            execSQL("ALTER TABLE `workspaces` ADD COLUMN `local_directory_uri` TEXT")
+        }.close()
+        helper.runMigrationsAndValidate(
+            "mig28dup",
+            33,
+            true,
+            Migration_28_29,
+            Migration_29_30,
+            Migration_30_31,
+            Migration_31_32,
+            Migration_32_33,
+        )
+    }
+
+    @Test
     fun fresh_install_builds_schema() {
         val context = RuntimeEnvironment.getApplication()
         val db: AppDatabase = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)

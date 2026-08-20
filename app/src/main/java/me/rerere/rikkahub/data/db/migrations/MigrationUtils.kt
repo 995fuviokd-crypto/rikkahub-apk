@@ -177,3 +177,17 @@ private fun isCorrectWorkflowsTable(db: SupportSQLiteDatabase, columns: Map<Stri
     }
     return indexExists
 }
+
+/**
+ * 判断表中是否已存在指定列。用于防御性迁移：
+ * 导入备份时数据库 schema 可能与版本号不一致（如备份库已含目标列但 version 较旧），
+ * 直接 `ALTER TABLE ADD COLUMN` 会抛 `duplicate column name` 导致崩溃。
+ */
+internal fun hasColumn(db: SupportSQLiteDatabase, table: String, column: String): Boolean {
+    return db.query("PRAGMA table_info(`$table`)").use { cursor ->
+        while (cursor.moveToNext()) {
+            if (cursor.getString(cursor.getColumnIndexOrThrow("name")) == column) return true
+        }
+        false
+    }
+}

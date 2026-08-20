@@ -15,20 +15,31 @@ object Migration_32_33 : Migration(32, 33) {
             db.execSQL("ALTER TABLE `memoryjournalentity` RENAME TO `MemoryJournalEntity`")
         }
 
-        db.execSQL(
-            "ALTER TABLE `groups` ADD COLUMN `reasoning_level` TEXT NOT NULL DEFAULT 'AUTO'"
-        )
-        db.execSQL(
-            "ALTER TABLE `groups` ADD COLUMN `enable_tools` INTEGER NOT NULL DEFAULT 1"
-        )
-        db.execSQL(
-            "ALTER TABLE `groups` ADD COLUMN `workspace_id` TEXT"
-        )
-        db.execSQL(
-            "ALTER TABLE `group_messages` ADD COLUMN `reasoning` TEXT NOT NULL DEFAULT ''"
-        )
-        db.execSQL(
-            "ALTER TABLE `group_messages` ADD COLUMN `tools` TEXT NOT NULL DEFAULT ''"
-        )
+        // 防御性加列：导入备份时数据库 schema 可能与版本号不一致，已存在则跳过。
+        if (!hasColumn(db, "groups", "reasoning_level")) {
+            db.execSQL(
+                "ALTER TABLE `groups` ADD COLUMN `reasoning_level` TEXT NOT NULL DEFAULT 'AUTO'"
+            )
+        }
+        if (!hasColumn(db, "groups", "enable_tools")) {
+            db.execSQL(
+                "ALTER TABLE `groups` ADD COLUMN `enable_tools` INTEGER NOT NULL DEFAULT 1"
+            )
+        }
+        if (!hasColumn(db, "groups", "workspace_id")) {
+            db.execSQL(
+                "ALTER TABLE `groups` ADD COLUMN `workspace_id` TEXT"
+            )
+        }
+        if (!hasColumn(db, "group_messages", "reasoning")) {
+            db.execSQL(
+                "ALTER TABLE `group_messages` ADD COLUMN `reasoning` TEXT NOT NULL DEFAULT ''"
+            )
+        }
+        if (!hasColumn(db, "group_messages", "tools")) {
+            db.execSQL(
+                "ALTER TABLE `group_messages` ADD COLUMN `tools` TEXT NOT NULL DEFAULT ''"
+            )
+        }
     }
 }

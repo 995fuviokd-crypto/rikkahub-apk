@@ -11,14 +11,31 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  */
 val Migration_24_25 = object : Migration(24, 25) {
     override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE memoryentity ADD COLUMN target TEXT NOT NULL DEFAULT 'MEMORY'")
-        db.execSQL("ALTER TABLE memoryentity ADD COLUMN summary TEXT")
-        db.execSQL("ALTER TABLE memoryentity ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
-        db.execSQL("ALTER TABLE memoryentity ADD COLUMN scope_key TEXT NOT NULL DEFAULT 'durable'")
-        db.execSQL("ALTER TABLE memoryentity ADD COLUMN conversation_id TEXT")
-        db.execSQL("ALTER TABLE memoryentity ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0")
-        db.execSQL("ALTER TABLE memoryentity ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0")
-        db.execSQL("ALTER TABLE memoryentity ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0")
+        // 防御性加列：导入备份时数据库 schema 可能与版本号不一致，已存在则跳过。
+        if (!hasColumn(db, "memoryentity", "target")) {
+            db.execSQL("ALTER TABLE memoryentity ADD COLUMN target TEXT NOT NULL DEFAULT 'MEMORY'")
+        }
+        if (!hasColumn(db, "memoryentity", "summary")) {
+            db.execSQL("ALTER TABLE memoryentity ADD COLUMN summary TEXT")
+        }
+        if (!hasColumn(db, "memoryentity", "source")) {
+            db.execSQL("ALTER TABLE memoryentity ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
+        }
+        if (!hasColumn(db, "memoryentity", "scope_key")) {
+            db.execSQL("ALTER TABLE memoryentity ADD COLUMN scope_key TEXT NOT NULL DEFAULT 'durable'")
+        }
+        if (!hasColumn(db, "memoryentity", "conversation_id")) {
+            db.execSQL("ALTER TABLE memoryentity ADD COLUMN conversation_id TEXT")
+        }
+        if (!hasColumn(db, "memoryentity", "created_at")) {
+            db.execSQL("ALTER TABLE memoryentity ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0")
+        }
+        if (!hasColumn(db, "memoryentity", "updated_at")) {
+            db.execSQL("ALTER TABLE memoryentity ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0")
+        }
+        if (!hasColumn(db, "memoryentity", "is_archived")) {
+            db.execSQL("ALTER TABLE memoryentity ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0")
+        }
         db.execSQL(
             """
             CREATE TABLE IF NOT EXISTS `MemoryJournalEntity` (

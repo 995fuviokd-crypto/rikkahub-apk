@@ -10,6 +10,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  */
 val Migration_25_26 = object : Migration(25, 26) {
     override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE workspaces ADD COLUMN android_local_access INTEGER NOT NULL DEFAULT 1")
+        if (!hasColumn(db, "workspaces", "android_local_access")) {
+            db.execSQL("ALTER TABLE workspaces ADD COLUMN android_local_access INTEGER NOT NULL DEFAULT 1")
+        }
     }
 }
