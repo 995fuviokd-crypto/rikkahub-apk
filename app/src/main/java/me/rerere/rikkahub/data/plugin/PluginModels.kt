@@ -117,4 +117,12 @@ object PluginCategories {
         "media",
         "other",
     )
+
+    /** 市场页分类筛选（按类型精简） */
+    val marketTypes = listOf(
+        ALL,
+        TYPE_PLUGIN,
+        TYPE_SKILL,
+        TYPE_MCP,
+    )
 }

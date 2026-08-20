@@ -1,10 +1,7 @@
 package me.rerere.rikkahub.ui.pages.extensions.plugin
 
-import android.content.Intent
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -25,17 +21,17 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -53,8 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -63,9 +58,9 @@ import me.rerere.hugeicons.stroke.BookOpen01
 import me.rerere.hugeicons.stroke.CloudDownload
 import me.rerere.hugeicons.stroke.CloudUpload
 import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Menu01
 import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.plugin.InstalledPlugin
 import me.rerere.rikkahub.data.plugin.PluginCategories
 import me.rerere.rikkahub.data.plugin.PluginMarketEntry
@@ -74,11 +69,10 @@ import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.theme.CustomColors
 import org.koin.androidx.compose.koinViewModel
-import java.io.ByteArrayOutputStream
 
 @Composable
 fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
-    val context = LocalContext.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     val installed by vm.installed.collectAsStateWithLifecycle()
     val marketEntries by vm.marketEntries.collectAsStateWithLifecycle()
     val marketLoading by vm.marketLoading.collectAsStateWithLifecycle()
@@ -91,13 +85,15 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
     var tab by remember { mutableIntStateOf(0) }
     var search by remember { mutableStateOf("") }
     var category by remember { mutableStateOf(PluginCategories.ALL) }
+    var showMenu by remember { mutableStateOf(false) }
     var showUploadDialog by remember { mutableStateOf(false) }
     var showRepoDialog by remember { mutableStateOf(false) }
     var showTutorialDialog by remember { mutableStateOf(false) }
     var showOpenAIDialog by remember { mutableStateOf(false) }
     var uploadType by remember { mutableStateOf(PluginCategories.TYPE_PLUGIN) }
     var deleteTarget by remember { mutableStateOf<InstalledPlugin?>(null) }
-    var uploadResult by remember { mutableStateOf<String?>(null) }
+
+    val snackbarHostState = remember { SnackbarHostState() }
 
     // 选择本地插件 zip 安装
     val localZipLauncher = rememberLauncherForActivityResult(
@@ -105,8 +101,7 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
     ) { uri ->
         uri?.let {
             context.contentResolver.openInputStream(uri)?.use { input ->
-                val bytes = input.readBytes()
-                vm.installFromZip(bytes)
+                vm.installFromZip(input.readBytes())
             }
         }
     }
@@ -117,22 +112,21 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
     ) { uri ->
         uri?.let {
             context.contentResolver.openInputStream(uri)?.use { input ->
-                val bytes = input.readBytes()
-                vm.upload(bytes, uploadType) { url ->
-                    uploadResult = url
-                }
+                vm.upload(input.readBytes(), uploadType) {}
             }
         }
     }
 
+    // 操作结果以 Snackbar 提示
     LaunchedEffect(notice) {
-        if (notice != null) {
-            kotlinx.coroutines.delay(2500)
+        val message = notice
+        if (message != null) {
+            snackbarHostState.showSnackbar(message)
             vm.clearNotice()
         }
     }
 
-    // 进入市场页自动拉取最新索引（实时同步）
+    // 进入市场页自动拉取最新索引
     LaunchedEffect(tab) {
         if (tab == 1) {
             vm.loadMarket()
@@ -147,20 +141,59 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
                 title = { Text("插件") },
                 navigationIcon = { BackButton() },
                 actions = {
-                    IconButton(onClick = { showTutorialDialog = true }) {
-                        Icon(HugeIcons.BookOpen01, contentDescription = "制作教程")
-                    }
-                    IconButton(onClick = { showRepoDialog = true }) {
-                        Icon(HugeIcons.Settings03, contentDescription = "市场设置")
-                    }
-                    IconButton(onClick = { showUploadDialog = true }) {
-                        Icon(HugeIcons.CloudUpload, contentDescription = "上传插件")
+                    Box {
+                        IconButton(onClick = { showMenu = true }) {
+                            Icon(HugeIcons.Menu01, contentDescription = "更多")
+                        }
+                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("上传插件") },
+                                leadingIcon = {
+                                    Icon(HugeIcons.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    showUploadDialog = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("导入 OpenAI 插件") },
+                                leadingIcon = {
+                                    Icon(HugeIcons.Puzzle, contentDescription = null, modifier = Modifier.size(18.dp))
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    showOpenAIDialog = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("市场仓库") },
+                                leadingIcon = {
+                                    Icon(HugeIcons.Settings03, contentDescription = null, modifier = Modifier.size(18.dp))
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    showRepoDialog = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("制作教程") },
+                                leadingIcon = {
+                                    Icon(HugeIcons.BookOpen01, contentDescription = null, modifier = Modifier.size(18.dp))
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    showTutorialDialog = true
+                                },
+                            )
+                        }
                     }
                 },
                 scrollBehavior = scrollBehavior,
                 colors = CustomColors.topBarColors,
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = CustomColors.topBarColors.containerColor,
     ) { innerPadding ->
@@ -188,7 +221,6 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
                     onToggle = vm::toggleEnabled,
                     onUninstall = { deleteTarget = it },
                     onInstallLocal = { localZipLauncher.launch(arrayOf("application/zip", "*/*")) },
-                    onImportOpenAI = { showOpenAIDialog = true },
                 )
 
                 1 -> MarketTab(
@@ -204,13 +236,10 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
                     onInstall = vm::install,
                     onRetry = vm::loadMarket,
                     onRefresh = vm::loadMarket,
+                    onEditRepo = { showRepoDialog = true },
                 )
             }
         }
-    }
-
-    notice?.let {
-        RikkaNotice(text = it, onDismiss = vm::clearNotice)
     }
 
     RikkaConfirmDialog(
@@ -236,8 +265,15 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
             onTokenChange = vm::setGithubToken,
             onRepoChange = vm::setMarketRepo,
             onPickFile = { uploadZipLauncher.launch(arrayOf("application/zip", "*/*")) },
-            onShowTutorial = { showTutorialDialog = true },
             onDismiss = { showUploadDialog = false },
+        )
+    }
+
+    if (showRepoDialog) {
+        RepoDialog(
+            repo = marketRepo,
+            onRepoChange = vm::setMarketRepo,
+            onDismiss = { showRepoDialog = false },
         )
     }
 
@@ -252,21 +288,6 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
             onDismiss = { showOpenAIDialog = false },
         )
     }
-
-    if (showRepoDialog) {
-        RepoDialog(
-            repo = marketRepo,
-            onRepoChange = vm::setMarketRepo,
-            onDismiss = { showRepoDialog = false },
-        )
-    }
-
-    uploadResult?.let { url ->
-        UploadSuccessDialog(
-            url = url,
-            onDismiss = { uploadResult = null },
-        )
-    }
 }
 
 @Composable
@@ -275,7 +296,6 @@ private fun InstalledTab(
     onToggle: (String) -> Unit,
     onUninstall: (InstalledPlugin) -> Unit,
     onInstallLocal: () -> Unit,
-    onImportOpenAI: () -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -294,10 +314,6 @@ private fun InstalledTab(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = onImportOpenAI) {
-                    Icon(HugeIcons.Puzzle, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Text("导入 OpenAI", modifier = Modifier.padding(start = 4.dp))
-                }
                 TextButton(onClick = onInstallLocal) {
                     Icon(HugeIcons.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
                     Text("安装本地包", modifier = Modifier.padding(start = 4.dp))
@@ -366,24 +382,10 @@ private fun InstalledPluginCard(
                     )
                 }
                 if (plugin.info != null) {
-                    Text(
-                        text = "v${plugin.info.version} · ${plugin.info.category}${if (plugin.info.author.isNotBlank()) " · ${plugin.info.author}" else ""}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                     if (plugin.info.description.isNotBlank()) {
                         Text(
                             text = plugin.info.description,
                             style = MaterialTheme.typography.bodySmall,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    if (plugin.info.actions.isNotEmpty()) {
-                        Text(
-                            text = "快捷操作: ${plugin.info.actions.joinToString("、") { it.label }}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -425,19 +427,16 @@ private fun MarketTab(
     onInstall: (PluginMarketEntry) -> Unit,
     onRetry: () -> Unit,
     onRefresh: () -> Unit,
+    onEditRepo: () -> Unit,
 ) {
     val installedIds = remember(installed) { installed.map { it.id }.toSet() }
-    val categories = PluginCategories.known
+    val categories = PluginCategories.marketTypes
     val filtered = entries.filter { entry ->
         val matchSearch = search.isBlank() ||
             entry.name.contains(search, ignoreCase = true) ||
             entry.description.contains(search, ignoreCase = true) ||
-            entry.id.contains(search, ignoreCase = true) ||
-            entry.tags.any { it.contains(search, ignoreCase = true) }
-        val matchCategory = category == PluginCategories.ALL ||
-            entry.type == category ||
-            entry.category == category ||
-            entry.tags.contains(category)
+            entry.id.contains(search, ignoreCase = true)
+        val matchCategory = category == PluginCategories.ALL || entry.type == category
         matchSearch && matchCategory
     }
 
@@ -448,7 +447,7 @@ private fun MarketTab(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
-            placeholder = { Text("搜索插件 / 技能 / MCP / 标签") },
+            placeholder = { Text("搜索插件") },
             singleLine = true,
         )
         LazyRow(
@@ -459,7 +458,7 @@ private fun MarketTab(
                 FilterChip(
                     selected = category == cat,
                     onClick = { onCategoryChange(cat) },
-                    label = { Text(cat) },
+                    label = { Text(PluginCategories.typeLabel(cat)) },
                 )
             }
         }
@@ -468,8 +467,8 @@ private fun MarketTab(
             onRefresh = onRefresh,
             modifier = Modifier.fillMaxSize(),
         ) {
-            if (loading) {
-                Box(
+            when {
+                loading -> Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(48.dp),
@@ -477,8 +476,8 @@ private fun MarketTab(
                 ) {
                     CircularProgressIndicator()
                 }
-            } else if (error != null) {
-                Column(
+
+                error != null -> Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(48.dp),
@@ -486,10 +485,13 @@ private fun MarketTab(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(error, color = MaterialTheme.colorScheme.error)
-                    TextButton(onClick = onRetry) { Text("重试") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = onRetry) { Text("重试") }
+                        TextButton(onClick = onEditRepo) { Text("修改仓库") }
+                    }
                 }
-            } else if (filtered.isEmpty()) {
-                Box(
+
+                filtered.isEmpty() -> Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(48.dp),
@@ -497,8 +499,8 @@ private fun MarketTab(
                 ) {
                     Text("没有找到插件", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-            } else {
-                LazyColumn(
+
+                else -> LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -548,28 +550,11 @@ private fun MarketEntryCard(
                         label = { Text(PluginCategories.typeLabel(entry.type), style = MaterialTheme.typography.labelSmall) },
                     )
                 }
-                Text(
-                    text = "v${entry.version}${if (entry.author.isNotBlank()) " · ${entry.author}" else ""}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
                 if (entry.description.isNotBlank()) {
                     Text(
                         text = entry.description,
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                val extraTags = (entry.tags + listOf(entry.category).filter { it.isNotBlank() && it != "general" && it != entry.type })
-                    .distinct()
-                    .take(4)
-                if (extraTags.isNotEmpty()) {
-                    Text(
-                        text = extraTags.joinToString(" #", prefix = "#"),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
@@ -596,7 +581,6 @@ private fun UploadDialog(
     onTokenChange: (String) -> Unit,
     onRepoChange: (String) -> Unit,
     onPickFile: () -> Unit,
-    onShowTutorial: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var tokenInput by remember { mutableStateOf(token) }
@@ -607,7 +591,7 @@ private fun UploadDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = "使用 GitHub 个人访问令牌（PAT，需 contents:write 权限）把插件上传到你的仓库 plugins/ 目录并更新索引。支持插件、技能、MCP 配置等多种资源包。",
+                    text = "使用 GitHub Token（PAT，需 contents:write 权限）将插件上传到仓库 plugins/ 目录并更新索引。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -643,10 +627,6 @@ private fun UploadDialog(
                 ) {
                     Icon(HugeIcons.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
                     Text("选择文件并上传", modifier = Modifier.padding(start = 4.dp))
-                }
-                TextButton(onClick = onShowTutorial) {
-                    Icon(HugeIcons.BookOpen01, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Text("查看制作教程", modifier = Modifier.padding(start = 4.dp))
                 }
             }
         },
@@ -689,50 +669,6 @@ private fun RepoDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
-        },
-    )
-}
-
-@Composable
-private fun UploadSuccessDialog(
-    url: String,
-    onDismiss: () -> Unit,
-) {
-    val context = LocalContext.current
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("上传成功") },
-        text = {
-            Text(
-                text = url,
-                modifier = Modifier
-                    .widthIn(max = 360.dp)
-                    .clickable {
-                        runCatching {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                        }
-                    },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("关闭") }
-        },
-    )
-}
-
-@Composable
-private fun RikkaNotice(
-    text: String,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("提示") },
-        text = { Text(text) },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("确定") }
         },
     )
 }
@@ -806,7 +742,7 @@ private fun PluginTutorialDialog(
                 Text(
                     text = "{ \"id\": \"my-plugin\",\n  \"name\": \"我的插件\",\n  \"version\": \"1.0.0\",\n  \"description\": \"插件描述\",\n  \"author\": \"作者\",\n  \"category\": \"productivity\",\n  \"type\": \"plugin\",\n  \"systemPrompt\": \"启用后注入的系统提示\",\n  \"tags\": [\"翻译\", \"写作\"],\n  \"actions\": [\n    { \"label\": \"翻译\", \"prompt\": \"请翻译这段内容：\" }\n  ],\n  \"extensionPoints\": {\n    \"settingsActions\": [\n      { \"id\": \"s1\", \"label\": \"打开帮助\", \"target\": \"url\", \"payload\": \"https://example.com\" }\n    ],\n    \"homeActions\": []\n  } }",
                     style = MaterialTheme.typography.bodySmall,
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    fontFamily = FontFamily.Monospace,
                 )
                 Text("打包步骤", style = MaterialTheme.typography.titleSmall)
                 Text(
