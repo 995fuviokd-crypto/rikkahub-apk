@@ -313,7 +313,9 @@ class SettingsStore(
                 enabledPlugins = preferences[ENABLED_PLUGINS]?.let {
                     runCatching { JsonInstant.decodeFromString<Set<String>>(it) }.getOrDefault(emptySet())
                 } ?: emptySet(),
-                pluginMarketRepo = preferences[PLUGIN_MARKET_REPO] ?: Settings.DEFAULT_PLUGIN_MARKET_REPO,
+                pluginMarketRepo = preferences[PLUGIN_MARKET_REPO]
+                    ?.takeIf { it != Settings.LEGACY_BROKEN_MARKET_REPO }
+                    ?: Settings.DEFAULT_PLUGIN_MARKET_REPO,
                 githubToken = preferences[GITHUB_TOKEN] ?: "",
             )
         }
@@ -716,6 +718,9 @@ data class Settings(
 
         /** 默认插件市场索引仓库 */
         const val DEFAULT_PLUGIN_MARKET_REPO = "995fuviokd-crypto/plugin-market"
+
+        /** 旧版默认市场仓库（不存在，历史版本可能已持久化，读取时忽略回退到新默认值） */
+        const val LEGACY_BROKEN_MARKET_REPO = "rikkahub/plugin-market"
     }
 }
 
