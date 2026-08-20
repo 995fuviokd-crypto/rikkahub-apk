@@ -90,6 +90,10 @@ val repositoryModule = module {
     }
 
     single {
+        me.rerere.rikkahub.data.operit.OperitScriptRuntime(get())
+    }
+
+    single {
         me.rerere.rikkahub.data.api.GitHubPluginAPI.create(get())
     }
 

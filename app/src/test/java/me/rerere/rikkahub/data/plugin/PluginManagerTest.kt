@@ -302,6 +302,43 @@ class PluginManagerTest {
     }
 
     @Test
+    fun `parseMcpServers parses command stdio npx configs`() {
+        val dir = kotlin.io.path.createTempDirectory("adapt-mcp-command").toFile()
+        try {
+            File(dir, "mcp.json").writeText(
+                """
+                {
+                  "mcpServers": {
+                    "filesystem": {
+                      "command": "npx",
+                      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+                      "env": { "DISABLE_AUTO_UPDATE": "true" },
+                      "type": "stdio"
+                    },
+                    "remote": {
+                      "url": "https://remote.example.com/sse",
+                      "type": "sse"
+                    }
+                  }
+                }
+                """.trimIndent()
+            )
+            val servers = PluginManager.parseMcpServers(File(dir, "mcp.json"))
+            assertEquals(2, servers.size)
+            val command = servers.first { it is me.rerere.rikkahub.data.ai.mcp.McpServerConfig.CommandServerConfig }
+            assertTrue(command is me.rerere.rikkahub.data.ai.mcp.McpServerConfig.CommandServerConfig)
+            val cmd = command as me.rerere.rikkahub.data.ai.mcp.McpServerConfig.CommandServerConfig
+            assertEquals("npx", cmd.command)
+            assertEquals(listOf("-y", "@modelcontextprotocol/server-filesystem", "/tmp"), cmd.args)
+            assertEquals("true", cmd.env["DISABLE_AUTO_UPDATE"])
+            assertTrue(cmd.serverUrl.startsWith("local:"))
+            assertEquals("filesystem", cmd.commonOptions.name)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `autoAdapt returns null for unrecognized bundle`() {
         val dir = kotlin.io.path.createTempDirectory("adapt-none").toFile()
         try {

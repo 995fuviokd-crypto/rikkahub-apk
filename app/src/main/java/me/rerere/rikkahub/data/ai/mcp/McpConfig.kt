@@ -91,6 +91,25 @@ sealed class McpServerConfig {
             return copy(id = id, commonOptions = commonOptions)
         }
     }
+
+    /**
+     * 本地命令型 MCP（Operit 等第三方配置）：command + args + env 启动本地进程。
+     * RikkaHub 客户端仅实现远程 SSE / Streamable HTTP 传输，该类型用于在 MCP
+     * 设置中**可见**并保留原始启动命令，连接状态会明确提示需要 Operit/Node 环境。
+     */
+    @Serializable
+    @SerialName("command")
+    data class CommandServerConfig(
+        override val id: Uuid = Uuid.random(),
+        override val commonOptions: McpCommonOptions = McpCommonOptions(),
+        val command: String = "",
+        val args: List<String> = emptyList(),
+        val env: Map<String, String> = emptyMap(),
+    ) : McpServerConfig() {
+        override fun clone(id: Uuid, commonOptions: McpCommonOptions): McpServerConfig {
+            return copy(id = id, commonOptions = commonOptions)
+        }
+    }
 }
 
 /** MCP Server 的连接地址（作为 OAuth 的 canonical resource 标识）。 */
@@ -98,4 +117,5 @@ val McpServerConfig.serverUrl: String
     get() = when (this) {
         is McpServerConfig.SseTransportServer -> url
         is McpServerConfig.StreamableHTTPServer -> url
+        is McpServerConfig.CommandServerConfig -> "local:${command.ifBlank { "command" }}"
     }

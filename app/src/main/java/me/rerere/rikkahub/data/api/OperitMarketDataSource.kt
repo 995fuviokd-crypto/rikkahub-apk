@@ -12,6 +12,9 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import me.rerere.rikkahub.data.operit.OperitScriptRuntime
+import me.rerere.rikkahub.data.operit.OperitToolManifest
+import me.rerere.rikkahub.data.operit.OperitToolManifestData
 import me.rerere.rikkahub.data.plugin.PluginCategories
 import me.rerere.rikkahub.data.plugin.PluginInfo
 import me.rerere.rikkahub.data.plugin.PluginJson
@@ -227,9 +230,14 @@ class OperitMarketDataSource(
         handle: OperitSourceHandle.ReleaseAsset,
     ) {
         outDir.mkdirs()
-        val rawDir = outDir.resolve("toolpkg").apply { mkdirs() }
-        PluginManager.unzipTo(bytes, rawDir)
-        val manifestFile = PluginManager.findFile(rawDir) { it.equals("manifest.json", ignoreCase = true) }
+        val operitDir = outDir.resolve(OperitScriptRuntime.OPERIT_DIR).apply { mkdirs() }
+        PluginManager.unzipTo(bytes, operitDir)
+        // 部分 toolpkg 顶层嵌套单目录，拍平到 operit/ 下
+        operitDir.listFiles()?.singleOrNull { it.isDirectory }?.let { nested ->
+            nested.copyRecursively(operitDir, overwrite = true)
+            nested.deleteRecursively()
+        }
+        val manifestFile = PluginManager.findFile(operitDir) { it.equals("manifest.json", ignoreCase = true) }
         val manifest = manifestFile
             ?.readText()
             ?.let { runCatching { Json.parseToJsonElement(it).jsonObject }.getOrNull() }
@@ -237,20 +245,20 @@ class OperitMarketDataSource(
             ?.takeIf { it.isNotBlank() }
             ?: entry.title.ifBlank { entry.id.substringAfter("package-") }
         val desc = jsonLocalizedString(manifest, "description") ?: entry.description
-        val systemPrompt = buildString {
-            append("这是来自 Operit 市场的 ToolPkg 工具包「$pkgName」。")
-            if (desc.isNotBlank()) append("简介：$desc\n")
-            append("原始包内容已保存在插件目录 toolpkg/ 下（manifest.json、main.js 等），")
-            append("该工具包的运行依赖 Operit 运行时，RikkaHub 无法直接执行其中的 JS 逻辑；")
-            append("你可读取插件目录下的文件内容，理解其能力定义后按需参考。")
-        }
+        val version = (manifest?.get("version") as? JsonPrimitive)?.contentOrNull
+            ?: "1.0.0"
+        val tools = OperitToolManifest.toolsFromDirectory(operitDir)
+        val systemPrompt = OperitToolManifest.describeSystemPrompt(pkgName, desc, tools)
         writePluginInfo(
-            outDir, entry, pkgName, "1.0.0", desc, systemPrompt,
+            outDir, entry, pkgName, version, desc, systemPrompt,
             tags = listOf("operit", "toolpkg"),
+        )
+        operitDir.resolve(OperitScriptRuntime.TOOL_MANIFEST).writeText(
+            OperitToolManifest.buildJson(OperitToolManifestData(pkgName, desc, tools))
         )
     }
 
-    /** script（单 JS 文件）：解析头部 METADATA，生成说明型插件并保留脚本内容 */
+    /** script（单 JS 文件）：解析头部 METADATA，生成本地可执行的脚本插件并保留脚本内容 */
     private fun buildScriptPlugin(
         outDir: File,
         entry: OperitListItem,
@@ -258,23 +266,23 @@ class OperitMarketDataSource(
         handle: OperitSourceHandle.ReleaseAsset,
     ) {
         outDir.mkdirs()
+        val operitDir = outDir.resolve(OperitScriptRuntime.OPERIT_DIR).apply { mkdirs() }
         val scriptName = handle.assetName.ifBlank { entry.id.substringAfter("script-").ifBlank { "script.js" } }
-        outDir.resolve(scriptName).writeBytes(bytes)
+        operitDir.resolve(scriptName).writeBytes(bytes)
         val metadata = parseOperitScriptMetaObject(bytes)
         val name = jsonLocalizedString(metadata, "display_name", "name")
             ?: entry.title.ifBlank { scriptName.substringBeforeLast('.') }
         val desc = jsonLocalizedString(metadata, "description") ?: entry.description
-        val systemPrompt = buildString {
-            append("这是来自 Operit 市场的脚本「$name」。")
-            if (desc.isNotBlank()) append("简介：$desc\n")
-            append("脚本内容已保存在插件目录 $scriptName 中，该脚本依赖 Operit 运行时执行，")
-            append("RikkaHub 无法直接运行；你可读取脚本文件了解其实现的工具能力，按需参考。")
-        }
+        val tools = OperitToolManifest.toolsFromMetadata(bytes)
+        val systemPrompt = OperitToolManifest.describeSystemPrompt(name, desc, tools)
         writePluginInfo(
             outDir, entry, name, "1.0.0",
             desc.ifBlank { "来自 Operit 市场的脚本（$scriptName）" },
             systemPrompt,
             tags = listOf("operit", "script"),
+        )
+        operitDir.resolve(OperitScriptRuntime.TOOL_MANIFEST).writeText(
+            OperitToolManifest.buildJson(OperitToolManifestData(name, desc, tools))
         )
     }
 

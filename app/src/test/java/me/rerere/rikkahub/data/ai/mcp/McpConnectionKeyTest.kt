@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.ai.mcp
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class McpConnectionKeyTest {
@@ -56,5 +57,20 @@ class McpConnectionKeyTest {
             commonOptions = manualAuth.commonOptions.copy(oauth = null)
         )
         assertEquals(manualAuthWithoutOAuth.connectionKey(), manualAuth.connectionKey())
+    }
+
+    @Test
+    fun `command config has distinct connection key and local server url`() {
+        val command = McpServerConfig.CommandServerConfig(
+            commonOptions = McpCommonOptions(name = "local"),
+            command = "npx",
+            args = listOf("-y", "@modelcontextprotocol/server-filesystem"),
+        )
+        assertEquals("command", command.connectionKey().transportType)
+        assertTrue(command.serverUrl.startsWith("local:"))
+        assertNotEquals(base.connectionKey(), command.connectionKey())
+
+        val changedCommand = command.copy(command = "node")
+        assertNotEquals(command.connectionKey(), changedCommand.connectionKey())
     }
 }

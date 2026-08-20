@@ -834,6 +834,10 @@
   <string name="setting_mcp_page_transport_type">Transport Type</string>
   <string name="setting_mcp_page_transport_type_desc">Select the transport protocol type for the MCP server</string>
   <string name="setting_mcp_page_url_label">URL</string>
+
+  <string name="setting_mcp_page_command">Command</string>
+  <string name="setting_mcp_page_command_desc">Local process start command (command + args + env). RikkaHub only supports remote SSE / Streamable HTTP transport, this type requires an external Node/Operit runtime</string>
+  <string name="setting_mcp_page_command_args">Args</string>
   <string name="setting_model_page_chat_model">Chat Model</string>
   <string name="setting_model_page_chat_model_desc">Global default chat model</string>
   <string name="setting_model_page_compress_model">Compress Model</string>
@@ -1363,8 +1367,9 @@
   <string name="assistant_page_local_tools_calendar_desc">Let the AI query and create calendar events</string>
   <string name="assistant_page_local_tools_device_info_title">Device Info</string>
   <string name="assistant_page_local_tools_device_info_desc">Let the AI query device information including the current effective screen resolution</string>
-  <string name="assistant_page_local_tools_accessibility_title">Accessibility Control</string>
-  <string name="assistant_page_local_tools_accessibility_desc">Let the AI control your phone via the accessibility service: open apps, tap on-screen elements, adjust volume, and navigate</string>
+  <string name="assistant_page_local_tools_operit_scripts_title">Operit Scripts</string>
+  <string name="assistant_page_local_tools_operit_scripts_desc">Let the AI run tools exported by Operit market scripts and ToolPkg plugins locally via the QuickJS engine</string>
+  <string name="assistant_page_local_tools_accessibility_title">Accessibility Control</string>  <string name="assistant_page_local_tools_accessibility_desc">Let the AI control your phone via the accessibility service: open apps, tap on-screen elements, adjust volume, and navigate</string>
   <string name="assistant_page_local_tools_accessibility_permission_required">Please enable the RikkaHub accessibility service in system settings to use Accessibility Control</string>
   <string name="assistant_page_local_tools_power_management_title">Power Management</string>
   <string name="assistant_page_local_tools_power_management_desc">Let the AI check battery status and guide you to exempt this app from battery restrictions for better background keep-alive</string>

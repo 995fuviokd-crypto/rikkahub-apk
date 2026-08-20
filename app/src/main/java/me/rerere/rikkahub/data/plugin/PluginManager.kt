@@ -5,7 +5,9 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.rikkahub.data.ai.mcp.McpCommonOptions
@@ -88,9 +90,17 @@ class PluginManager(
             .map { it.systemPrompt }
     }
 
+    /** 已启用插件中是否包含 Operit 脚本/ToolPkg 插件（存在 operit/ 目录且含 JS 文件） */
+    fun hasOperitScriptPlugins(enabledPlugins: Set<String>): Boolean {
+        if (enabledPlugins.isEmpty()) return false
+        return enabledPlugins.any { id ->
+            val dir = File(getPluginDir(id), me.rerere.rikkahub.data.operit.OperitScriptRuntime.OPERIT_DIR)
+            dir.isDirectory && dir.listFiles()?.any { it.extension == "js" } == true
+        }
+    }
+
     /** 已启用插件的快捷操作列表 */
-    fun enabledActions(enabledPlugins: Set<String>): List<PluginAction> {
-        if (enabledPlugins.isEmpty()) return emptyList()
+    fun enabledActions(enabledPlugins: Set<String>): List<PluginAction> {        if (enabledPlugins.isEmpty()) return emptyList()
         return enabledPlugins
             .sorted()
             .mapNotNull { loadInfo(it) }
@@ -379,16 +389,34 @@ class PluginManager(
             val servers = root["mcpServers"]?.jsonObject ?: root
             return servers.mapNotNull { (name, element) ->
                 val obj = element.jsonObject
-                val url = obj["url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val common = McpCommonOptions(enable = true, name = name)
                 val type = obj["type"]?.jsonPrimitive?.contentOrNull
                     ?: obj["transport"]?.jsonPrimitive?.contentOrNull
                     ?: "sse"
-                val common = McpCommonOptions(enable = true, name = name)
                 when (type.lowercase()) {
-                    "sse", "http", "http-sse" ->
+                    "sse", "http", "http-sse" -> {
+                        val url = obj["url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
                         McpServerConfig.SseTransportServer(commonOptions = common, url = url)
-                    "streamable_http", "streamable-http", "http_streamable" ->
+                    }
+                    "streamable_http", "streamable-http", "http_streamable" -> {
+                        val url = obj["url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
                         McpServerConfig.StreamableHTTPServer(commonOptions = common, url = url)
+                    }
+                    "command", "stdio", "local", "npx" -> {
+                        val command = obj["command"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                        val args = obj["args"]?.jsonArray?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                            ?: emptyList()
+                        val envObj = obj["env"]?.jsonObject
+                        val env = envObj?.entries?.mapNotNull { (k, v) ->
+                            k to ((v as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null)
+                        }?.toMap() ?: emptyMap()
+                        McpServerConfig.CommandServerConfig(
+                            commonOptions = common,
+                            command = command,
+                            args = args,
+                            env = env,
+                        )
+                    }
                     else -> null
                 }
             }

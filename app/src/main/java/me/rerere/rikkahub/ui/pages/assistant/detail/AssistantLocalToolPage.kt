@@ -262,6 +262,20 @@ private fun AssistantLocalToolContent(
             )
             item(
                 headlineContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_operit_scripts_title))
+                },
+                supportingContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_operit_scripts_desc))
+                },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.localTools.contains(LocalToolOption.OperitScripts),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.OperitScripts, it) }
+                    )
+                }
+            )
+            item(
+                headlineContent = {
                     Text(stringResource(R.string.assistant_page_local_tools_accessibility_title))
                 },
                 supportingContent = {

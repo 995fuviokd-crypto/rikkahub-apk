@@ -441,6 +441,12 @@ internal class McpSessionRegistry(
             client = httpClient,
             requestBuilder = { appendResolvedHeaders(config) },
         )
+
+        is McpServerConfig.CommandServerConfig ->
+            throw UnsupportedOperationException(
+                "本地命令 MCP「${config.commonOptions.name}」需 Operit/Node 运行环境，" +
+                    "RikkaHub 仅支持远程 SSE / Streamable HTTP 传输"
+            )
     }
 
     private fun HttpRequestBuilder.appendResolvedHeaders(config: McpServerConfig) {
@@ -474,6 +480,7 @@ internal fun McpServerConfig.connectionKey(): McpConnectionKey = McpConnectionKe
     transportType = when (this) {
         is McpServerConfig.SseTransportServer -> "sse"
         is McpServerConfig.StreamableHTTPServer -> "streamable_http"
+        is McpServerConfig.CommandServerConfig -> "command"
     },
     serverUrl = serverUrl,
     clientName = commonOptions.name,
