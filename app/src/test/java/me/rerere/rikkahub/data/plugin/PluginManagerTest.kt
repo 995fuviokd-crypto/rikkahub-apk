@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.plugin
 
+import me.rerere.rikkahub.data.ai.mcp.serverUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -219,5 +220,95 @@ class PluginManagerTest {
         ).getOrThrow()
         assertEquals("设置动作", info.extensionPoints.settingsActions[0].label)
         assertEquals("首页动作", info.extensionPoints.homeActions[0].label)
+    }
+
+    @Test
+    fun `autoAdapt generates plugin json for skill markdown`() {
+        val dir = kotlin.io.path.createTempDirectory("adapt-skill").toFile()
+        try {
+            File(dir, "SKILL.md").writeText(
+                "---\nname: 经验笔记\ndescription: 记录排错经验\n---\n\n# 技能正文\n记录并整理经验。"
+            )
+            val info = PluginManager.autoAdapt(dir)
+            assertNotNull(info)
+            info!!
+            assertEquals("skill", info.type)
+            assertEquals("经验笔记", info.name)
+            assertTrue(info.systemPrompt.contains("记录并整理经验"))
+            assertTrue(info.id.startsWith("resource-"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `autoAdapt generates plugin json for character card v3`() {
+        val dir = kotlin.io.path.createTempDirectory("adapt-chara").toFile()
+        try {
+            File(dir, "character.json").writeText(
+                """
+                {
+                  "spec": "chara_card_v3",
+                  "name": "小猫娘",
+                  "description": "可爱的小猫娘",
+                  "data": {
+                    "name": "小猫娘",
+                    "system_prompt": "你是小猫娘喵，用可爱的语气回复。",
+                    "personality": "粘人、活泼",
+                    "first_mes": "主人喵~今天也要陪我玩吗？"
+                  }
+                }
+                """.trimIndent()
+            )
+            val info = PluginManager.autoAdapt(dir)
+            assertNotNull(info)
+            info!!
+            assertEquals("character", info.type)
+            assertEquals("小猫娘", info.name)
+            assertTrue(info.systemPrompt.contains("用可爱的语气回复"))
+            assertTrue(info.systemPrompt.contains("开场白"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `autoAdapt generates plugin json for mcp json`() {
+        val dir = kotlin.io.path.createTempDirectory("adapt-mcp").toFile()
+        try {
+            File(dir, "mcp.json").writeText(
+                """
+                {
+                  "mcpServers": {
+                    "天气": {
+                      "url": "https://weather.example.com/mcp",
+                      "type": "streamable_http"
+                    }
+                  }
+                }
+                """.trimIndent()
+            )
+            val info = PluginManager.autoAdapt(dir)
+            assertNotNull(info)
+            info!!
+            assertEquals("mcp", info.type)
+            assertEquals("MCP: 天气", info.name)
+            val servers = PluginManager.parseMcpServers(File(dir, "mcp.json"))
+            assertEquals(1, servers.size)
+            assertEquals("https://weather.example.com/mcp", servers[0].serverUrl)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `autoAdapt returns null for unrecognized bundle`() {
+        val dir = kotlin.io.path.createTempDirectory("adapt-none").toFile()
+        try {
+            File(dir, "data.txt").writeText("hello")
+            assertEquals(null, PluginManager.autoAdapt(dir))
+        } finally {
+            dir.deleteRecursively()
+        }
     }
 }

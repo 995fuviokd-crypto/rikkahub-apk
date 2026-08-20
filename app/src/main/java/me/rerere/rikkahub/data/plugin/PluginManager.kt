@@ -4,6 +4,13 @@ import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import me.rerere.rikkahub.data.ai.mcp.McpCommonOptions
+import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
+import me.rerere.rikkahub.data.ai.mcp.serverUrl
 import java.io.File
 import java.util.zip.ZipInputStream
 
@@ -136,6 +143,15 @@ class PluginManager(
     /** 从插件 zip 字节中提取 plugin.json（用于上传前校验与生成市场条目） */
     fun parseArchive(bytes: ByteArray): Result<PluginInfo> = Companion.extractPluginInfo(bytes)
 
+    /** 解析插件目录内的 mcp.json，转换为 App 可用的 MCP 服务配置（启用 mcp 类型插件时注册）。递归查找，兼容子目录存放。 */
+    fun mcpServersFromPlugin(pluginId: String): List<McpServerConfig> {
+        val dir = getPluginDir(pluginId)
+        val file = Companion.findFile(dir) {
+            it.equals("mcp.json", ignoreCase = true) || it.equals(".mcp.json", ignoreCase = true)
+        } ?: return emptyList()
+        return runCatching { Companion.parseMcpServers(file) }.getOrDefault(emptyList())
+    }
+
     /** 卸载插件目录 */
     suspend fun uninstall(pluginId: String): Boolean = withContext(Dispatchers.IO) {
         val dir = getPluginDir(pluginId)
@@ -150,7 +166,17 @@ class PluginManager(
             Companion.unzipTo(bytes, staging)
             val infoFile = staging.resolve(METADATA_FILE)
             if (!infoFile.exists()) {
-                return@withContext Result.failure(IllegalArgumentException("插件包缺少 plugin.json"))
+                // 缺少 plugin.json：尝试把角色卡/SKILL 技能/MCP 配置等资源包自动适配为本地插件
+                val adapted = Companion.autoAdapt(staging)
+                if (adapted == null) {
+                    return@withContext Result.failure(
+                        IllegalArgumentException("插件包缺少 plugin.json，且无法自动识别为 skill/MCP/角色卡资源包")
+                    )
+                }
+                infoFile.writeText(PluginJson.toJson(adapted))
+            } else {
+                // 已有 plugin.json：补全缺失的能力提示词，保证第三方/收录包安装后真正生效
+                Companion.ensurePluginJson(staging)
             }
             val info = runCatching { PluginJson.fromJson(infoFile.readText()) }
                 .getOrElse { return@withContext Result.failure(IllegalArgumentException("plugin.json 解析失败")) }
@@ -192,6 +218,210 @@ class PluginManager(
         private const val TAG = "PluginManager"
         const val PLUGIN_DIR_NAME = "plugins"
         const val METADATA_FILE = "plugin.json"
+        private const val MAX_SYSTEM_PROMPT_LEN = 30000
+
+        /**
+         * 补全已有 plugin.json 的插件能力提示词：type=skill / character 但 systemPrompt 为空时，
+         * 从包内递归查找 SKILL.md / 角色卡并写入 systemPrompt，使第三方收录包安装后真正生效。
+         */
+        fun ensurePluginJson(dir: File): Boolean {
+            val infoFile = dir.resolve(METADATA_FILE)
+            if (!infoFile.exists()) return false
+            val info = runCatching { PluginJson.fromJson(infoFile.readText()) }.getOrNull() ?: return false
+            if (info.systemPrompt.isNotBlank()) return false
+            val prompt = when (info.type) {
+                PluginCategories.TYPE_SKILL ->
+                    findFile(dir) { it.equals("SKILL.md", ignoreCase = true) }
+                        ?.readText()?.trim()
+                PluginCategories.TYPE_CHARACTER ->
+                    findFile(dir) {
+                        it.endsWith(".card.json", ignoreCase = true) || it.equals("character.json", ignoreCase = true)
+                    }?.let { parseCharacterJson(it.readText()) }?.systemPrompt
+                else -> null
+            }
+            if (prompt.isNullOrBlank()) return false
+            infoFile.writeText(PluginJson.toJson(info.copy(systemPrompt = prompt.take(MAX_SYSTEM_PROMPT_LEN))))
+            return true
+        }
+
+        /**
+         * 资源包自动适配：对解压目录中缺少 plugin.json 的内容做类型推导，
+         * 生成最小的 RikkaHub 插件元数据，使角色卡/SKILL 技能/MCP 配置安装到本地即可生效。
+         * 识别顺序：角色卡(JSON/PNG) > SKILL.md 技能 > mcp.json。无法识别返回 null。
+         */
+        fun autoAdapt(stagingDir: File): PluginInfo? {
+            // 1. 角色卡：Tavern v3/v2 JSON 或 .card.png（tEXt chara）
+            val cardFile = findFiles(stagingDir) {
+                it.endsWith(".card.json", ignoreCase = true) ||
+                    it.equals("character.json", ignoreCase = true)
+            }.firstOrNull()
+            if (cardFile != null) {
+                runCatching { parseCharacterJson(cardFile.readText()) }
+                    .getOrNull()?.let { return it }
+            }
+            val cardPng = findFiles(stagingDir) { it.endsWith(".card.png", ignoreCase = true) }.firstOrNull()
+            if (cardPng != null) {
+                runCatching { parseCharacterPng(cardPng) }.getOrNull()?.let { return it }
+            }
+            // 2. SKILL.md 技能
+            findFile(stagingDir) { it.equals("SKILL.md", ignoreCase = true) }?.let { skillFile ->
+                runCatching { parseSkillFile(skillFile) }.getOrNull()?.let { return it }
+            }
+            // 3. mcp.json / .mcp.json
+            findFile(stagingDir) { it.equals("mcp.json", ignoreCase = true) || it.equals(".mcp.json", ignoreCase = true) }
+                ?.let { mcpFile ->
+                    val servers = runCatching { parseMcpServers(mcpFile) }.getOrDefault(emptyList())
+                    if (servers.isNotEmpty()) {
+                        val name = servers.first().commonOptions.name.ifBlank { "MCP" }
+                        return PluginInfo(
+                            id = resourceId("mcp-$name"),
+                            name = "MCP: $name",
+                            version = "1.0.0",
+                            description = "MCP 服务 $name（共 ${servers.size} 个），启用后自动注册到 MCP 设置",
+                            category = "mcp",
+                            type = PluginCategories.TYPE_MCP,
+                            tags = listOf(PluginCategories.TYPE_MCP),
+                        )
+                    }
+                }
+            return null
+        }
+
+        private fun parseCharacterJson(text: String): PluginInfo? {
+            val root = Json.parseToJsonElement(text).jsonObject
+            val data = root["data"]?.jsonObject ?: root
+            val name = root["name"]?.jsonPrimitive?.contentOrNull
+                ?: data["name"]?.jsonPrimitive?.contentOrNull
+                ?: return null
+            val description = root["description"]?.jsonPrimitive?.contentOrNull
+                ?: data["description"]?.jsonPrimitive?.contentOrNull
+                ?: "角色卡 $name"
+            val systemPrompt = buildString {
+                data["system_prompt"]?.jsonPrimitive?.contentOrNull?.let { append(it).append("\n\n") }
+                root["description"]?.jsonPrimitive?.contentOrNull?.let { append("角色简介：").append(it).append("\n") }
+                data["personality"]?.jsonPrimitive?.contentOrNull?.let { append("性格：").append(it).append("\n") }
+                data["scenario"]?.jsonPrimitive?.contentOrNull?.let { append("场景：").append(it).append("\n") }
+                data["first_mes"]?.jsonPrimitive?.contentOrNull?.let { append("开场白：").append(it) }
+            }.trim()
+            return PluginInfo(
+                id = resourceId("character-$name"),
+                name = name,
+                version = "1.0.0",
+                description = description,
+                category = "character",
+                type = PluginCategories.TYPE_CHARACTER,
+                systemPrompt = systemPrompt,
+                tags = listOf(PluginCategories.TYPE_CHARACTER),
+            )
+        }
+
+        private fun parseCharacterPng(file: File): PluginInfo? {
+            val bytes = file.readBytes()
+            if (bytes.size < 8 || bytes[0] != 0x89.toByte() || bytes[1] != 0x50.toByte()) return null
+            var pos = 8
+            while (pos + 12 <= bytes.size) {
+                val len = readIntBE(bytes, pos)
+                val type = String(bytes, pos + 4, 4)
+                if (type == "IEND") break
+                if (type == "tEXt" && pos + 8 + len <= bytes.size) {
+                    val chunk = bytes.copyOfRange(pos + 8, pos + 8 + len)
+                    val idx = chunk.indexOf(0)
+                    if (idx > 0) {
+                        val keyword = String(chunk, 0, idx, Charsets.ISO_8859_1)
+                        if (keyword == "chara") {
+                            val json = String(chunk, idx + 1, chunk.size - idx - 1, Charsets.ISO_8859_1)
+                            return parseCharacterJson(json)
+                        }
+                    }
+                }
+                pos += 12 + len
+            }
+            return null
+        }
+
+        private fun parseSkillFile(skillFile: File): PluginInfo? {
+            val content = skillFile.readText().trim()
+            if (content.isBlank()) return null
+            val frontmatter = parseFrontMatter(content)
+            val name = frontmatter["name"]
+                ?: skillFile.parentFile?.name?.ifBlank { null }
+                ?: "Skill"
+            val description = frontmatter["description"] ?: "技能 $name"
+            return PluginInfo(
+                id = resourceId("skill-$name"),
+                name = name,
+                version = "1.0.0",
+                description = description,
+                category = "skill",
+                type = PluginCategories.TYPE_SKILL,
+                systemPrompt = content.take(MAX_SYSTEM_PROMPT_LEN),
+                tags = listOf(PluginCategories.TYPE_SKILL),
+            )
+        }
+
+        private fun parseFrontMatter(content: String): Map<String, String> {
+            if (!content.startsWith("---")) return emptyMap()
+            val end = content.indexOf("\n---", 4)
+            if (end < 0) return emptyMap()
+            return content.substring(3, end).lines()
+                .mapNotNull { line ->
+                    val idx = line.indexOf(':')
+                    if (idx <= 0) null else line.substring(0, idx).trim() to
+                        line.substring(idx + 1).trim().trim('"', '\'')
+                }
+                .toMap()
+        }
+
+        /** 解析 mcp.json / .mcp.json，根为 {"mcpServers": {...}} 或直接为服务名映射 */
+        fun parseMcpServers(file: File): List<McpServerConfig> {
+            val root = Json.parseToJsonElement(file.readText()).jsonObject
+            val servers = root["mcpServers"]?.jsonObject ?: root
+            return servers.mapNotNull { (name, element) ->
+                val obj = element.jsonObject
+                val url = obj["url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val type = obj["type"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["transport"]?.jsonPrimitive?.contentOrNull
+                    ?: "sse"
+                val common = McpCommonOptions(enable = true, name = name)
+                when (type.lowercase()) {
+                    "sse", "http", "http-sse" ->
+                        McpServerConfig.SseTransportServer(commonOptions = common, url = url)
+                    "streamable_http", "streamable-http", "http_streamable" ->
+                        McpServerConfig.StreamableHTTPServer(commonOptions = common, url = url)
+                    else -> null
+                }
+            }
+        }
+
+        /** 稳定的资源 id：ASCII slug + 短哈希，保证目录名安全且不冲突 */
+        private fun resourceId(raw: String): String {
+            val ascii = raw.lowercase().trim()
+                .replace(Regex("[^a-z0-9]+"), "-")
+                .trim('-')
+                .take(40)
+            val suffix = Integer.toHexString(raw.hashCode() and 0xffff)
+            return "resource-${ascii.ifBlank { "res" }}-$suffix"
+        }
+
+        fun findFile(root: File, predicate: (String) -> Boolean): File? {
+            return findFiles(root, predicate).firstOrNull()
+        }
+
+        private fun findFiles(root: File, predicate: (String) -> Boolean): List<File> {
+            if (!root.isDirectory) return emptyList()
+            val result = mutableListOf<File>()
+            root.walkTopDown().forEach { file ->
+                if (file.isFile && predicate(file.name)) result.add(file)
+            }
+            return result
+        }
+
+        private fun readIntBE(bytes: ByteArray, offset: Int): Int {
+            return (bytes[offset].toInt() and 0xff) shl 24 or
+                ((bytes[offset + 1].toInt() and 0xff) shl 16) or
+                ((bytes[offset + 2].toInt() and 0xff) shl 8) or
+                (bytes[offset + 3].toInt() and 0xff)
+        }
 
         /** 从插件 zip 字节中提取 plugin.json。纯 JVM 可测，不依赖 Context。
          *  优先取包根目录的 plugin.json；找不到时退而取任意子目录内的（兼容打包目录嵌套）。 */

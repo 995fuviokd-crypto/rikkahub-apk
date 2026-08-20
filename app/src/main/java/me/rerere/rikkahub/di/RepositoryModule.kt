@@ -116,4 +116,8 @@ val repositoryModule = module {
     single {
         me.rerere.rikkahub.data.api.PluginMarketDataSource(get(), get())
     }
+
+    single {
+        me.rerere.rikkahub.data.api.OperitMarketDataSource.create(get(), get())
+    }
 }

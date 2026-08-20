@@ -111,6 +111,7 @@ val viewModelModule = module {
             pluginManager = get(),
             marketDataSource = get(),
             openAIPluginAdapter = get(),
+            operitDataSource = get(),
         )
     }
     viewModel<WorkflowEditorVM> {

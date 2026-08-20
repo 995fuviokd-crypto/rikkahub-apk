@@ -8,7 +8,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.rerere.rikkahub.data.api.OperitListItem
+import me.rerere.rikkahub.data.api.OperitMarketDataSource
 import me.rerere.rikkahub.data.api.PluginMarketDataSource
+import me.rerere.rikkahub.data.ai.mcp.serverUrl
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.plugin.InstalledPlugin
@@ -24,6 +27,7 @@ class PluginMarketVM(
     private val pluginManager: PluginManager,
     private val marketDataSource: PluginMarketDataSource,
     private val openAIPluginAdapter: OpenAIPluginAdapter,
+    private val operitDataSource: OperitMarketDataSource,
 ) : ViewModel() {
     private val _installed = MutableStateFlow<List<InstalledPlugin>>(emptyList())
     val installed = _installed.asStateFlow()
@@ -99,6 +103,67 @@ class PluginMarketVM(
         }
     }
 
+    // ---- Operit 社区市场 ----
+    private val _operitEntries = MutableStateFlow<List<OperitListItem>>(emptyList())
+    val operitEntries = _operitEntries.asStateFlow()
+
+    private val _operitLoading = MutableStateFlow(false)
+    val operitLoading = _operitLoading.asStateFlow()
+
+    private val _operitError = MutableStateFlow<String?>(null)
+    val operitError = _operitError.asStateFlow()
+
+    private val _operitSort = MutableStateFlow("likes")
+    val operitSort = _operitSort.asStateFlow()
+
+    private val _operitType = MutableStateFlow("all")
+    val operitType = _operitType.asStateFlow()
+
+    private val _operitInstallingId = MutableStateFlow<String?>(null)
+    val operitInstallingId = _operitInstallingId.asStateFlow()
+
+    fun loadOperit() {
+        viewModelScope.launch {
+            _operitLoading.value = true
+            _operitError.value = null
+            operitDataSource.fetchList(_operitType.value, _operitSort.value, 1)
+                .onSuccess { _operitEntries.value = it.items }
+                .onFailure { _operitError.value = "Operit 市场加载失败: ${it.message}" }
+            _operitLoading.value = false
+        }
+    }
+
+    fun setOperitType(type: String) {
+        _operitType.value = type
+        loadOperit()
+    }
+
+    fun setOperitSort(sort: String) {
+        _operitSort.value = sort
+        loadOperit()
+    }
+
+    /** 安装 Operit 条目：GitHub 目录打包为插件 zip，经 autoAdapt 自动适配后本地生效 */
+    fun installOperit(entry: OperitListItem) {
+        if (_operitInstallingId.value != null) return
+        viewModelScope.launch {
+            _operitInstallingId.value = entry.id
+            _notice.value = null
+            operitDataSource.downloadAsPlugin(entry)
+                .onSuccess { bytes ->
+                    pluginManager.installZip(bytes)
+                        .onSuccess { info ->
+                            autoEnablePlugin(info.id)
+                            _notice.value = "已安装并启用 ${info.name}（Operit 社区）"
+                        }
+                        .onFailure { _notice.value = "安装失败: ${it.message}" }
+                }
+                .onFailure { _notice.value = "下载失败: ${it.message}" }
+            _operitInstallingId.value = null
+            refreshInstalled()
+        }
+    }
+
     fun setGithubToken(token: String) {
         _githubToken.value = token.trim()
         viewModelScope.launch {
@@ -116,6 +181,7 @@ class PluginMarketVM(
             }
             _enabledPlugins = enabled
             settingsStore.update { it.copy(enabledPlugins = enabled) }
+            if (pluginId in enabled) registerMcpServersIfNeeded(pluginId)
             refreshInstalled()
         }
     }
@@ -185,6 +251,26 @@ class PluginMarketVM(
             val enabled = settings.enabledPlugins + pluginId
             _enabledPlugins = enabled
             settingsStore.update { it.copy(enabledPlugins = enabled) }
+            registerMcpServersIfNeeded(pluginId)
+        }
+    }
+
+    /** mcp 类型插件启用时，把插件包内 mcp.json 的服务注册到 MCP 设置，使对话中真正可用 */
+    private fun registerMcpServersIfNeeded(pluginId: String) {
+        viewModelScope.launch {
+            val info = pluginManager.loadInfo(pluginId) ?: return@launch
+            if (info.type != "mcp") return@launch
+            val servers = pluginManager.mcpServersFromPlugin(pluginId)
+            if (servers.isEmpty()) return@launch
+            val settings = settingsStore.settingsFlow.first()
+            val existingUrls = settings.mcpServers.map { it.serverUrl }.toSet()
+            val newServers = servers.filter { it.serverUrl !in existingUrls }
+            if (newServers.isNotEmpty()) {
+                settingsStore.update {
+                    it.copy(mcpServers = it.mcpServers + newServers)
+                }
+                _notice.value = "已注册 ${newServers.size} 个 MCP 服务到 MCP 设置"
+            }
         }
     }
 

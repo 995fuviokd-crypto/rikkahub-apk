@@ -86,6 +86,7 @@ object PluginCategories {
     const val TYPE_SKILL = "skill"
     const val TYPE_MCP = "mcp"
     const val TYPE_JSON = "json"
+    const val TYPE_CHARACTER = "character"
 
     /** 资源类型预设（上传时可选） */
     val types = listOf(
@@ -93,6 +94,7 @@ object PluginCategories {
         TYPE_SKILL,
         TYPE_MCP,
         TYPE_JSON,
+        TYPE_CHARACTER,
         "other",
     )
 
@@ -102,6 +104,7 @@ object PluginCategories {
         TYPE_SKILL -> "技能"
         TYPE_MCP -> "MCP"
         TYPE_JSON -> "JSON 配置"
+        TYPE_CHARACTER -> "角色卡"
         else -> type.ifBlank { "其他" }
     }
 
@@ -112,6 +115,7 @@ object PluginCategories {
         TYPE_SKILL,
         TYPE_MCP,
         TYPE_JSON,
+        TYPE_CHARACTER,
         "development",
         "productivity",
         "creative",
@@ -127,5 +131,7 @@ object PluginCategories {
         TYPE_PLUGIN,
         TYPE_SKILL,
         TYPE_MCP,
+        TYPE_CHARACTER,
+        TYPE_JSON,
     )
 }
