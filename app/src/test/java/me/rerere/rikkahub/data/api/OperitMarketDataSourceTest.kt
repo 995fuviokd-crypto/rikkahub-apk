@@ -114,6 +114,25 @@ class OperitMarketDataSourceTest {
         assertEquals("legacy-author", asString.displayAuthor)
     }
 
+    @Test
+    fun `item publisher accepts object without crashing`() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        // 真实 Operit 响应：author / publisher 均为对象 {id, login, avatar}
+        val real = json.decodeFromString<OperitListItem>(
+            """{"id":"x","title":"t","source":{"kind":"script","url":"https://example.com/a"},
+                "author":{"id":"gh_88519250","login":"yanjun62","avatar":"https://avatars.example/u/88519250?v=4"},
+                "publisher":{"id":"gh_88519250","login":"yanjun62","avatar":"https://avatars.example/u/88519250?v=4"}}"""
+        )
+        assertEquals("yanjun62", real.displayAuthor)
+
+        // author 为空对象、publisher 提供名字时回退到 publisher
+        val viaPublisher = json.decodeFromString<OperitListItem>(
+            """{"id":"x","title":"t","source":{"kind":"script","url":"https://example.com/a"},
+                "author":{},"publisher":{"id":"gh_1","login":"publisherLogin"}}"""
+        )
+        assertEquals("publisherLogin", viaPublisher.displayAuthor)
+    }
+
     // ---- helpers ----
 
     private fun tarGz(

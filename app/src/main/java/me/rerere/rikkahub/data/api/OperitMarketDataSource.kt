@@ -47,21 +47,24 @@ data class OperitListItem(
     @SerialName("source") val source: OperitSource = OperitSource(),
     @SerialName("latestVersion") val latestVersion: OperitVersion = OperitVersion(),
     val author: JsonElement? = null,
-    val publisher: String = "",
+    val publisher: JsonElement? = null,
 ) {
     val displayAuthor: String
         get() = source.repoOwner.ifBlank {
-            when (val a = author) {
-                is JsonPrimitive -> a.content
-                is JsonObject -> listOf("login", "name", "id")
-                    .mapNotNull { (a[it] as? JsonPrimitive)?.contentOrNull }
-                    .firstOrNull()
-                    .orEmpty()
-                else -> ""
-            }.ifBlank { publisher }
+            author.toAuthorName().ifBlank { publisher.toAuthorName() }
         }
 
     val sourceKind: String get() = source.kind
+}
+
+/** author / publisher 字段在 Operit 不同版本中可能是字符串或对象（{id, login, avatar}），统一安全提取 */
+private fun JsonElement?.toAuthorName(): String = when (this) {
+    is JsonPrimitive -> content
+    is JsonObject -> listOf("login", "name", "id")
+        .mapNotNull { (this[it] as? JsonPrimitive)?.contentOrNull }
+        .firstOrNull()
+        .orEmpty()
+    else -> ""
 }
 
 @Serializable
