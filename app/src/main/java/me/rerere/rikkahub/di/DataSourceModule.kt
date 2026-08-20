@@ -14,6 +14,7 @@ import kotlinx.serialization.json.Json
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.common.http.AcceptLanguageBuilder
 import me.rerere.rikkahub.BuildConfig
+import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.AIRequestInterceptor
 import me.rerere.rikkahub.data.ai.RequestLoggingInterceptor
 import me.rerere.rikkahub.data.ai.transformers.AssistantTemplateLoader
@@ -56,7 +57,7 @@ import java.util.concurrent.TimeUnit
 
 val dataSourceModule = module {
     single {
-        McpManager(settingsStore = get(), appScope = get(), filesManager = get(), appEventBus = get())
+        SettingsStore(context = get(), scope = get())
     }
 
     single {

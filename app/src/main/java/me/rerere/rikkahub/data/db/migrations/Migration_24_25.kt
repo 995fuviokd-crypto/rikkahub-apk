@@ -21,7 +21,7 @@ val Migration_24_25 = object : Migration(24, 25) {
         db.execSQL("ALTER TABLE memoryentity ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0")
         db.execSQL(
             """
-            CREATE TABLE IF NOT EXISTS `memoryjournalentity` (
+            CREATE TABLE IF NOT EXISTS `MemoryJournalEntity` (
                 `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                 `assistant_id` TEXT NOT NULL,
                 `conversation_id` TEXT NOT NULL,

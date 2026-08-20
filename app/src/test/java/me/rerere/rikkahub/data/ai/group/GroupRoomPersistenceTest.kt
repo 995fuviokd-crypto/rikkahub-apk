@@ -38,7 +38,7 @@ private class RoomTestCaller : GroupMemberCaller {
 }
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(sdk = [34], application = android.app.Application::class)
 class GroupRoomPersistenceTest {
     private lateinit var db: AppDatabase
     private lateinit var dao: GroupDAO
