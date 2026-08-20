@@ -666,9 +666,9 @@ private fun OperitEntryCard(
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (entry.sourceKind == "github_repo" && entry.source.repoName.isNotBlank()) {
+            if (entry.sourceKind == "github_repo" && entry.source?.repoName.isNullOrBlank().not()) {
                 Text(
-                    text = "来源: ${entry.source.repoOwner}/${entry.source.repoName}",
+                    text = "来源: ${entry.source?.repoOwner.orEmpty()}/${entry.source?.repoName.orEmpty()}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

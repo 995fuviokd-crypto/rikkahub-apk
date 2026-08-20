@@ -101,7 +101,7 @@ class OperitMarketDataSourceTest {
 
     @Test
     fun `item author accepts object and string forms`() {
-        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; explicitNulls = false }
         val asObject = json.decodeFromString<OperitListItem>(
             """{"id":"x","title":"t","source":{"kind":"script","url":"https://example.com/a"},
                 "author":{"id":"gh_88519250","login":"youssef"},"publisher":"pub"}"""
@@ -116,7 +116,7 @@ class OperitMarketDataSourceTest {
 
     @Test
     fun `item publisher accepts object without crashing`() {
-        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; explicitNulls = false }
         // 真实 Operit 响应：author / publisher 均为对象 {id, login, avatar}
         val real = json.decodeFromString<OperitListItem>(
             """{"id":"x","title":"t","source":{"kind":"script","url":"https://example.com/a"},
@@ -131,6 +131,116 @@ class OperitMarketDataSourceTest {
                 "author":{},"publisher":{"id":"gh_1","login":"publisherLogin"}}"""
         )
         assertEquals("publisherLogin", viaPublisher.displayAuthor)
+    }
+
+    // ---- 全类型适配：来源解析与资产处理 ----
+
+    @Test
+    fun `resolveOperitHandle prefers github_repo source over assets`() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; explicitNulls = false }
+        val skill = json.decodeFromString<OperitListItem>(
+            """{"id":"skill-https-github-com-luck-104n-operit-pack-tree-main-skills-x",
+                "title":"t","source":{"kind":"github_repo","url":"https://github.com/Luck-104n/operit-pack/tree/main/skills/x"},
+                "latestVersion":{"source":null}}"""
+        )
+        val handle = resolveOperitHandle(skill)
+        assertTrue(handle is OperitSourceHandle.GitHubDir)
+        val dir = handle as OperitSourceHandle.GitHubDir
+        assertEquals("Luck-104n", dir.source.owner)
+        assertEquals("operit-pack", dir.source.repo)
+        assertEquals("skills/x", dir.source.path)
+    }
+
+    @Test
+    fun `resolveOperitHandle falls back to release asset for package and script`() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; explicitNulls = false }
+        val pkg = json.decodeFromString<OperitListItem>(
+            """{"id":"package-com-operit-gentle-guardian-0-6-0","title":"t","source":null,
+                "assets":[{"id":"a1","kind":"github_release_asset",
+                    "url":"https://github.com/y/OperitForge/releases/download/x/y.toolpkg","assetName":"y.toolpkg"}]}"""
+        )
+        val handle = resolveOperitHandle(pkg)
+        assertTrue(handle is OperitSourceHandle.ReleaseAsset)
+        val asset = handle as OperitSourceHandle.ReleaseAsset
+        assertEquals("y.toolpkg", asset.assetName)
+        assertTrue(asset.url.contains("y.toolpkg"))
+    }
+
+    @Test
+    fun `resolveOperitHandle derives github source from id when source missing`() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; explicitNulls = false }
+        val item = json.decodeFromString<OperitListItem>(
+            """{"id":"skill-https-github-com-leilaomi-operit-coding-skills","title":"t","source":null,"assets":[]}"""
+        )
+        val handle = resolveOperitHandle(item)
+        assertTrue(handle is OperitSourceHandle.GitHubDir)
+        val dir = handle as OperitSourceHandle.GitHubDir
+        assertEquals("leilaomi", dir.source.owner)
+        assertEquals("operit-coding-skills", dir.source.repo)
+    }
+
+    @Test
+    fun `resolveOperitHandle fails when no source and no assets`() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; explicitNulls = false }
+        val item = json.decodeFromString<OperitListItem>("""{"id":"script-x","title":"t","source":null,"assets":[]}""")
+        try {
+            resolveOperitHandle(item)
+            assertTrue("应当抛出异常", false)
+        } catch (e: IllegalStateException) {
+            assertTrue(e.message.orEmpty().contains("内容来源"))
+        }
+    }
+
+    @Test
+    fun `operit assets field deserializes release urls`() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; explicitNulls = false }
+        val item = json.decodeFromString<OperitListItem>(
+            """{"id":"script-chat-permission-filter","title":"t","source":null,
+                "assets":[{"id":"a","versionId":"v","kind":"github_release_asset",
+                    "url":"https://github.com/w/OperitForge/releases/download/x/chat.js","sha256":"abc","assetName":"chat.js"}]}"""
+        )
+        assertEquals(1, item.assets.size)
+        assertEquals("github_release_asset", item.assets[0].kind)
+        assertEquals("chat.js", item.assets[0].assetName)
+    }
+
+    @Test
+    fun `detectOperitAssetFormat identifies zip gzip and text`() {
+        assertEquals(OperitAssetFormat.ZIP, detectOperitAssetFormat(byteArrayOf('P'.code.toByte(), 'K'.code.toByte(), 3, 4)))
+        assertEquals(OperitAssetFormat.GZIP, detectOperitAssetFormat(byteArrayOf(0x1f.toByte(), 0x8b.toByte(), 8, 0)))
+        assertEquals(OperitAssetFormat.TEXT, detectOperitAssetFormat("/* METADATA */".toByteArray()))
+    }
+
+    @Test
+    fun `parseOperitScriptMetadata extracts name and localized display`() {
+        val script = """
+            /*
+            METADATA
+            {
+              "name": "chat_permission_filter",
+              "display_name": {"zh": "增强对话", "en": "Enhanced Chat"},
+              "description": {"zh": "按角色卡隔离", "en": "Isolated"}
+            }
+            */
+            function run() {}
+        """.trimIndent().toByteArray()
+        val meta = parseOperitScriptMetadata(script)
+        assertEquals("chat_permission_filter", meta["name"])
+        assertTrue(meta["display_name"].orEmpty().contains("增强对话"))
+        assertTrue(meta["description"].orEmpty().contains("按角色卡隔离"))
+    }
+
+    @Test
+    fun `parseOperitScriptMetadata tolerates non-json body`() {
+        assertEquals(emptyMap<String, String>(), parseOperitScriptMetadata("function run() {}".toByteArray()))
+    }
+
+    @Test
+    fun `operitPluginIdFor produces safe stable id`() {
+        val id = operitPluginIdFor("package-com-operit-gentle-guardian-artifact-0-6-0")
+        assertTrue(id.startsWith("operit-"))
+        assertEquals(id, operitPluginIdFor("package-com-operit-gentle-guardian-artifact-0-6-0"))
+        assertTrue(id.all { it.isLetterOrDigit() || it == '-' })
     }
 
     // ---- helpers ----

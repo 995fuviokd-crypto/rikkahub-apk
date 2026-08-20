@@ -10,7 +10,10 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import me.rerere.rikkahub.data.plugin.PluginCategories
+import me.rerere.rikkahub.data.plugin.PluginInfo
 import me.rerere.rikkahub.data.plugin.PluginJson
 import me.rerere.rikkahub.data.plugin.PluginManager
 import okhttp3.MediaType.Companion.toMediaType
@@ -44,18 +47,30 @@ data class OperitListItem(
     val detail: String = "",
     @SerialName("categoryId") val categoryId: String = "",
     @SerialName("stateCode") val stateCode: String = "",
-    @SerialName("source") val source: OperitSource = OperitSource(),
+    @SerialName("source") val source: OperitSource? = null,
     @SerialName("latestVersion") val latestVersion: OperitVersion = OperitVersion(),
+    @SerialName("assets") val assets: List<OperitAsset> = emptyList(),
     val author: JsonElement? = null,
     val publisher: JsonElement? = null,
 ) {
     val displayAuthor: String
-        get() = source.repoOwner.ifBlank {
+        get() = source?.repoOwner.orEmpty().ifBlank {
             author.toAuthorName().ifBlank { publisher.toAuthorName() }
         }
 
-    val sourceKind: String get() = source.kind
+    val sourceKind: String get() = source?.kind.orEmpty()
 }
+
+/** release 资产：script/package 类型无 GitHub 目录来源，改由该下载地址获取 */
+@Serializable
+data class OperitAsset(
+    val id: String = "",
+    @SerialName("versionId") val versionId: String = "",
+    val kind: String = "",
+    val url: String = "",
+    val sha256: String = "",
+    @SerialName("assetName") val assetName: String = "",
+)
 
 /** author / publisher 字段在 Operit 不同版本中可能是字符串或对象（{id, login, avatar}），统一安全提取 */
 private fun JsonElement?.toAuthorName(): String = when (this) {
@@ -85,7 +100,7 @@ data class OperitVersion(
     val version: String = "",
     @SerialName("formatVer") val formatVer: String = "",
     @SerialName("minAppVer") val minAppVer: String = "",
-    @SerialName("source") val source: OperitSource = OperitSource(),
+    @SerialName("source") val source: OperitSource? = null,
 )
 
 @Serializable
@@ -116,8 +131,12 @@ interface OperitMarketApi {
                 .baseUrl("https://static.operit.app/")
                 .client(httpClient)
                 .addConverterFactory(
-                    Json { ignoreUnknownKeys = true }
-                        .asConverterFactory("application/json; charset=UTF8".toMediaType())
+                    Json {
+                        ignoreUnknownKeys = true
+                        // Operit 各端点大量字段显式为 null（source/assets 等），按缺失处理走默认值
+                        explicitNulls = false
+                        coerceInputValues = true
+                    }.asConverterFactory("application/json; charset=UTF8".toMediaType())
                 )
                 .build()
                 .create(OperitMarketApi::class.java)
@@ -147,64 +166,198 @@ class OperitMarketDataSource(
     }
 
     /**
-     * 将 Operit 条目对应的 GitHub 目录下载并打包为 RikkaHub 插件 zip。
-     * 步骤：解析 source.url → codeload 拉 tarball → tar.gz 解压 → 裁剪到目标子目录 →
-     * 补全 plugin.json（autoAdapt / ensurePluginJson）→ 打包 zip。
+     * 将 Operit 条目下载并打包为 RikkaHub 插件 zip。按条目来源分流：
+     * - skill / mcp：source 的 github_repo 目录 → codeload tarball → 解压 → 自动适配。
+     * - script / package：source 为空，走 assets[].github_release_asset 直接下载
+     *   （.js 脚本 / .toolpkg 运行包），解包识别后生成可安装插件。
+     * 所有路径最终产出含有效 plugin.json 的 zip，避免「plugin.json 解析失败」。
      */
     suspend fun downloadAsPlugin(entry: OperitListItem): Result<ByteArray> = withContext(Dispatchers.IO) {
         runCatching {
-            val src = entry.latestVersion.source.takeIf { it.kind == "github_repo" }
-                ?: entry.source.takeIf { it.kind == "github_repo" }
-                ?: error("该条目不是 GitHub 仓库来源，无法安装")
-            val parsed = parseGitHubUrl(src.url) ?: error("无法解析 GitHub 链接：${src.url}")
-            val tarball = downloadBytes(
-                "https://codeload.github.com/${parsed.owner}/${parsed.repo}/tar.gz/${parsed.ref}"
-            )
-            val tempRoot = File(context.cacheDir, "operit-${System.nanoTime()}").apply { mkdirs() }
-            try {
-                extractTarGz(tarball, tempRoot)
-                val repoRoot = locateRoot(tempRoot, parsed.repo)
-                val sourceDir = if (parsed.path.isNullOrBlank()) {
-                    repoRoot
-                } else {
-                    repoRoot.resolve(parsed.path).takeIf { it.isDirectory }
-                        ?: error("仓库中不存在目录：${parsed.path}")
-                }
-                if (!hasAnyResource(sourceDir)) {
-                    error("该目录下未找到 skill / mcp / 角色卡 / plugin.json 资源")
-                }
-                if (!ensureAdapted(sourceDir)) {
-                    error("资源包无法自动适配为 RikkaHub 插件")
-                }
-                zipDirectory(sourceDir)
-            } finally {
-                tempRoot.deleteRecursively()
+            when (val handle = resolveOperitHandle(entry)) {
+                is OperitSourceHandle.GitHubDir -> downloadGitHubDir(entry, handle.source)
+                is OperitSourceHandle.ReleaseAsset -> downloadReleaseAsset(entry, handle)
             }
         }
     }
 
-    private fun hasAnyResource(dir: File): Boolean {
-        if (dir.resolve("plugin.json").isFile) return true
-        val found = PluginManager.findFile(dir) {
-            it.equals("SKILL.md", ignoreCase = true) ||
-                it.equals("mcp.json", ignoreCase = true) ||
-                it.equals(".mcp.json", ignoreCase = true) ||
-                it.endsWith(".card.json", ignoreCase = true) ||
-                it.equals("character.json", ignoreCase = true)
+    private suspend fun downloadGitHubDir(entry: OperitListItem, parsed: GitHubSource): ByteArray {
+        val tarball = downloadBytes(
+            "https://codeload.github.com/${parsed.owner}/${parsed.repo}/tar.gz/${parsed.ref}"
+        )
+        val tempRoot = File(context.cacheDir, "operit-${System.nanoTime()}").apply { mkdirs() }
+        return try {
+            extractTarGz(tarball, tempRoot)
+            val repoRoot = locateRoot(tempRoot, parsed.repo)
+            val sourceDir = if (parsed.path.isNullOrBlank()) {
+                repoRoot
+            } else {
+                repoRoot.resolve(parsed.path).takeIf { it.isDirectory }
+                    ?: error("仓库中不存在目录：${parsed.path}")
+            }
+            ensureAdapted(sourceDir, entry)
+            zipDirectory(sourceDir)
+        } finally {
+            tempRoot.deleteRecursively()
         }
-        return found != null
     }
 
-    /** 有 plugin.json 则补全 systemPrompt，否则走 autoAdapt 生成 */
-    private fun ensureAdapted(dir: File): Boolean {
+    /** release 资产通道：script（单 JS）/ package（.toolpkg zip）下载后转成可安装插件 */
+    private suspend fun downloadReleaseAsset(entry: OperitListItem, handle: OperitSourceHandle.ReleaseAsset): ByteArray {
+        val bytes = downloadBytes(handle.url)
+        val tempRoot = File(context.cacheDir, "operit-${System.nanoTime()}").apply { mkdirs() }
+        return try {
+            val outDir = tempRoot.resolve("plugin")
+            when (detectOperitAssetFormat(bytes)) {
+                OperitAssetFormat.ZIP -> buildToolpkgPlugin(outDir, entry, bytes, handle)
+                OperitAssetFormat.GZIP -> buildGzipPlugin(outDir, entry, bytes, handle)
+                OperitAssetFormat.TEXT -> buildScriptPlugin(outDir, entry, bytes, handle)
+            }
+            zipDirectory(outDir)
+        } finally {
+            tempRoot.deleteRecursively()
+        }
+    }
+
+    /** 解析 Operit 脚本头部 /* METADATA {…} */ 的 JSON 字段 */
+    private fun buildToolpkgPlugin(
+        outDir: File,
+        entry: OperitListItem,
+        bytes: ByteArray,
+        handle: OperitSourceHandle.ReleaseAsset,
+    ) {
+        outDir.mkdirs()
+        val rawDir = outDir.resolve("toolpkg").apply { mkdirs() }
+        PluginManager.unzipTo(bytes, rawDir)
+        val manifestFile = PluginManager.findFile(rawDir) { it.equals("manifest.json", ignoreCase = true) }
+        val manifest = manifestFile
+            ?.readText()
+            ?.let { runCatching { Json.parseToJsonElement(it).jsonObject }.getOrNull() }
+        val pkgName = manifest?.get("name")?.jsonPrimitive?.contentOrNull
+            ?.takeIf { it.isNotBlank() }
+            ?: entry.title.ifBlank { entry.id.substringAfter("package-") }
+        val desc = manifest?.get("description")?.jsonPrimitive?.contentOrNull
+            ?.ifBlank { entry.description }
+            ?: entry.description
+        val systemPrompt = buildString {
+            append("这是来自 Operit 市场的 ToolPkg 工具包「$pkgName」。")
+            if (desc.isNotBlank()) append("简介：$desc\n")
+            append("原始包内容已保存在插件目录 toolpkg/ 下（manifest.json、main.js 等），")
+            append("该工具包的运行依赖 Operit 运行时，RikkaHub 无法直接执行其中的 JS 逻辑；")
+            append("你可读取插件目录下的文件内容，理解其能力定义后按需参考。")
+        }
+        writePluginInfo(
+            outDir, entry, pkgName, "1.0.0", desc, systemPrompt,
+            tags = listOf("operit", "toolpkg"),
+        )
+    }
+
+    /** script（单 JS 文件）：解析头部 METADATA，生成说明型插件并保留脚本内容 */
+    private fun buildScriptPlugin(
+        outDir: File,
+        entry: OperitListItem,
+        bytes: ByteArray,
+        handle: OperitSourceHandle.ReleaseAsset,
+    ) {
+        outDir.mkdirs()
+        val scriptName = handle.assetName.ifBlank { entry.id.substringAfter("script-").ifBlank { "script.js" } }
+        outDir.resolve(scriptName).writeBytes(bytes)
+        val metadata = parseOperitScriptMetadata(bytes)
+        val displayName = metadata["display_name"]?.let { raw ->
+            runCatching { Json.parseToJsonElement(raw).jsonObject }
+                .getOrNull()
+                ?.let { (it["zh"] ?: it["en"])?.jsonPrimitive?.contentOrNull }
+        } ?: metadata["name"]
+        val name = displayName?.takeIf { it.isNotBlank() }
+            ?: entry.title.ifBlank { scriptName.substringBeforeLast('.') }
+        val desc = metadata["description"]?.let { raw ->
+            runCatching { Json.parseToJsonElement(raw).jsonObject }
+                .getOrNull()
+                ?.let { (it["zh"] ?: it["en"])?.jsonPrimitive?.contentOrNull }
+        } ?: entry.description
+        val systemPrompt = buildString {
+            append("这是来自 Operit 市场的脚本「$name」。")
+            if (desc.isNotBlank()) append("简介：$desc\n")
+            append("脚本内容已保存在插件目录 $scriptName 中，该脚本依赖 Operit 运行时执行，")
+            append("RikkaHub 无法直接运行；你可读取脚本文件了解其实现的工具能力，按需参考。")
+        }
+        writePluginInfo(
+            outDir, entry, name, "1.0.0",
+            desc.ifBlank { "来自 Operit 市场的脚本（$scriptName）" },
+            systemPrompt,
+            tags = listOf("operit", "script"),
+        )
+    }
+
+    /** gzip 资产：可能是 tar.gz（继续 tar 解压）或 gzip 单文件，剥壳后按 zip/文本再处理 */
+    private fun buildGzipPlugin(
+        outDir: File,
+        entry: OperitListItem,
+        bytes: ByteArray,
+        handle: OperitSourceHandle.ReleaseAsset,
+    ) {
+        val decompressed = try {
+            GZIPInputStream(ByteArrayInputStream(bytes)).use { it.readBytes() }
+        } catch (_: Exception) {
+            error("无法解压 gzip 资产：${handle.assetName}")
+        }
+        when (detectOperitAssetFormat(decompressed)) {
+            OperitAssetFormat.ZIP -> buildToolpkgPlugin(outDir, entry, decompressed, handle)
+            OperitAssetFormat.GZIP -> error("资产格式异常：${handle.assetName}")
+            OperitAssetFormat.TEXT -> buildScriptPlugin(outDir, entry, decompressed, handle)
+        }
+    }
+
+    /** 有 plugin.json 则补全 systemPrompt，否则走 autoAdapt；都无法识别时生成说明型插件兜底 */
+    private fun ensureAdapted(dir: File, entry: OperitListItem) {
         val infoFile = dir.resolve("plugin.json")
         if (infoFile.exists()) {
             PluginManager.ensurePluginJson(dir)
-            return true
+            return
         }
-        val adapted = PluginManager.autoAdapt(dir) ?: return false
-        infoFile.writeText(PluginJson.toJson(adapted))
-        return true
+        PluginManager.autoAdapt(dir)?.let { adapted ->
+            infoFile.writeText(PluginJson.toJson(adapted))
+            return
+        }
+        // 兜底：仓库目录无任何可识别资源（如普通 MCP 源码仓库），保留内容并生成说明型插件
+        val name = entry.title.ifBlank { entry.id }
+        val desc = entry.description.ifBlank { "来自 Operit 市场的资源（${typeLabel(entry.type)}）" }
+        val fileList = dir.walkTopDown().filter { it.isFile }
+            .map { it.relativeTo(dir).path }.toList()
+        val systemPrompt = buildString {
+            append("这是来自 Operit 市场的资源「$name」（${typeLabel(entry.type)}）。")
+            if (desc.isNotBlank()) append("简介：$desc\n")
+            append("未识别到 SKILL.md / mcp.json / 角色卡 等可注入内容，目录内容已原样保留，共 ")
+            append(fileList.size).append(" 个文件，可按需读取参考。")
+        }
+        writePluginInfo(dir, entry, name, "1.0.0", desc, systemPrompt, tags = listOf("operit"))
+    }
+
+    /** 写 plugin.json + systemPrompt 文件，保证 zip 可被 RikkaHub 正常解析安装 */
+    private fun writePluginInfo(
+        dir: File,
+        entry: OperitListItem,
+        name: String,
+        version: String,
+        description: String,
+        systemPrompt: String,
+        tags: List<String>,
+    ) {
+        dir.mkdirs()
+        val info = PluginInfo(
+            id = operitPluginIdFor(entry.id.ifBlank { name }),
+            name = name,
+            version = version,
+            description = description,
+            author = entry.displayAuthor,
+            repository = entry.source?.url.orEmpty(),
+            category = "general",
+            systemPrompt = systemPrompt,
+            type = PluginCategories.TYPE_SKILL,
+            tags = (listOf("operit") + tags).distinct(),
+        )
+        dir.resolve("plugin.json").writeText(PluginJson.toJson(info))
+        dir.resolve("systemPrompt.md").writeText(systemPrompt)
     }
 
     private suspend fun downloadBytes(url: String): ByteArray {
@@ -396,3 +549,88 @@ data class GitHubSource(
     val ref: String,
     val path: String?,
 )
+
+/** Operit 条目内容来源：GitHub 目录（skill/mcp）或 release 资产（script/package） */
+sealed class OperitSourceHandle {
+    data class GitHubDir(val source: GitHubSource) : OperitSourceHandle()
+    data class ReleaseAsset(val url: String, val assetName: String) : OperitSourceHandle()
+}
+
+/**
+ * 解析 Operit 条目内容来源，优先级：latestVersion.source > entry.source > id 内嵌 GitHub 链接
+ * > assets[].github_release_asset。skill/mcp 条目在列表接口带 source，而 script/package
+ * 条目的 source 为 null，仅能通过 release 资产下载。
+ */
+internal fun resolveOperitHandle(entry: OperitListItem): OperitSourceHandle {
+    val repoSource = listOf(entry.latestVersion.source, entry.source)
+        .firstOrNull { it != null && it.kind == "github_repo" && it.url.isNotBlank() }
+    if (repoSource != null) {
+        val parsed = OperitMarketDataSource.parseGitHubUrl(repoSource.url)
+            ?: error("无法解析 GitHub 链接：${repoSource.url}")
+        return OperitSourceHandle.GitHubDir(parsed)
+    }
+    // 兜底：列表接口个别端点不带 source，但 id 内嵌了来源链接（如 skill-https-github-com-owner-repo-...）
+    parseGitHubUrlFromId(entry.id)?.let { return OperitSourceHandle.GitHubDir(it) }
+    // script/package：从 release 资产下载
+    val asset = entry.assets.firstOrNull { it.kind == "github_release_asset" && it.url.isNotBlank() }
+        ?: entry.assets.firstOrNull { it.url.isNotBlank() }
+        ?: error("该条目未提供内容来源，无法安装")
+    return OperitSourceHandle.ReleaseAsset(asset.url, asset.assetName)
+}
+
+internal enum class OperitAssetFormat { ZIP, GZIP, TEXT }
+
+/** 资产字节格式检测：PK 魔数 → zip（toolpkg），gzip 魔数 → 压缩包，其余按文本（script） */
+internal fun detectOperitAssetFormat(bytes: ByteArray): OperitAssetFormat = when {
+    bytes.size >= 4 && bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte() -> OperitAssetFormat.ZIP
+    bytes.size >= 2 && bytes[0] == 0x1f.toByte() && bytes[1] == 0x8b.toByte() -> OperitAssetFormat.GZIP
+    else -> OperitAssetFormat.TEXT
+}
+
+/** 解析 Operit 脚本头部 /* METADATA {…} */ 的 JSON 字段，字符串值去引号、对象值保留原文 */
+internal fun parseOperitScriptMetadata(bytes: ByteArray): Map<String, String> {
+    val head = String(bytes, 0, minOf(bytes.size, 8192), Charsets.UTF_8)
+    val start = head.indexOf("METADATA")
+    if (start < 0) return emptyMap()
+    val brace = head.indexOf('{', start)
+    if (brace < 0) return emptyMap()
+    var depth = 0
+    var end = -1
+    for (i in brace until head.length) {
+        when (head[i]) {
+            '{' -> depth++
+            '}' -> {
+                depth--
+                if (depth == 0) { end = i + 1; break }
+            }
+        }
+    }
+    if (end < 0) return emptyMap()
+    return runCatching {
+        val obj = Json.parseToJsonElement(head.substring(brace, end)).jsonObject
+        obj.entries.associate { (k, v) ->
+            k to ((v as? JsonPrimitive)?.contentOrNull ?: v.toString())
+        }
+    }.getOrDefault(emptyMap())
+}
+
+/** 从条目 id 内嵌的 slug 化链接还原 owner/repo（如 skill-https-github-com-owner-repo-...）。
+ *  owner 取首个不含连字符的段，repo 取其余（含连字符），子路径因分隔符被替换无法还原。
+ *  仅作列表接口缺 source 时的兜底。 */
+internal fun parseGitHubUrlFromId(id: String): GitHubSource? {
+    val match = Regex("https-github-com-([a-z0-9_.]+)-([a-z0-9_.-]+)").find(id) ?: return null
+    val owner = match.groupValues[1]
+    val repo = match.groupValues[2]
+    if (owner.isBlank() || repo.isBlank()) return null
+    return GitHubSource(owner, repo, "main", null)
+}
+
+/** 稳定插件 id：ascii slug + 短哈希，保证目录名安全且不冲突 */
+internal fun operitPluginIdFor(raw: String): String {
+    val ascii = raw.lowercase().trim()
+        .replace(Regex("[^a-z0-9]+"), "-")
+        .trim('-')
+        .take(40)
+    val suffix = Integer.toHexString(raw.hashCode() and 0xffff)
+    return "operit-${ascii.ifBlank { "res" }}-$suffix"
+}
