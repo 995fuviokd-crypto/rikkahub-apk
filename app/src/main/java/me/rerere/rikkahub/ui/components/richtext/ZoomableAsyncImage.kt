@@ -16,11 +16,31 @@ import coil3.request.ImageRequest
 import coil3.request.allowHardware
 import coil3.request.crossfade
 import coil3.request.placeholder
+import java.net.URLDecoder
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
 import me.rerere.rikkahub.ui.components.ui.LocalExportContext
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
+
+// 把内嵌的 SVG data URI（base64 或 urlencoded 形式）解码成字节数组，
+// 让 Coil 的 SvgDecoder 直接渲染 AI 输出的矢量图。
+private fun decodeSvgDataUri(url: String?): ByteArray? {
+    if (url == null || !url.startsWith("data:image/svg+xml")) {
+        return null
+    }
+    return when {
+        url.contains(";base64,") -> {
+            val b64 = url.substringAfter("base64,")
+            android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+        }
+
+        else -> {
+            val raw = url.substringAfter(",")
+            URLDecoder.decode(raw, "UTF-8").toByteArray(Charsets.UTF_8)
+        }
+    }
+}
 
 @Composable
 fun ZoomableAsyncImage(
@@ -35,8 +55,9 @@ fun ZoomableAsyncImage(
     val context = LocalContext.current
     val placeholder = if(LocalDarkMode.current) R.drawable.placeholder_dark else R.drawable.placeholder
     val export = LocalExportContext.current
+    val svgBytes = remember(model) { decodeSvgDataUri(model) }
     val coilModel = ImageRequest.Builder(context)
-        .data(model)
+        .data(svgBytes ?: model)
         .placeholder(placeholder)
         .crossfade(false)
         .allowHardware(!export)

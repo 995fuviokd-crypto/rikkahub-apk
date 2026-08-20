@@ -178,7 +178,7 @@ class FilesManager(
                 parts = message.parts.map { part ->
                     when (part) {
                         is UIMessagePart.Image -> {
-                            if (part.url.startsWith("data:image")) {
+                            if (part.url.startsWith("data:image") && !part.url.startsWith("data:image/svg")) {
                                 val sourceByteArray = Base64.decode(part.url.substringAfter("base64,").toByteArray())
                                 val bitmap = BitmapFactory.decodeByteArray(sourceByteArray, 0, sourceByteArray.size)
                                 val byteArray = FileUtils.compressBitmapToPng(bitmap)

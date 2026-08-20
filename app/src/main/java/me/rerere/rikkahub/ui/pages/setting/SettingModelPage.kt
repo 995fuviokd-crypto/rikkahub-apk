@@ -142,6 +142,26 @@ private fun ModelSettingsPage(settings: Settings, vm: SettingVM, contentPadding:
         }
         item {
             ModelSettingItem(
+                title = stringResource(R.string.setting_model_page_image_model),
+                description = stringResource(R.string.setting_model_page_image_model_desc),
+                modelId = settings.imageGenerationModelId,
+                providers = settings.providers,
+                type = ModelType.IMAGE,
+                onSelect = { vm.updateSettings(settings.copy(imageGenerationModelId = it.id)) },
+            )
+        }
+        item {
+            ModelSettingItem(
+                title = stringResource(R.string.setting_model_page_video_model),
+                description = stringResource(R.string.setting_model_page_video_model_desc),
+                modelId = settings.videoGenerationModelId,
+                providers = settings.providers,
+                type = ModelType.VIDEO,
+                onSelect = { vm.updateSettings(settings.copy(videoGenerationModelId = it.id)) },
+            )
+        }
+        item {
+            ModelSettingItem(
                 title = stringResource(R.string.setting_model_page_translate_model),
                 description = stringResource(R.string.setting_model_page_translate_model_desc),
                 modelId = settings.translateModeId,
@@ -288,11 +308,12 @@ private fun ModelSettingItem(
     providers: List<ProviderSetting>,
     onSelect: (Model) -> Unit,
     onClear: (() -> Unit)? = null,
+    type: ModelType = ModelType.CHAT,
 ) {
     val state = rememberModelListState(
         modelId = modelId,
         providers = providers,
-        type = ModelType.CHAT,
+        type = type,
     )
 
     Column {

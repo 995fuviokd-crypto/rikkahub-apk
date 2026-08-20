@@ -12,6 +12,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -36,7 +37,9 @@ fun StewardModeButton(
     enabled: Boolean,
     status: StewardModeStatus,
     maxLoops: Int,
+    unlimitedLoops: Boolean,
     onMaxLoopsChange: (Int) -> Unit,
+    onUnlimitedLoopsChange: (Boolean) -> Unit,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -47,7 +50,9 @@ fun StewardModeButton(
             enabled = enabled,
             status = status,
             maxLoops = maxLoops,
+            unlimitedLoops = unlimitedLoops,
             onMaxLoopsChange = onMaxLoopsChange,
+            onUnlimitedLoopsChange = onUnlimitedLoopsChange,
             onToggle = {
                 onToggle()
                 showSheet = false
@@ -85,7 +90,9 @@ private fun StewardModeSheet(
     enabled: Boolean,
     status: StewardModeStatus,
     maxLoops: Int,
+    unlimitedLoops: Boolean,
     onMaxLoopsChange: (Int) -> Unit,
+    onUnlimitedLoopsChange: (Boolean) -> Unit,
     onToggle: () -> Unit,
     onDismissRequest: () -> Unit,
 ) {
@@ -135,17 +142,46 @@ private fun StewardModeSheet(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(
-                    text = stringResource(R.string.steward_mode_max_loops, maxLoops),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Slider(
-                    value = maxLoops.toFloat(),
-                    onValueChange = { onMaxLoopsChange(it.roundToInt()) },
-                    valueRange = StewardModeController.MIN_MAX_LOOPS.toFloat()..
-                        StewardModeController.MAX_MAX_LOOPS.toFloat(),
-                    steps = StewardModeController.MAX_MAX_LOOPS - StewardModeController.MIN_MAX_LOOPS - 1,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.steward_mode_unlimited_loops),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = stringResource(R.string.steward_mode_unlimited_loops_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = unlimitedLoops,
+                        onCheckedChange = onUnlimitedLoopsChange,
+                    )
+                }
+                if (unlimitedLoops) {
+                    Text(
+                        text = stringResource(R.string.steward_mode_unlimited_loops_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.steward_mode_max_loops, maxLoops),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Slider(
+                        value = maxLoops.toFloat(),
+                        onValueChange = { onMaxLoopsChange(it.roundToInt()) },
+                        valueRange = StewardModeController.MIN_MAX_LOOPS.toFloat()..
+                            StewardModeController.MAX_MAX_LOOPS.toFloat(),
+                        steps = StewardModeController.MAX_MAX_LOOPS - StewardModeController.MIN_MAX_LOOPS - 1,
+                    )
+                }
             }
         }
     }

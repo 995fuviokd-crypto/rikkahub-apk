@@ -102,6 +102,7 @@ class ChatVM(
     )
     val stewardModeState: StateFlow<StewardModeState> = stewardModeController.state
     val stewardMaxLoops: StateFlow<Int> = stewardModeController.maxLoops
+    val stewardUnlimitedLoops: StateFlow<Boolean> = stewardModeController.unlimitedLoops
 
     init {
         // 添加对话引用
@@ -291,6 +292,10 @@ class ChatVM(
 
     fun setStewardMaxLoops(value: Int) {
         stewardModeController.setMaxLoops(value)
+    }
+
+    fun setStewardUnlimitedLoops(value: Boolean) {
+        stewardModeController.setUnlimitedLoops(value)
     }
 
     suspend fun forkMessage(message: UIMessage): Conversation {

@@ -160,4 +160,41 @@ class StewardModeControllerTest {
         ctrl.setMaxLoops(0)
         assertEquals(StewardModeController.MIN_MAX_LOOPS, ctrl.maxLoops.value)
     }
+
+    @Test
+    fun `unlimited loops keeps sending beyond max loops`() = runBlocking {
+        val (ctrl, sent) = controller { _, _ ->
+            StewardJudgement(completed = false, nextInstruction = "再来一轮")
+        }
+        ctrl.setMaxLoops(1)
+        ctrl.setUnlimitedLoops(true)
+        ctrl.enable("请实现登录功能")
+
+        // 第 1 轮
+        ctrl.onAiIdle(idleConversation("第一轮"))
+        // 即使已超过 maxLoops=1，无上限时仍继续发送
+        ctrl.onAiIdle(idleConversation("第二轮"))
+        ctrl.onAiIdle(idleConversation("第三轮"))
+
+        assertTrue(ctrl.state.value.enabled)
+        assertEquals(3, ctrl.state.value.loopCount)
+        assertEquals(3, sent.size)
+        assertTrue(ctrl.unlimitedLoops.value)
+    }
+
+    @Test
+    fun `disabling unlimited restores loop limit`() = runBlocking {
+        val (ctrl, sent) = controller { _, _ ->
+            StewardJudgement(completed = false, nextInstruction = "再来一轮")
+        }
+        ctrl.setMaxLoops(1)
+        ctrl.setUnlimitedLoops(true)
+        ctrl.setUnlimitedLoops(false)
+        ctrl.enable("请实现登录功能")
+
+        ctrl.onAiIdle(idleConversation("第一轮"))
+        assertEquals(1, sent.size)
+        assertEquals(StewardModeStatus.Stopped, ctrl.state.value.status)
+        assertFalse(ctrl.state.value.enabled)
+    }
 }

@@ -302,6 +302,7 @@ private fun ChatPageContent(
 
     val stewardModeState by vm.stewardModeState.collectAsStateWithLifecycle()
     val stewardMaxLoops by vm.stewardMaxLoops.collectAsStateWithLifecycle()
+    val stewardUnlimitedLoops by vm.stewardUnlimitedLoops.collectAsStateWithLifecycle()
     val canRecall by vm.canRecall.collectAsStateWithLifecycle()
     val canRedo by vm.canRedo.collectAsStateWithLifecycle()
 
@@ -452,8 +453,10 @@ private fun ChatPageContent(
                     },
                     stewardModeState = stewardModeState,
                     stewardMaxLoops = stewardMaxLoops,
+                    stewardUnlimitedLoops = stewardUnlimitedLoops,
                     onToggleStewardMode = { vm.toggleStewardMode() },
                     onStewardMaxLoopsChange = { vm.setStewardMaxLoops(it) },
+                    onStewardUnlimitedLoopsChange = { vm.setStewardUnlimitedLoops(it) },
                 )
             },
             containerColor = Color.Transparent,

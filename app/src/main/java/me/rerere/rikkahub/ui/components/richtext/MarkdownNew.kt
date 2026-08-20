@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
 import androidx.core.graphics.toColorInt
+import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -112,8 +113,30 @@ private val flavour by lazy {
 
 private val parser by lazy { MarkdownParser(flavour) }
 
+// 内嵌 SVG 块（AI 直接输出的 <svg>...</svg>）在 jsoup HTML 解析下结构会错乱，
+// 因此先把它整体提取出来转成 base64 data URI 图片，交由 Coil 的 SvgDecoder 渲染。
+private const val SVG_DATA_URI_PREFIX = "data:image/svg+xml;base64,"
+private val SVG_BLOCK_REGEX = Regex("<svg\\b[^>]*>[\\s\\S]*?<\\/svg>", RegexOption.IGNORE_CASE)
+
+private fun replaceSvgBlocksWithDataUri(content: String): String {
+    val codeBlocks = mutableListOf<IntRange>()
+    CODE_BLOCK_REGEX.findAll(content).forEach { codeBlocks.add(it.range) }
+    fun isInCodeBlock(pos: Int) = codeBlocks.any { pos in it }
+    return SVG_BLOCK_REGEX.replace(content) { m ->
+        if (isInCodeBlock(m.range.first)) {
+            m.value
+        } else {
+            val b64 = Base64.encodeToString(
+                m.value.toByteArray(Charsets.UTF_8),
+                Base64.NO_WRAP,
+            )
+            "\n![]($SVG_DATA_URI_PREFIX$b64)\n"
+        }
+    }
+}
+
 private fun generateMarkdownHtml(content: String): String {
-    val preprocessed = preProcess(content)
+    val preprocessed = replaceSvgBlocksWithDataUri(preProcess(content))
     val tree = parser.buildMarkdownTreeFromString(preprocessed)
     return HtmlGenerator(preprocessed, tree, flavour).generateHtml()
 }

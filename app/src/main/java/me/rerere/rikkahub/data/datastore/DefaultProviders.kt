@@ -12,6 +12,7 @@ import me.rerere.ai.provider.BalanceOption
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
@@ -46,14 +47,39 @@ val DEFAULT_PROVIDERS = listOf(
         name = "OpenAI",
         baseUrl = "https://api.openai.com/v1",
         apiKey = "",
-        builtIn = true
+        builtIn = true,
+        models = listOf(
+            Model(
+                modelId = "gpt-image-1",
+                displayName = "GPT Image 1",
+                type = ModelType.IMAGE,
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.IMAGE),
+            )
+        )
     ),
     ProviderSetting.Google(
         id = Uuid.parse("6ab18148-c138-4394-a46f-1cd8c8ceaa6d"),
         name = "Gemini",
         apiKey = "",
         enabled = true,
-        builtIn = true
+        builtIn = true,
+        models = listOf(
+            Model(
+                modelId = "gemini-2.0-flash-exp-image-generation",
+                displayName = "Gemini 2.0 Flash Image",
+                type = ModelType.IMAGE,
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.IMAGE),
+            ),
+            Model(
+                modelId = "veo-2.0-fast",
+                displayName = "Veo 2.0 Fast",
+                type = ModelType.VIDEO,
+                inputModalities = listOf(Modality.TEXT),
+                outputModalities = listOf(Modality.IMAGE),
+            ),
+        )
     ),
     ProviderSetting.OpenAI(
         id = Uuid.parse("1b1395ed-b702-4aeb-8bc1-b681c4456953"),

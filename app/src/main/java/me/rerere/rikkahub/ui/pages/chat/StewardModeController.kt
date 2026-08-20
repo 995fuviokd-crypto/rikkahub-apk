@@ -42,10 +42,18 @@ class StewardModeController(
     private val _maxLoops = MutableStateFlow(DEFAULT_MAX_LOOPS)
     val maxLoops: StateFlow<Int> = _maxLoops.asStateFlow()
 
+    /** 无上限轮回：为 true 时不再受 [maxLoops] 限制，直到 AI 判定任务完成。 */
+    private val _unlimitedLoops = MutableStateFlow(false)
+    val unlimitedLoops: StateFlow<Boolean> = _unlimitedLoops.asStateFlow()
+
     private var anchorInstruction: String? = null
 
     fun setMaxLoops(value: Int) {
         _maxLoops.value = value.coerceIn(MIN_MAX_LOOPS, MAX_MAX_LOOPS)
+    }
+
+    fun setUnlimitedLoops(value: Boolean) {
+        _unlimitedLoops.value = value
     }
 
     /** 开启托管模式，锚定用户原始指令。 */
@@ -75,7 +83,8 @@ class StewardModeController(
         val current = _state.value
         if (!current.enabled || current.checking) return
 
-        if (current.loopCount >= _maxLoops.value) {
+        val loopLimitReached = !_unlimitedLoops.value && current.loopCount >= _maxLoops.value
+        if (loopLimitReached) {
             disable(StewardModeStatus.Stopped)
             return
         }
@@ -103,7 +112,8 @@ class StewardModeController(
 
             sendMessage(nextInstruction)
             val newLoopCount = _state.value.loopCount + 1
-            if (newLoopCount >= _maxLoops.value) {
+            val limitReached = !_unlimitedLoops.value && newLoopCount >= _maxLoops.value
+            if (limitReached) {
                 _state.value = StewardModeState(
                     loopCount = newLoopCount,
                     status = StewardModeStatus.Stopped,

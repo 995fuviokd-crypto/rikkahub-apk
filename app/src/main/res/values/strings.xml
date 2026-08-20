@@ -856,6 +856,10 @@
   <string name="setting_model_page_enable_suggestion">Enable Chat Suggestions</string>
   <string name="setting_model_page_suggestion_model">Chat Suggestion Model</string>
   <string name="setting_model_page_suggestion_model_desc">Model used to generate conversation suggestions. If not set, uses the fast model</string>
+  <string name="setting_model_page_image_model">Image Generation Model</string>
+  <string name="setting_model_page_image_model_desc">Model used for image generation</string>
+  <string name="setting_model_page_video_model">Video Generation Model</string>
+  <string name="setting_model_page_video_model_desc">Model used for video generation</string>
   <string name="setting_model_page_suggestion_prompt_vars">Variables: Conversation content: {content}, Language: {locale}</string>
   <string name="setting_model_page_title">Model Settings</string>
   <string name="setting_model_page_title_model">Title Summary Model</string>
@@ -1015,6 +1019,7 @@
   <string name="setting_provider_page_filter_placeholder">Enter model name to filter</string>
   <string name="setting_provider_page_image">Image</string>
   <string name="setting_provider_page_image_model">Image</string>
+  <string name="setting_provider_page_video_model">Video</string>
   <string name="setting_provider_page_image_qr_decode_failed">Failed to parse QR code from image: %s</string>
   <string name="setting_provider_page_import_dialog_message">Please select import method:</string>
   <string name="setting_provider_page_import_dialog_title">Import Provider Configuration</string>
@@ -1425,4 +1430,7 @@
   <string name="steward_mode_status_completed">Task completed</string>
   <string name="steward_mode_status_stopped">Stopped</string>
   <string name="steward_mode_max_loops">Max auto rounds: %1$d</string>
+  <string name="steward_mode_unlimited_loops">Unlimited auto rounds</string>
+  <string name="steward_mode_unlimited_loops_desc">Loop until the AI judges the task is finished, ignoring the round limit</string>
+  <string name="steward_mode_unlimited_loops_hint">Unlimited: the AI keeps working until it reports the task as completed. Make sure the model can reliably judge completion to avoid endless loops.</string>
 </resources>

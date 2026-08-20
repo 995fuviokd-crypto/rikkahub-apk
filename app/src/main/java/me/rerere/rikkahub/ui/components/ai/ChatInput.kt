@@ -138,8 +138,10 @@ fun ChatInput(
     onLongSendClick: () -> Unit,
     stewardModeState: StewardModeState? = null,
     stewardMaxLoops: Int = StewardModeController.DEFAULT_MAX_LOOPS,
+    stewardUnlimitedLoops: Boolean = false,
     onToggleStewardMode: () -> Unit = {},
     onStewardMaxLoopsChange: (Int) -> Unit = {},
+    onStewardUnlimitedLoopsChange: (Boolean) -> Unit = {},
 ) {
     val toaster = LocalToaster.current
     val assistant = settings.getCurrentAssistant()
@@ -339,7 +341,9 @@ fun ChatInput(
                                     enabled = stewardModeState.enabled,
                                     status = stewardModeState.status,
                                     maxLoops = stewardMaxLoops,
+                                    unlimitedLoops = stewardUnlimitedLoops,
                                     onMaxLoopsChange = onStewardMaxLoopsChange,
+                                    onUnlimitedLoopsChange = onStewardUnlimitedLoopsChange,
                                     onToggle = onToggleStewardMode,
                                 )
                             }
