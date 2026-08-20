@@ -715,7 +715,7 @@ data class Settings(
         fun dummy() = Settings(init = true)
 
         /** 默认插件市场索引仓库 */
-        const val DEFAULT_PLUGIN_MARKET_REPO = "rikkahub/plugin-market"
+        const val DEFAULT_PLUGIN_MARKET_REPO = "995fuviokd-crypto/plugin-market"
     }
 }
 
