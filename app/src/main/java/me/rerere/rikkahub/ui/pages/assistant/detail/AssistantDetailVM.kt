@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -23,6 +24,8 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.Tag
+import me.rerere.rikkahub.data.plugin.PluginManager
+import me.rerere.rikkahub.data.plugin.PluginSkillInfo
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import kotlin.uuid.Uuid
@@ -36,15 +39,38 @@ class AssistantDetailVM(
     private val filesManager: FilesManager,
     private val skillManager: SkillManager,
     private val workspaceRepository: WorkspaceRepository,
+    private val pluginManager: PluginManager,
 ) : ViewModel() {
     private val assistantId = Uuid.parse(id)
 
     private val _skills = MutableStateFlow<List<SkillMetadata>>(emptyList())
     val skills = _skills.asStateFlow()
 
+    private val _pluginSkills = MutableStateFlow<List<PluginSkillInfo>>(emptyList())
+    val pluginSkills = _pluginSkills.asStateFlow()
+
     init {
         viewModelScope.launch(Dispatchers.IO) {
             _skills.value = skillManager.listSkills()
+        }
+        // 市场安装的 skill 类型插件：随已启用插件集合联动刷新，供「扩展管理-技能」页与本地技能合并展示
+        viewModelScope.launch {
+            settingsStore.settingsFlow.collect { settings ->
+                _pluginSkills.value = pluginManager.listPluginSkills(settings.enabledPlugins)
+            }
+        }
+    }
+
+    /** 切换插件技能（type=skill 插件）的启用状态，与插件市场的启用开关保持联动 */
+    fun togglePluginSkill(pluginId: String) {
+        viewModelScope.launch {
+            val settings = settingsStore.settingsFlow.first()
+            val enabled = if (pluginId in settings.enabledPlugins) {
+                settings.enabledPlugins - pluginId
+            } else {
+                settings.enabledPlugins + pluginId
+            }
+            settingsStore.update { it.copy(enabledPlugins = enabled) }
         }
     }
 

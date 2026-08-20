@@ -116,6 +116,14 @@ class OperitJsTranspilerTest {
     }
 
     @Test
+    fun `run gen runtime invokes generator correctly without self`() {
+        // 无 self 时必须调用 gen() 而非把函数对象当生成器实例，否则 g.next 崩溃
+        val runtime = OperitJsTranspiler.RUN_GEN_RUNTIME
+        assertTrue(runtime.contains("gen()"))
+        assertTrue(runtime.contains("gen.call(self)"))
+    }
+
+    @Test
     fun `no async functions leaves source mostly unchanged`() {
         val src = "function add(a, b) { return a + b; }"
         val out = OperitJsTranspiler.transpile(src)

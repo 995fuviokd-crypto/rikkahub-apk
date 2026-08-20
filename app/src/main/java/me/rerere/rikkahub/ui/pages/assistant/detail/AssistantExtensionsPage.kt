@@ -41,6 +41,7 @@ fun AssistantExtensionsPage(id: String) {
     val assistant by vm.assistant.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val skills by vm.skills.collectAsStateWithLifecycle()
+    val pluginSkills by vm.pluginSkills.collectAsStateWithLifecycle()
     val navController = LocalNavController.current
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val scope = rememberCoroutineScope()
@@ -184,7 +185,7 @@ fun AssistantExtensionsPage(id: String) {
                     }
 
                     3 -> {
-                        if (skills.isEmpty()) {
+                        if (skills.isEmpty() && pluginSkills.isEmpty()) {
                             ExtensionEmptyState(
                                 message = stringResource(R.string.assistant_extensions_page_empty_skills),
                                 buttonText = stringResource(R.string.assistant_extensions_page_goto_extensions),
@@ -200,6 +201,10 @@ fun AssistantExtensionsPage(id: String) {
                                         val newSkills = if (checked) assistant.enabledSkills + name
                                         else assistant.enabledSkills - name
                                         vm.update(assistant.copy(enabledSkills = newSkills))
+                                    },
+                                    pluginSkills = pluginSkills,
+                                    onTogglePluginSkill = { pluginId, _ ->
+                                        vm.togglePluginSkill(pluginId)
                                     },
                                 )
                                 TextButton(

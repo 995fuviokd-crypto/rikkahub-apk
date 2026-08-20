@@ -6,12 +6,15 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import me.rerere.rikkahub.data.operit.OperitScriptRuntime
 import me.rerere.rikkahub.data.operit.OperitToolManifest
 import me.rerere.rikkahub.data.operit.OperitToolManifestData
@@ -258,6 +261,11 @@ class OperitMarketDataSource(
         operitDir.resolve(OperitScriptRuntime.TOOL_MANIFEST).writeText(
             OperitToolManifest.buildJson(OperitToolManifestData(pkgName, desc, tools))
         )
+        generateIndexHtml(
+            outDir, pkgName, desc.ifBlank { "来自 Operit 市场的 ToolPkg 资源包" },
+            tools = tools, kind = "package",
+            fileList = operitDir.walkTopDown().filter { it.isFile }.map { it.relativeTo(operitDir).path }.toList(),
+        )
     }
 
     /** script（单 JS 文件）：解析头部 METADATA，生成本地可执行的脚本插件并保留脚本内容 */
@@ -285,6 +293,10 @@ class OperitMarketDataSource(
         )
         operitDir.resolve(OperitScriptRuntime.TOOL_MANIFEST).writeText(
             OperitToolManifest.buildJson(OperitToolManifestData(name, desc, tools))
+        )
+        generateIndexHtml(
+            outDir, name, desc.ifBlank { "来自 Operit 市场的脚本（$scriptName）" },
+            tools = tools, kind = "script",
         )
     }
 
@@ -331,8 +343,14 @@ class OperitMarketDataSource(
         val desc = entry.description.ifBlank { "来自 Operit 市场的资源（${typeLabel(entry.type)}）" }
         val fileList = dir.walkTopDown().filter { it.isFile }
             .map { it.relativeTo(dir).path }.toList()
-        // 源码型 MCP 条目：即使无 mcp.json 也生成 mcp 类型插件，明确提示需外部运行环境
+        // 源码型 MCP 条目：优先从仓库识别启动命令生成 mcp.json，使其可注册到 MCP 设置
         val isMcpSource = entry.type == "mcp"
+        if (isMcpSource && generateMcpConfigIfPossible(dir, entry, name)) {
+            PluginManager.autoAdapt(dir)?.let { adapted ->
+                infoFile.writeText(PluginJson.toJson(adapted))
+                return
+            }
+        }
         val systemPrompt = buildString {
             append("这是来自 Operit 市场的资源「$name」（${typeLabel(entry.type)}）。")
             if (desc.isNotBlank()) append("简介：$desc\n")
@@ -350,7 +368,157 @@ class OperitMarketDataSource(
             type = if (isMcpSource) PluginCategories.TYPE_MCP else PluginCategories.TYPE_PLUGIN,
             category = if (isMcpSource) "mcp" else "general",
         )
+        // 生成 web 索引展示页（含文件清单），供应用内 webview 展示
+        generateIndexHtml(
+            dir, name, desc,
+            tools = emptyList(),
+            kind = if (isMcpSource) "mcp" else "resource",
+            fileList = fileList,
+        )
     }
+
+    /**
+     * 从 MCP 源码仓库识别可执行配置：依次尝试 mcp.json（已存在）、smithery.yaml、
+     * package.json（bin/scripts.start/main）、README 中的 npx/uvx 启动命令。
+     * 命中后写入 mcp.json（Claude Code 兼容），使插件安装后可注册到 MCP 设置。
+     * @return 是否成功生成 mcp.json
+     */
+    private fun generateMcpConfigIfPossible(dir: File, entry: OperitListItem, fallbackName: String): Boolean {
+        val existing = PluginManager.findFile(dir) {
+            it.equals("mcp.json", ignoreCase = true) || it.equals(".mcp.json", ignoreCase = true)
+        }
+        if (existing != null) return true
+        val servers = mutableListOf<Pair<String, List<String>>>()
+        PluginManager.findFile(dir) { it.equals("smithery.yaml", ignoreCase = true) || it.equals("smithery.yml", ignoreCase = true) }
+            ?.let { servers.addAll(parseSmitheryCommand(it.readText())) }
+        if (servers.isEmpty()) {
+            PluginManager.findFile(dir) { it.equals("package.json", ignoreCase = true) }
+                ?.let { parsePackageJsonCommand(it.readText())?.let { c -> servers.add(c) } }
+        }
+        if (servers.isEmpty()) {
+            PluginManager.findFile(dir) {
+                it.matches(Regex("(?i)readme(\\.md|\\.txt|\\.markdown)?$"))
+            }?.let { parseReadmeRunCommand(it.readText())?.let { c -> servers.add(c) } }
+        }
+        if (servers.isEmpty()) return false
+        val safeName = fallbackName.replace(Regex("[^a-zA-Z0-9._-]"), "-").trim('-').ifBlank { "operit-mcp" }
+        val mcpJson = buildJsonObject {
+            put("mcpServers", buildJsonObject {
+                servers.take(3).forEachIndexed { index, (cmd, args) ->
+                    val serverName = if (index == 0) safeName.take(40) else "$safeName-${index + 1}"
+                    put(serverName, buildJsonObject {
+                        put("type", "command")
+                        put("command", cmd)
+                        put("args", JsonArray(args.map { JsonPrimitive(it) }))
+                    })
+                }
+            })
+        }
+        runCatching { dir.resolve("mcp.json").writeText(mcpJson.toString()) }
+        return true
+    }
+
+    /** 解析 smithery.yaml 中的 startCommand.command 列表 */
+    private fun parseSmitheryCommand(content: String): List<Pair<String, List<String>>> {
+        val cmd = Regex("""(?m)^\s*command:\s*$""").find(content) ?: return emptyList()
+        val rest = content.substring(cmd.range.last)
+        val args = Regex("""(?m)^\s*-\s*(.+?)\s*$""").findAll(rest)
+            .map { it.groupValues[1].trim().trim('"', '\'', '`') }
+            .filter { it.isNotBlank() && !it.startsWith("#") }
+            .take(16)
+            .toList()
+        if (args.isEmpty()) return emptyList()
+        return listOf(args.first() to args.drop(1))
+    }
+
+    /** 解析 package.json：优先 bin 入口（node 执行），其次 scripts.start，最后 main */
+    private fun parsePackageJsonCommand(content: String): Pair<String, List<String>>? {
+        val root = runCatching { Json.parseToJsonElement(content).jsonObject }.getOrNull() ?: return null
+        (root["bin"]?.jsonObject?.values?.firstOrNull() as? JsonPrimitive)?.contentOrNull?.let { bin ->
+            return "node" to listOf(bin)
+        }
+        ((root["bin"] as? JsonPrimitive)?.contentOrNull)?.let { bin ->
+            return "node" to listOf(bin)
+        }
+        (root["scripts"]?.jsonObject?.get("start") as? JsonPrimitive)?.contentOrNull?.let { start ->
+            val parts = start.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+            if (parts.isNotEmpty()) return parts.first() to parts.drop(1)
+        }
+        (root["main"] as? JsonPrimitive)?.contentOrNull?.let { main ->
+            return "node" to listOf(main)
+        }
+        return null
+    }
+
+    /** 解析 README 中的 npx/uvx 启动命令 */
+    private fun parseReadmeRunCommand(content: String): Pair<String, List<String>>? {
+        val regex = Regex("""(npx|uvx|node)\s+([@\w][\w@./-]*)((?:[\s-]+[@\w./-][\w@./-]*)*)""")
+        val m = regex.find(content) ?: return null
+        val runner = m.groupValues[1]
+        val pkg = m.groupValues[2]
+        val tail = m.groupValues[3].trim().split(Regex("\\s+")).filter { it.isNotBlank() && it != "-y" }
+        return (runner to (listOf("-y", pkg) + tail))
+    }
+
+    /** 生成应用内 webview 可展示的插件索引页（web/index.html），含名称/描述/工具清单/文件列表 */
+    private fun generateIndexHtml(
+        dir: File,
+        title: String,
+        desc: String,
+        tools: List<me.rerere.rikkahub.data.operit.OperitToolDef>,
+        kind: String,
+        fileList: List<String> = emptyList(),
+    ) {
+        val webDir = File(dir, "web").apply { mkdirs() }
+        val toolItems = if (tools.isEmpty()) {
+            "<li>（无独立工具清单）</li>"
+        } else {
+            tools.joinToString("") { t ->
+                val d = t.description.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                "<li><code>${htmlEsc(t.name)}</code>${if (d.isNotBlank()) " — $d" else ""}</li>"
+            }
+        }
+        val fileItems = if (fileList.isEmpty()) {
+            ""
+        } else {
+            "<h3>包含文件</h3><ul>" + fileList.sorted().take(100).joinToString("") { "<li><code>${htmlEsc(it)}</code></li>" } +
+                (if (fileList.size > 100) "<li>…共 ${fileList.size} 个</li>" else "") + "</ul>"
+        }
+        val kindLabel = when (kind) {
+            "script" -> "Operit 脚本"
+            "package" -> "Operit ToolPkg"
+            "mcp" -> "Operit MCP"
+            else -> "资源包"
+        }
+        webDir.resolve("index.html").writeText(
+            """
+            <!doctype html><html lang="zh"><meta charset="utf-8">
+            <meta name="viewport" content="width=device-width,initial-scale=1">
+            <title>${htmlEsc(title)}</title>
+            <style>
+            body{font-family:system-ui,sans-serif;margin:0;padding:16px;background:#f6f7f9;color:#1c1c1e;line-height:1.6}
+            h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:18px 0 6px}
+            .badge{display:inline-block;font-size:12px;padding:2px 8px;border-radius:10px;background:#e4e9f0;color:#3a4557;margin-bottom:8px}
+            .desc{font-size:14px;color:#3a4557;margin:0 0 8px}
+            ul{padding-left:18px;font-size:14px}code{background:#eef1f5;padding:1px 5px;border-radius:4px;font-size:12px}
+            .note{font-size:12px;color:#8a919c;background:#fff;border:1px solid #e6e8ec;border-radius:8px;padding:10px;margin-top:16px}
+            </style>
+            <h1>${htmlEsc(title)}</h1><span class="badge">$kindLabel</span>
+            <p class="desc">${htmlEsc(desc)}</p>
+            <h2>可用工具</h2><ul>$toolItems</ul>
+            $fileItems
+            <div class="note">该资源由 Operit 市场提供，已由 RikkaHub 本地引擎适配。脚本依赖的 Tools.* 运行时
+            （文件/网络/系统通知等）已映射为 RikkaHub 本地能力；依赖 UI 自动化、浏览器控制等特权能力的工具会返回受限提示。</div>
+            </html>
+            """.trimIndent()
+        )
+    }
+
+    private fun htmlEsc(s: String): String = s
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
 
     /** 写 plugin.json + systemPrompt 文件，保证 zip 可被 RikkaHub 正常解析安装 */
     private fun writePluginInfo(

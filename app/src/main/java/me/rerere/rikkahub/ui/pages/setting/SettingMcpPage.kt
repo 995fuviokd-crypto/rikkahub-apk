@@ -364,6 +364,8 @@ private fun McpServerItem(
                         Text(
                             text = item.commonOptions.name,
                             style = MaterialTheme.typography.titleLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         val dotColor =
                             if (item.commonOptions.enable) MaterialTheme.extendColors.green6 else MaterialTheme.extendColors.red6
@@ -1097,7 +1099,12 @@ private fun McpToolCard(
 }
 
 private fun isValidMcpName(name: String): Boolean {
-    return name.isEmpty() || name.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' }
+    // 允许字母数字与 - _ . 空格等常见命名字符，禁止路径分隔/控制字符，防止注入与名称为空
+    if (name.isBlank()) return false
+    if (name.length > 64) return false
+    return name.all { c ->
+        c.isLetterOrDigit() || c == '-' || c == '_' || c == '.' || c == ' ' || c == ':'
+    }
 }
 
 private fun parseMcpServersFromJson(json: String): List<McpServerConfig> {

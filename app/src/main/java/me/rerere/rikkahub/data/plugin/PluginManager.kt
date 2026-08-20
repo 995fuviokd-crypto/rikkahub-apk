@@ -411,9 +411,15 @@ class PluginManager(
             return servers.mapNotNull { (name, element) ->
                 val obj = element.jsonObject
                 val common = McpCommonOptions(enable = true, name = name)
+                // type/transport 缺失时按字段推断：有 command 视为本地命令（Claude Code 标准 mcp.json
+                // 只写 command/args，无 type 字段），否则有 url 视为远程服务
                 val type = obj["type"]?.jsonPrimitive?.contentOrNull
                     ?: obj["transport"]?.jsonPrimitive?.contentOrNull
-                    ?: "sse"
+                    ?: when {
+                        obj.containsKey("command") -> "command"
+                        obj.containsKey("url") -> "sse"
+                        else -> "sse"
+                    }
                 when (type.lowercase()) {
                     "sse", "http", "http-sse" -> {
                         val url = obj["url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null

@@ -18,8 +18,7 @@ object OperitJsTranspiler {
     /** 注入到目标脚本头部的运行时，用于同步驱动 generator */
     const val RUN_GEN_RUNTIME: String = """
 function __operitRunGen(gen, self) {
-    var g = gen;
-    if (self !== undefined && self !== null) g = gen.call(self);
+    var g = (self !== undefined && self !== null) ? gen.call(self) : gen();
     var step = g.next();
     while (!step.done) { step = g.next(step.value); }
     return step.value;

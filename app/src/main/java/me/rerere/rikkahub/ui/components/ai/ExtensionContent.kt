@@ -28,6 +28,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Link01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.files.SkillMetadata
+import me.rerere.rikkahub.data.plugin.PluginSkillInfo
 import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.data.model.QuickMessage
@@ -116,6 +117,8 @@ fun SkillsContent(
     onToggle: (String, Boolean) -> Unit,
     modifier: Modifier = Modifier,
     onManage: (() -> Unit)? = null,
+    pluginSkills: List<PluginSkillInfo> = emptyList(),
+    onTogglePluginSkill: ((String, Boolean) -> Unit)? = null,
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -141,6 +144,40 @@ fun SkillsContent(
                 },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
             )
+        }
+        if (pluginSkills.isNotEmpty()) {
+            item(key = "plugin-skill-header") {
+                Text(
+                    text = stringResource(R.string.extension_content_plugin_skills),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
+                )
+            }
+            items(pluginSkills, key = { "plugin-${it.pluginId}" }) { pluginSkill ->
+                ListItem(
+                    headlineContent = { Text(pluginSkill.name) },
+                    supportingContent = pluginSkill.description.takeIf { it.isNotBlank() }?.let { desc ->
+                        {
+                            Text(
+                                text = desc,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                maxLines = 2,
+                            )
+                        }
+                    },
+                    trailingContent = {
+                        if (onTogglePluginSkill != null) {
+                            Switch(
+                                checked = pluginSkill.enabled,
+                                onCheckedChange = { checked -> onTogglePluginSkill(pluginSkill.pluginId, checked) }
+                            )
+                        }
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+            }
         }
         if (onManage != null) {
             item {

@@ -89,8 +89,12 @@ val repositoryModule = module {
         me.rerere.rikkahub.data.plugin.PluginManager(get())
     }
 
+    single<me.rerere.rikkahub.data.operit.OperitChatBridge> {
+        me.rerere.rikkahub.data.chat.RikkaOperitChatBridge(get(), get(), get())
+    }
+
     single {
-        me.rerere.rikkahub.data.operit.OperitScriptRuntime(get())
+        me.rerere.rikkahub.data.operit.OperitScriptRuntime(get(), get())
     }
 
     single {

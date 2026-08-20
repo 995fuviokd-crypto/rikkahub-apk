@@ -42,7 +42,7 @@ internal fun buildOperitTool(
             }
             if (entries.isEmpty()) return@buildString
             appendLine("**Operit 本地工具**")
-            appendLine("已启用以下 Operit 脚本/ToolPkg 插件，可使用 `run_operit_tool` 调用其工具（Tools.* 中文件/通知能力已在本地映射，对话/工作流等 Operit 专有 API 会返回受限提示）：")
+            appendLine("已启用以下 Operit 脚本/ToolPkg 插件，可使用 `run_operit_tool` 调用其工具。Tools.* 运行时已真实映射：文件读写（Tools.Files，沙箱目录）、HTTP 请求与网页抓取（Tools.Net）、系统能力如 sleep/toast/通知/设备信息（Tools.System）、表达式计算（Tools.calc）、本地会话读写（Tools.Chat，读取/创建/删除/改名 RikkaHub 会话与消息）；UI 自动化、浏览器控制、sendMessage 等依赖界面状态或特权的 Operit 专有 API 返回受限提示。")
             entries.forEach { (id, pair) ->
                 appendLine("- 插件「${pair.first}」（plugin_id=$id）：")
                 pair.second.forEach { tool ->

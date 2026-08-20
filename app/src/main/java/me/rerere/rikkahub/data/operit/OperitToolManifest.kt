@@ -80,8 +80,9 @@ object OperitToolManifest {
                 if (tool.description.isNotBlank()) sb.append("：").append(tool.description)
                 sb.append("\n")
             }
-            sb.append("脚本依赖的 Tools.* 运行时已本地映射：文件读写（Tools.Files）与系统通知（Tools.System）直接可用；")
-            sb.append("对话/工作流等 Operit 专有 API 暂不可用，依赖它们的工具会返回受限提示。")
+            sb.append("脚本依赖的 Tools.* 运行时已本地映射：文件读写（Tools.Files）、HTTP 请求与网页抓取（Tools.Net）、")
+            sb.append("系统能力如 sleep/toast/通知/设备信息（Tools.System）、表达式计算（Tools.calc）真实可用；")
+            sb.append("UI 自动化、浏览器控制、Java 桥接等依赖 Shizuku/无障碍特权的 Operit 专有 API 返回受限提示。")
         } else {
             sb.append("脚本内容已保存在插件 operit/ 目录，可用 `run_operit_tool` 调用其导出函数（具体工具见插件说明）。")
         }

@@ -358,6 +358,7 @@
   <string name="extension_content_manage">管理</string>
   <string name="extension_content_unnamed">未命名</string>
   <string name="extension_content_unnamed_lorebook">未命名Lorebook</string>
+  <string name="extension_content_plugin_skills">插件技能</string>
   <string name="extension_selector_go_to_extensions">管理扩展</string>
   <string name="extension_selector_go_to_skills">前往管理 Skills</string>
   <string name="extension_selector_lorebooks_empty">无可用的lorebooks</string>

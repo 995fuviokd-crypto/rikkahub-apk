@@ -46,6 +46,9 @@ interface MessageNodeDAO {
 
     @RawQuery
     suspend fun getMessageCountPerDayRaw(query: SupportSQLiteQuery): List<MessageDayCount>
+
+    @RawQuery
+    suspend fun getMessageCountsRaw(query: SupportSQLiteQuery): List<ConversationMessageCount>
 }
 
 data class MessageTokenStats(
@@ -79,6 +82,17 @@ suspend fun MessageNodeDAO.getMessageCountPerDay(startDate: String): List<Messag
                 "AND json_extract(j.value, '$.createdAt') >= ? " +
                 "GROUP BY day",
             arrayOf(startDate)
+        )
+    )
+
+data class ConversationMessageCount(val conversationId: String, val count: Int)
+
+// 一次性统计所有会话的消息总数（json_each 展开 messages JSON 数组），供 Operit Chat.listChats 使用
+suspend fun MessageNodeDAO.getMessageCounts(): List<ConversationMessageCount> =
+    getMessageCountsRaw(
+        SimpleSQLiteQuery(
+            "SELECT mn.conversation_id AS conversationId, COUNT(*) AS count " +
+                "FROM message_node mn, json_each(mn.messages) j GROUP BY mn.conversation_id"
         )
     )
 
