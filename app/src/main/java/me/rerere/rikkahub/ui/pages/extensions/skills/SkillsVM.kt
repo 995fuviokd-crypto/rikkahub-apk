@@ -12,23 +12,59 @@ import java.util.zip.ZipInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.files.FileUtils
 import me.rerere.rikkahub.data.files.SkillFrontmatterParser
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.files.SkillMetadata
+import me.rerere.rikkahub.data.plugin.PluginManager
+import me.rerere.rikkahub.data.plugin.PluginSkillInfo
 import org.json.JSONArray
 import kotlin.collections.iterator
 
 class SkillsVM(
     private val skillManager: SkillManager,
+    private val pluginManager: PluginManager,
+    private val settingsStore: SettingsStore,
 ) : ViewModel() {
     private val _skills = MutableStateFlow<List<SkillMetadata>>(emptyList())
     val skills = _skills.asStateFlow()
 
+    private val _pluginSkills = MutableStateFlow<List<PluginSkillInfo>>(emptyList())
+    val pluginSkills = _pluginSkills.asStateFlow()
+
     init {
         loadSkills()
+        viewModelScope.launch {
+            settingsStore.settingsFlow.collect { settings ->
+                _pluginSkills.value = pluginManager.listPluginSkills(settings.enabledPlugins)
+            }
+        }
+    }
+
+    /** 切换插件技能（skill 插件）的启用状态，仅对 type=skill 插件生效 */
+    fun togglePluginSkill(pluginId: String) {
+        viewModelScope.launch {
+            val settings = settingsStore.settingsFlow.first()
+            val enabled = if (pluginId in settings.enabledPlugins) {
+                settings.enabledPlugins - pluginId
+            } else {
+                settings.enabledPlugins + pluginId
+            }
+            settingsStore.update { it.copy(enabledPlugins = enabled) }
+        }
+    }
+
+    /** 卸载插件技能（skill 插件），同时从 enabledPlugins 清理 */
+    fun uninstallPluginSkill(pluginId: String) {
+        viewModelScope.launch {
+            pluginManager.uninstall(pluginId)
+            val settings = settingsStore.settingsFlow.first()
+            settingsStore.update { it.copy(enabledPlugins = settings.enabledPlugins - pluginId) }
+        }
     }
 
     private fun loadSkills() {

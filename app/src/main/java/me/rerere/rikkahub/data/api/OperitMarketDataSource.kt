@@ -16,6 +16,8 @@ import me.rerere.rikkahub.data.operit.OperitScriptRuntime
 import me.rerere.rikkahub.data.operit.OperitToolManifest
 import me.rerere.rikkahub.data.operit.OperitToolManifestData
 import me.rerere.rikkahub.data.plugin.PluginCategories
+import me.rerere.rikkahub.data.plugin.PluginExtensionAction
+import me.rerere.rikkahub.data.plugin.PluginExtensionPoints
 import me.rerere.rikkahub.data.plugin.PluginInfo
 import me.rerere.rikkahub.data.plugin.PluginJson
 import me.rerere.rikkahub.data.plugin.PluginManager
@@ -329,13 +331,25 @@ class OperitMarketDataSource(
         val desc = entry.description.ifBlank { "来自 Operit 市场的资源（${typeLabel(entry.type)}）" }
         val fileList = dir.walkTopDown().filter { it.isFile }
             .map { it.relativeTo(dir).path }.toList()
+        // 源码型 MCP 条目：即使无 mcp.json 也生成 mcp 类型插件，明确提示需外部运行环境
+        val isMcpSource = entry.type == "mcp"
         val systemPrompt = buildString {
             append("这是来自 Operit 市场的资源「$name」（${typeLabel(entry.type)}）。")
             if (desc.isNotBlank()) append("简介：$desc\n")
-            append("未识别到 SKILL.md / mcp.json / 角色卡 等可注入内容，目录内容已原样保留，共 ")
-            append(fileList.size).append(" 个文件，可按需读取参考。")
+            if (isMcpSource) {
+                append("这是一个 MCP Server 源码仓库，需要 Node 等外部运行环境编译/运行，RikkaHub 无法直接连接。")
+                append("目录内容已原样保留（共 ${fileList.size} 个文件），可参考其实现，或自行搭建服务后通过「设置-MCP」添加远程服务。")
+            } else {
+                append("未识别到 SKILL.md / mcp.json / 角色卡 等可注入内容，目录内容已原样保留，共 ")
+                append(fileList.size).append(" 个文件，可按需读取参考。")
+            }
         }
-        writePluginInfo(dir, entry, name, "1.0.0", desc, systemPrompt, tags = listOf("operit"))
+        writePluginInfo(
+            dir, entry, name, "1.0.0", desc, systemPrompt,
+            tags = listOf("operit", if (isMcpSource) PluginCategories.TYPE_MCP else "other"),
+            type = if (isMcpSource) PluginCategories.TYPE_MCP else PluginCategories.TYPE_PLUGIN,
+            category = if (isMcpSource) "mcp" else "general",
+        )
     }
 
     /** 写 plugin.json + systemPrompt 文件，保证 zip 可被 RikkaHub 正常解析安装 */
@@ -347,19 +361,52 @@ class OperitMarketDataSource(
         description: String,
         systemPrompt: String,
         tags: List<String>,
+        type: String = PluginCategories.TYPE_SKILL,
+        category: String = "general",
     ) {
         dir.mkdirs()
+        val id = operitPluginIdFor(entry.id.ifBlank { name })
+        // 自动生成 web 展示扩展入口：包内含 web/ 目录 → 插件内置页面；条目带 GitHub 来源 → 源码仓库页
+        val homeActions = buildList {
+            val webHasHtml = File(dir, "web").listFiles()?.any {
+                it.isFile && it.name.endsWith(".html", ignoreCase = true)
+            } == true
+            if (webHasHtml) {
+                add(
+                    PluginExtensionAction(
+                        id = "web-home",
+                        label = "打开页面",
+                        description = "打开插件内置页面",
+                        target = "webview",
+                        payload = "plugin://$id/index.html",
+                    )
+                )
+            }
+            val repoUrl = entry.source?.url.orEmpty()
+            if (repoUrl.startsWith("http://") || repoUrl.startsWith("https://")) {
+                add(
+                    PluginExtensionAction(
+                        id = "repo-link",
+                        label = "查看源码仓库",
+                        description = "在应用内打开条目源码仓库",
+                        target = "webview",
+                        payload = repoUrl,
+                    )
+                )
+            }
+        }
         val info = PluginInfo(
-            id = operitPluginIdFor(entry.id.ifBlank { name }),
+            id = id,
             name = name,
             version = version,
             description = description,
             author = entry.displayAuthor,
             repository = entry.source?.url.orEmpty(),
-            category = "general",
+            category = category,
             systemPrompt = systemPrompt,
-            type = PluginCategories.TYPE_SKILL,
+            type = type,
             tags = (listOf("operit") + tags).distinct(),
+            extensionPoints = PluginExtensionPoints(homeActions = homeActions),
         )
         dir.resolve("plugin.json").writeText(PluginJson.toJson(info))
         dir.resolve("systemPrompt.md").writeText(systemPrompt)

@@ -99,6 +99,27 @@ class PluginManager(
         }
     }
 
+    /** 已安装的 skill 类型插件列表（供技能页合并展示）。type=skill 的插件既可注入 systemPrompt，也可作为技能查看/启用 */
+    fun listPluginSkills(enabledPlugins: Set<String>): List<PluginSkillInfo> {
+        return getPluginsDir().listFiles()
+            ?.filter { it.isDirectory }
+            ?.mapNotNull { dir ->
+                val infoFile = dir.resolve(METADATA_FILE)
+                if (!infoFile.exists()) return@mapNotNull null
+                val info = runCatching { PluginJson.fromJson(infoFile.readText()) }.getOrNull() ?: return@mapNotNull null
+                if (info.type != PluginCategories.TYPE_SKILL) return@mapNotNull null
+                PluginSkillInfo(
+                    pluginId = info.id,
+                    name = info.name.ifBlank { info.id },
+                    description = info.description.ifBlank { "插件技能" },
+                    enabled = info.id in enabledPlugins,
+                    dir = dir,
+                )
+            }
+            ?.sortedBy { it.name }
+            ?: emptyList()
+    }
+
     /** 已启用插件的快捷操作列表 */
     fun enabledActions(enabledPlugins: Set<String>): List<PluginAction> {        if (enabledPlugins.isEmpty()) return emptyList()
         return enabledPlugins
@@ -528,6 +549,15 @@ data class InstalledPlugin(
     val id: String,
     val info: PluginInfo?,
     val status: PluginStatus,
+)
+
+/** 插件包内承载的 skill 型技能，供技能页与本地技能合并展示 */
+data class PluginSkillInfo(
+    val pluginId: String,
+    val name: String,
+    val description: String,
+    val enabled: Boolean,
+    val dir: File,
 )
 
 object PluginJson {

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -16,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -29,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -60,20 +63,28 @@ import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.rikkahub.data.files.SkillFrontmatterParser
 import me.rerere.rikkahub.data.files.SkillMetadata
+import me.rerere.rikkahub.data.plugin.InstalledPlugin
+import me.rerere.rikkahub.data.plugin.PluginManager
+import me.rerere.rikkahub.data.plugin.PluginSkillInfo
+import me.rerere.rikkahub.data.plugin.PluginStatus
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.ui.pages.extensions.plugin.InstalledPluginDetailDialog
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
+import org.koin.compose.koinInject
 
 @Composable
 fun SkillsPage() {
     val navController = LocalNavController.current
     val vm = koinViewModel<SkillsVM>()
+    val pluginManager: PluginManager = koinInject()
     val skills by vm.skills.collectAsStateWithLifecycle()
+    val pluginSkills by vm.pluginSkills.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val toaster = LocalToaster.current
     val context = LocalContext.current
@@ -81,6 +92,7 @@ fun SkillsPage() {
     var showAddDialog by rememberSaveable { mutableStateOf(false) }
     var showImportDialog by rememberSaveable { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<SkillMetadata?>(null) }
+    var selectedPlugin by remember { mutableStateOf<PluginSkillInfo?>(null) }
     val fileImportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -121,7 +133,7 @@ fun SkillsPage() {
             ),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (skills.isEmpty()) {
+            if (skills.isEmpty() && pluginSkills.isEmpty()) {
                 item {
                     Column(
                         modifier = Modifier
@@ -156,6 +168,35 @@ fun SkillsPage() {
                     onClick = { navController.navigate(Screen.SkillDetail(skill.name)) },
                     onDelete = { deleteTarget = skill },
                 )
+            }
+
+            if (pluginSkills.isNotEmpty()) {
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = "插件技能",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = "来自已安装 skill 类型插件的技能，可在下方开关启用/卸载",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                items(pluginSkills, key = { it.pluginId }) { skill ->
+                    PluginSkillCard(
+                        skill = skill,
+                        onClick = { selectedPlugin = skill },
+                        onToggle = { vm.togglePluginSkill(skill.pluginId) },
+                    )
+                }
             }
         }
     }
@@ -227,6 +268,76 @@ fun SkillsPage() {
         onDismiss = { deleteTarget = null },
     ) {
         Text(stringResource(R.string.skills_page_delete_message, deleteTarget?.name ?: ""))
+    }
+
+    selectedPlugin?.let { skill ->
+        val info = pluginManager.loadInfo(skill.pluginId)
+        InstalledPluginDetailDialog(
+            plugin = InstalledPlugin(
+                id = skill.pluginId,
+                info = info,
+                status = if (skill.enabled) PluginStatus.ENABLED else PluginStatus.INSTALLED,
+            ),
+            installDir = pluginManager.getPluginDir(skill.pluginId).absolutePath,
+            onToggle = { vm.togglePluginSkill(skill.pluginId) },
+            onUninstall = {
+                vm.uninstallPluginSkill(skill.pluginId)
+                selectedPlugin = null
+            },
+            onDismiss = { selectedPlugin = null },
+        )
+    }
+}
+
+@Composable
+private fun PluginSkillCard(
+    skill: PluginSkillInfo,
+    onClick: () -> Unit,
+    onToggle: () -> Unit,
+) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = HugeIcons.Puzzle,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = skill.name,
+                        style = MaterialTheme.typography.titleSmallEmphasized,
+                        maxLines = 1,
+                    )
+                    AssistChip(
+                        onClick = {},
+                        label = { Text("插件", style = MaterialTheme.typography.labelSmall) },
+                    )
+                }
+                Text(
+                    text = skill.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                )
+            }
+            Switch(checked = skill.enabled, onCheckedChange = { onToggle() })
+        }
     }
 }
 

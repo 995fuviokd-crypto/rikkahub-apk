@@ -70,6 +70,7 @@ import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.data.api.OperitListItem
 import me.rerere.rikkahub.data.api.OperitMarketDataSource
+import me.rerere.rikkahub.data.api.operitPluginIdFor
 import me.rerere.rikkahub.data.plugin.InstalledPlugin
 import me.rerere.rikkahub.data.plugin.PluginCategories
 import me.rerere.rikkahub.data.plugin.PluginManager
@@ -80,6 +81,18 @@ import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.theme.CustomColors
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
+
+private const val MARKET_SOURCE_ALL = "全部"
+private const val MARKET_SOURCE_OFFICIAL = "官方市场"
+private const val MARKET_SOURCE_OPERIT = "Operit 社区"
+
+/** Operit 资源类型映射到市场分类（script/package 视为插件） */
+private fun operitCategoryFor(type: String): String = when (type) {
+    "skill" -> PluginCategories.TYPE_SKILL
+    "mcp" -> PluginCategories.TYPE_MCP
+    "script", "package" -> PluginCategories.TYPE_PLUGIN
+    else -> type
+}
 
 @Composable
 fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
@@ -96,8 +109,6 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
     val operitEntries by vm.operitEntries.collectAsStateWithLifecycle()
     val operitLoading by vm.operitLoading.collectAsStateWithLifecycle()
     val operitError by vm.operitError.collectAsStateWithLifecycle()
-    val operitSort by vm.operitSort.collectAsStateWithLifecycle()
-    val operitType by vm.operitType.collectAsStateWithLifecycle()
     val operitInstallingId by vm.operitInstallingId.collectAsStateWithLifecycle()
 
     var tab by remember { mutableIntStateOf(0) }
@@ -164,8 +175,10 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
     // 进入市场页自动拉取最新索引
     LaunchedEffect(tab) {
         when (tab) {
-            1 -> vm.loadMarket()
-            2 -> vm.loadOperit()
+            1 -> {
+                vm.loadMarket()
+                vm.loadOperit()
+            }
         }
     }
 
@@ -239,11 +252,6 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
                     onClick = { tab = 1 },
                     text = { Text("市场") },
                 )
-                Tab(
-                    selected = tab == 2,
-                    onClick = { tab = 2 },
-                    text = { Text("Operit 社区") },
-                )
             }
 
             when (tab) {
@@ -257,31 +265,27 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
 
                 1 -> MarketTab(
                     entries = marketEntries,
+                    operitEntries = operitEntries,
                     installed = installed,
                     loading = marketLoading,
                     error = marketError,
+                    operitLoading = operitLoading,
+                    operitError = operitError,
                     downloadingId = downloadingId,
+                    operitInstallingId = operitInstallingId,
                     search = search,
                     onSearchChange = { search = it },
                     category = category,
                     onCategoryChange = { category = it },
                     onInstall = vm::install,
+                    onInstallOperit = vm::installOperit,
                     onSelect = { selectedEntry = it },
-                    onRetry = vm::loadMarket,
-                    onRefresh = vm::loadMarket,
-                )
-
-                2 -> OperitTab(
-                    entries = operitEntries,
-                    loading = operitLoading,
-                    error = operitError,
-                    installingId = operitInstallingId,
-                    sort = operitSort,
-                    type = operitType,
-                    onSortChange = vm::setOperitSort,
-                    onTypeChange = vm::setOperitType,
-                    onRetry = vm::loadOperit,
-                    onInstall = vm::installOperit,
+                    onRetryMarket = vm::loadMarket,
+                    onRetryOperit = vm::loadOperit,
+                    onRefresh = {
+                        vm.loadMarket()
+                        vm.loadOperit()
+                    },
                 )
             }
         }
@@ -516,124 +520,10 @@ private fun InstalledPluginCard(
 }
 
 @Composable
-private fun OperitTab(
-    entries: List<OperitListItem>,
-    loading: Boolean,
-    error: String?,
-    installingId: String?,
-    sort: String,
-    type: String,
-    onSortChange: (String) -> Unit,
-    onTypeChange: (String) -> Unit,
-    onRetry: () -> Unit,
-    onInstall: (OperitListItem) -> Unit,
-) {
-    val typeOptions = listOf("all", "skill", "mcp", "script", "package")
-    val sortOptions = listOf("likes", "downloads", "updated")
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            AssistChip(
-                onClick = {},
-                label = { Text("Operit 社区资源") },
-            )
-            Spacer(Modifier.weight(1f))
-            DropdownMenuChip(
-                current = sortOptions.firstOrNull { it == sort } ?: "likes",
-                options = sortOptions,
-                label = { OperitMarketDataSource.typeLabel(it) },
-                onSelect = onSortChange,
-            )
-        }
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            items(typeOptions, key = { it }) { t ->
-                FilterChip(
-                    selected = type == t,
-                    onClick = { onTypeChange(t) },
-                    label = { Text(OperitMarketDataSource.typeLabel(t)) },
-                )
-            }
-        }
-        when {
-            loading && entries.isEmpty() -> Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) { CircularProgressIndicator() }
-
-            error != null -> Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(48.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(error, color = MaterialTheme.colorScheme.error)
-                TextButton(onClick = onRetry) { Text("重试") }
-            }
-
-            entries.isEmpty() -> Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(48.dp),
-                contentAlignment = Alignment.Center,
-            ) { Text("没有找到资源", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-
-            else -> LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(entries, key = { it.id }) { entry ->
-                    OperitEntryCard(
-                        entry = entry,
-                        installing = installingId == entry.id,
-                        onInstall = { onInstall(entry) },
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DropdownMenuChip(
-    current: String,
-    options: List<String>,
-    label: (String) -> String,
-    onSelect: (String) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        AssistChip(
-            onClick = { expanded = true },
-            label = { Text("排序: ${label(current)}") },
-        )
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(label(option)) },
-                    onClick = {
-                        expanded = false
-                        onSelect(option)
-                    },
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun OperitEntryCard(
     entry: OperitListItem,
     installing: Boolean,
+    installed: Boolean,
     onInstall: () -> Unit,
 ) {
     Card {
@@ -647,6 +537,10 @@ private fun OperitEntryCard(
                 AssistChip(
                     onClick = {},
                     label = { Text(OperitMarketDataSource.typeLabel(entry.type)) },
+                )
+                AssistChip(
+                    onClick = {},
+                    label = { Text("Operit", style = MaterialTheme.typography.labelSmall) },
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
@@ -682,10 +576,14 @@ private fun OperitEntryCard(
                     color = MaterialTheme.colorScheme.primary,
                 )
                 Spacer(Modifier.weight(1f))
-                if (installing) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                } else {
-                    Button(onClick = onInstall) { Text("安装") }
+                when {
+                    installing -> CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    installed -> Text(
+                        text = "已安装",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    else -> Button(onClick = onInstall) { Text("安装") }
                 }
             }
         }
@@ -695,22 +593,31 @@ private fun OperitEntryCard(
 @Composable
 private fun MarketTab(
     entries: List<PluginMarketEntry>,
+    operitEntries: List<OperitListItem>,
     installed: List<InstalledPlugin>,
     loading: Boolean,
     error: String?,
+    operitLoading: Boolean,
+    operitError: String?,
     downloadingId: String?,
+    operitInstallingId: String?,
     search: String,
     onSearchChange: (String) -> Unit,
     category: String,
     onCategoryChange: (String) -> Unit,
     onInstall: (PluginMarketEntry) -> Unit,
+    onInstallOperit: (OperitListItem) -> Unit,
     onSelect: (PluginMarketEntry) -> Unit,
-    onRetry: () -> Unit,
+    onRetryMarket: () -> Unit,
+    onRetryOperit: () -> Unit,
     onRefresh: () -> Unit,
 ) {
     val installedIds = remember(installed) { installed.map { it.id }.toSet() }
+    var source by remember { mutableStateOf(MARKET_SOURCE_ALL) }
+    val sourceOptions = listOf(MARKET_SOURCE_ALL, MARKET_SOURCE_OFFICIAL, MARKET_SOURCE_OPERIT)
     val categories = PluginCategories.marketTypes
-    val filtered = entries.filter { entry ->
+
+    val filteredOfficial = entries.filter { entry ->
         val matchSearch = search.isBlank() ||
             entry.name.contains(search, ignoreCase = true) ||
             entry.description.contains(search, ignoreCase = true) ||
@@ -718,6 +625,17 @@ private fun MarketTab(
         val matchCategory = category == PluginCategories.ALL || entry.type == category
         matchSearch && matchCategory
     }
+    val filteredOperit = operitEntries.filter { entry ->
+        val matchSearch = search.isBlank() ||
+            entry.title.contains(search, ignoreCase = true) ||
+            entry.description.contains(search, ignoreCase = true)
+        val matchCategory = category == PluginCategories.ALL || operitCategoryFor(entry.type) == category
+        matchSearch && matchCategory
+    }
+    val showOfficial = source != MARKET_SOURCE_OPERIT
+    val showOperit = source != MARKET_SOURCE_OFFICIAL
+    val listEmpty =
+        (showOfficial && filteredOfficial.isEmpty()) && (showOperit && filteredOperit.isEmpty())
 
     Column(modifier = Modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -733,6 +651,18 @@ private fun MarketTab(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            items(sourceOptions, key = { it }) { option ->
+                FilterChip(
+                    selected = source == option,
+                    onClick = { source = option },
+                    label = { Text(option) },
+                )
+            }
+        }
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             items(categories, key = { it }) { cat ->
                 FilterChip(
                     selected = category == cat,
@@ -742,12 +672,12 @@ private fun MarketTab(
             }
         }
         PullToRefreshBox(
-            isRefreshing = loading,
+            isRefreshing = loading || operitLoading,
             onRefresh = onRefresh,
             modifier = Modifier.fillMaxSize(),
         ) {
             when {
-                loading -> Box(
+                loading && operitLoading && entries.isEmpty() && operitEntries.isEmpty() -> Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(48.dp),
@@ -756,7 +686,7 @@ private fun MarketTab(
                     CircularProgressIndicator()
                 }
 
-                error != null -> Column(
+                error != null && operitError != null && entries.isEmpty() && operitEntries.isEmpty() -> Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(48.dp),
@@ -764,10 +694,10 @@ private fun MarketTab(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(error, color = MaterialTheme.colorScheme.error)
-                    TextButton(onClick = onRetry) { Text("重试") }
+                    TextButton(onClick = onRetryMarket) { Text("重试") }
                 }
 
-                filtered.isEmpty() -> Box(
+                listEmpty -> Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(48.dp),
@@ -781,14 +711,44 @@ private fun MarketTab(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    items(filtered, key = { it.id }) { entry ->
-                        MarketEntryCard(
-                            entry = entry,
-                            installed = entry.id in installedIds,
-                            downloading = downloadingId == entry.id,
-                            onClick = { onSelect(entry) },
-                            onInstall = { onInstall(entry) },
-                        )
+                    if (showOfficial && filteredOfficial.isNotEmpty()) {
+                        items(filteredOfficial, key = { "official-${it.id}" }) { entry ->
+                            MarketEntryCard(
+                                entry = entry,
+                                installed = entry.id in installedIds,
+                                downloading = downloadingId == entry.id,
+                                onClick = { onSelect(entry) },
+                                onInstall = { onInstall(entry) },
+                            )
+                        }
+                    } else if (showOfficial && error != null) {
+                        item {
+                            Text(
+                                "官方市场加载失败：$error",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            TextButton(onClick = onRetryMarket) { Text("重试") }
+                        }
+                    }
+                    if (showOperit && filteredOperit.isNotEmpty()) {
+                        items(filteredOperit, key = { "operit-${it.id}" }) { entry ->
+                            OperitEntryCard(
+                                entry = entry,
+                                installing = operitInstallingId == entry.id,
+                                installed = operitPluginIdFor(entry.id) in installedIds,
+                                onInstall = { onInstallOperit(entry) },
+                            )
+                        }
+                    } else if (showOperit && operitError != null) {
+                        item {
+                            Text(
+                                "Operit 社区加载失败：$operitError",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            TextButton(onClick = onRetryOperit) { Text("重试") }
+                        }
                     }
                 }
             }
@@ -924,99 +884,6 @@ private fun PluginDetailDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
-        },
-    )
-}
-
-@Composable
-private fun InstalledPluginDetailDialog(
-    plugin: InstalledPlugin,
-    installDir: String,
-    onToggle: () -> Unit,
-    onUninstall: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val uriHandler = LocalUriHandler.current
-    val info = plugin.info
-    val hasCapability = info != null && (
-        info.systemPrompt.isNotBlank() ||
-            info.actions.isNotEmpty() ||
-            info.extensionPoints.homeActions.isNotEmpty() ||
-            info.extensionPoints.settingsActions.isNotEmpty() ||
-            info.extensionPoints.sidebarActions.isNotEmpty()
-        )
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(info?.name ?: plugin.id) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = "状态：${when {
-                        plugin.status == PluginStatus.BROKEN -> "损坏"
-                        plugin.status == PluginStatus.ENABLED && !hasCapability -> "资源包（仅提供文件，无运行能力）"
-                        plugin.status == PluginStatus.ENABLED -> "已生效"
-                        hasCapability -> "未生效"
-                        else -> "已安装"
-                    }}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                info?.let { i ->
-                    if (i.description.isNotBlank()) {
-                        Text(i.description, style = MaterialTheme.typography.bodyMedium)
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AssistChip(
-                            onClick = {},
-                            label = { Text(PluginCategories.typeLabel(i.type), style = MaterialTheme.typography.labelSmall) },
-                        )
-                        if (i.version.isNotBlank()) {
-                            AssistChip(
-                                onClick = {},
-                                label = { Text("v${i.version}", style = MaterialTheme.typography.labelSmall) },
-                            )
-                        }
-                    }
-                    if (i.author.isNotBlank()) {
-                        Text("作者：${i.author}", style = MaterialTheme.typography.bodySmall)
-                    }
-                    if (i.repository.isNotBlank() && (i.repository.startsWith("https://") || i.repository.startsWith("http://"))) {
-                        Text(
-                            text = "GitHub 仓库",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.clickable { uriHandler.openUri(i.repository) },
-                        )
-                    }
-                    if (i.tags.isNotEmpty()) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            i.tags.take(4).forEach { tag ->
-                                AssistChip(
-                                    onClick = {},
-                                    label = { Text(tag, style = MaterialTheme.typography.labelSmall) },
-                                )
-                            }
-                        }
-                    }
-                }
-                Text(
-                    text = "安装位置：$installDir",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (info != null && plugin.status != PluginStatus.BROKEN) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("启用", style = MaterialTheme.typography.bodyMedium)
-                        Switch(checked = plugin.status == PluginStatus.ENABLED, onCheckedChange = { onToggle() })
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onUninstall) { Text("卸载") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("关闭") }
         },
     )
 }
