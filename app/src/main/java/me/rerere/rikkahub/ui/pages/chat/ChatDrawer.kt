@@ -521,6 +521,60 @@ fun ChatDrawerContent(
                 }
             )
 
+            // 插件扩展能力主界面入口（homeActions）：独立纵向区块，避免挤压底部导航按钮
+            val homePluginManager: me.rerere.rikkahub.data.plugin.PluginManager = koinInject()
+            val homeActions = homePluginManager.enabledExtensionActions(settings.enabledPlugins, "home")
+            var homePromptAction by remember { mutableStateOf<me.rerere.rikkahub.data.plugin.PluginExtensionAction?>(null) }
+            if (homeActions.isNotEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    homeActions.forEach { action ->
+                        Surface(
+                            onClick = {
+                                me.rerere.rikkahub.ui.pages.extensions.plugin.performExtensionAction(
+                                    action = action,
+                                    pluginManager = homePluginManager,
+                                    context = context,
+                                    onOpenWebView = { url, contentId, pluginId ->
+                                        navController.navigate(Screen.WebView(url = url, contentId = contentId, pluginId = pluginId))
+                                    },
+                                    onPromptAction = { homePromptAction = it },
+                                )
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp),
+                            shape = MaterialTheme.shapes.medium,
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Icon(
+                                    imageVector = HugeIcons.Puzzle,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    text = action.label,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             Row(
                 horizontalArrangement = Arrangement.SpaceAround,
                 verticalAlignment = Alignment.CenterVertically,
@@ -603,51 +657,6 @@ fun ChatDrawerContent(
                 )
 
                 Spacer(Modifier.weight(1f))
-
-                // 插件扩展能力主界面入口（homeActions）
-                val pluginManager: me.rerere.rikkahub.data.plugin.PluginManager = koinInject()
-                val homeActions = pluginManager.enabledExtensionActions(settings.enabledPlugins, "home")
-                var homePromptAction by remember { mutableStateOf<me.rerere.rikkahub.data.plugin.PluginExtensionAction?>(null) }
-                homeActions.forEach { action ->
-                    Surface(
-                        onClick = {
-                            me.rerere.rikkahub.ui.pages.extensions.plugin.performExtensionAction(
-                                action = action,
-                                pluginManager = pluginManager,
-                                context = context,
-                                onOpenWebView = { url, contentId, pluginId ->
-                                    navController.navigate(Screen.WebView(url = url, contentId = contentId, pluginId = pluginId))
-                                },
-                                onPromptAction = { homePromptAction = it },
-                            )
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 4.dp),
-                        shape = MaterialTheme.shapes.medium,
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            Icon(
-                                imageVector = HugeIcons.Puzzle,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.onSurface,
-                            )
-                            Text(
-                                text = action.label,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                    }
-                }
 
                 DrawerAction(
                     icon = {

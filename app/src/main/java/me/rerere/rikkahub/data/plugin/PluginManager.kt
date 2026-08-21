@@ -154,13 +154,22 @@ class PluginManager(
      * relativePath 相对插件目录下的 web/，防路径穿越。
      */
     fun loadWebResource(pluginId: String, relativePath: String): String? {
+        val file = resolveWebResourceFile(pluginId, relativePath) ?: return null
+        return runCatching { file.readText() }.getOrNull()
+    }
+
+    /**
+     * 解析插件包内 web/ 目录下的资源文件（用于 webview 扩展入口以真实文件 URL 加载）。
+     * relativePath 相对插件目录下的 web/，防路径穿越。
+     */
+    fun resolveWebResourceFile(pluginId: String, relativePath: String): File? {
         val webRoot = File(getPluginDir(pluginId), "web")
         val file = File(webRoot, relativePath)
         val canonicalRoot = runCatching { webRoot.canonicalPath }.getOrNull() ?: return null
         val canonicalFile = runCatching { file.canonicalPath }.getOrNull() ?: return null
         if (!canonicalFile.startsWith(canonicalRoot)) return null
         if (!file.isFile) return null
-        return runCatching { file.readText() }.getOrNull()
+        return file
     }
 
     /** 内置插件包制作技能 id（随 App 预置，可在已安装列表卸载） */

@@ -25,7 +25,6 @@ import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.rikkahub.data.plugin.PluginExtensionAction
 import me.rerere.rikkahub.data.plugin.PluginManager
 import me.rerere.rikkahub.ui.components.ui.CardGroup
-import me.rerere.rikkahub.ui.components.webview.WebViewContentCache
 import me.rerere.rikkahub.utils.openUrl
 
 /** 解析插件 webview 资源引用 `plugin://<插件id>/<web路径>` */
@@ -67,10 +66,9 @@ fun performExtensionAction(
             } else {
                 val (pluginId, path) = parsePluginWebPayload(action.payload)
                 if (pluginId != null) {
-                    val html = pluginManager.loadWebResource(pluginId, path ?: "index.html")
-                    if (html != null) {
-                        val contentId = WebViewContentCache.store(context.cacheDir, html)
-                        onOpenWebView("", contentId, pluginId)
+                    val file = pluginManager.resolveWebResourceFile(pluginId, path ?: "index.html")
+                    if (file != null) {
+                        onOpenWebView(file.toURI().toString(), "", pluginId)
                     } else {
                         Toast.makeText(context, "插件页面不存在", Toast.LENGTH_SHORT).show()
                     }
