@@ -415,7 +415,7 @@ class RouteActivity : ComponentActivity() {
                             }
 
                             entry<Screen.WebView> { key ->
-                                WebViewPage(key.url, key.contentId)
+                                WebViewPage(key.url, key.contentId, key.pluginId)
                             }
 
                             entry<Screen.SettingTheme> {
@@ -676,7 +676,7 @@ sealed interface Screen : NavKey {
     data object ImageGen : Screen
 
     @Serializable
-    data class WebView(val url: String = "", val contentId: String = "") : Screen
+    data class WebView(val url: String = "", val contentId: String = "", val pluginId: String = "") : Screen
 
     @Serializable
     data object SettingTheme : Screen

@@ -50,7 +50,7 @@ fun performExtensionAction(
     action: PluginExtensionAction,
     pluginManager: PluginManager,
     context: Context,
-    onOpenWebView: (url: String, contentId: String) -> Unit,
+    onOpenWebView: (url: String, contentId: String, pluginId: String) -> Unit,
     onPromptAction: (PluginExtensionAction) -> Unit,
 ) {
     fun copy(text: String) {
@@ -63,14 +63,14 @@ fun performExtensionAction(
         "copy" -> copy(action.payload)
         "webview" -> {
             if (action.payload.startsWith("http://") || action.payload.startsWith("https://")) {
-                onOpenWebView(action.payload, "")
+                onOpenWebView(action.payload, "", "")
             } else {
                 val (pluginId, path) = parsePluginWebPayload(action.payload)
                 if (pluginId != null) {
                     val html = pluginManager.loadWebResource(pluginId, path ?: "index.html")
                     if (html != null) {
                         val contentId = WebViewContentCache.store(context.cacheDir, html)
-                        onOpenWebView("", contentId)
+                        onOpenWebView("", contentId, pluginId)
                     } else {
                         Toast.makeText(context, "插件页面不存在", Toast.LENGTH_SHORT).show()
                     }
@@ -124,7 +124,7 @@ fun PluginExtensionsCard(
     enabledPlugins: Set<String>,
     pluginManager: PluginManager,
     scope: String,
-    onOpenWebView: (url: String, contentId: String) -> Unit = { _, _ -> },
+    onOpenWebView: (url: String, contentId: String, pluginId: String) -> Unit = { _, _, _ -> },
 ) {
     val actions = pluginManager.enabledExtensionActions(enabledPlugins, scope)
     if (actions.isEmpty()) return

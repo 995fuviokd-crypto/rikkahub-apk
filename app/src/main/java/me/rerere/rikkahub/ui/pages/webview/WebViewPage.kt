@@ -36,20 +36,32 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.stroke.MoreVertical
+import me.rerere.rikkahub.data.operit.OperitScriptRuntime
+import me.rerere.rikkahub.data.plugin.PluginJsBridge
+import me.rerere.rikkahub.data.plugin.PluginManager
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.webview.WEB_VIEW_BASE_URL
 import me.rerere.rikkahub.ui.components.webview.WebView
 import me.rerere.rikkahub.ui.components.webview.WebViewContentCache
 import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
+import org.koin.compose.koinInject
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WebViewPage(url: String, contentId: String) {
+fun WebViewPage(url: String, contentId: String, pluginId: String = "") {
     val context = LocalContext.current
+    val pluginManager: PluginManager = koinInject()
+    val operitRuntime: OperitScriptRuntime = koinInject()
+    val interfaces = if (pluginId.isNotEmpty()) {
+        mapOf("AndroidPlugin" to PluginJsBridge(pluginId, pluginManager, operitRuntime))
+    } else {
+        emptyMap()
+    }
     val state = if (url.isNotEmpty()) {
         rememberWebViewState(
             url = url,
+            interfaces = interfaces,
             settings = {
                 builtInZoomControls = true
                 displayZoomControls = false
@@ -64,6 +76,7 @@ fun WebViewPage(url: String, contentId: String) {
             data = content,
             baseUrl = WEB_VIEW_BASE_URL,
             mimeType = "text/html",
+            interfaces = interfaces,
             settings = {
                 builtInZoomControls = true
                 displayZoomControls = false

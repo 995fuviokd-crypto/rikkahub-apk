@@ -17,7 +17,7 @@ class OperitJsTranspilerTest {
         """.trimIndent()
         val out = OperitJsTranspiler.transpile(src)
         assertTrue(out.contains("function foo(a) { return __operitRunGen(function*()"))
-        assertTrue(out.contains("var r = yield Tools.Chat.listChats({ limit: a });"))
+        assertTrue(out.contains("var r = (yield Tools.Chat.listChats({ limit: a }));"))
         assertTrue(out.contains("return r;"))
         assertFalse(out.contains("async function"))
         assertFalse(out.contains("await"))
@@ -59,7 +59,7 @@ class OperitJsTranspilerTest {
         """.trimIndent()
         val out = OperitJsTranspiler.transpile(src)
         assertTrue(out.contains("getInfo() { return __operitRunGen(function*()"))
-        assertTrue(out.contains("var r = yield Tools.Chat.getMessages"))
+        assertTrue(out.contains("var r = (yield Tools.Chat.getMessages"))
     }
 
     @Test
@@ -76,7 +76,7 @@ class OperitJsTranspilerTest {
         val out = OperitJsTranspiler.transpile(src)
         assertTrue(out.contains("function outer() { return __operitRunGen(function*()"))
         assertTrue(out.contains("function inner() { return __operitRunGen(function*()"))
-        assertTrue(out.contains("return yield Tools.Files.read"))
+        assertTrue(out.contains("return (yield Tools.Files.read"))
     }
 
     @Test

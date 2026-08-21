@@ -490,8 +490,8 @@ fun ChatDrawerContent(
                 enabledPlugins = settings.enabledPlugins,
                 pluginManager = sidebarPluginManager,
                 scope = "sidebar",
-            ) { url, contentId ->
-                navController.navigate(Screen.WebView(url = url, contentId = contentId))
+            ) { url, contentId, pluginId ->
+                navController.navigate(Screen.WebView(url = url, contentId = contentId, pluginId = pluginId))
             }
                 }
             }
@@ -615,8 +615,8 @@ fun ChatDrawerContent(
                                 action = action,
                                 pluginManager = pluginManager,
                                 context = context,
-                                onOpenWebView = { url, contentId ->
-                                    navController.navigate(Screen.WebView(url = url, contentId = contentId))
+                                onOpenWebView = { url, contentId, pluginId ->
+                                    navController.navigate(Screen.WebView(url = url, contentId = contentId, pluginId = pluginId))
                                 },
                                 onPromptAction = { homePromptAction = it },
                             )

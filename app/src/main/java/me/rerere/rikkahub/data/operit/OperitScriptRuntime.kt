@@ -247,6 +247,9 @@ function __operitLoadEntry(entry) {
 
     data class ToolResult(val ok: Boolean, val message: String, val data: JsonElement?)
 
+    /** 插件数据目录（脚本内 Files 工具的沙箱根目录），供 webview 插件页 bridge 复用 */
+    fun dataDir(pluginId: String): File = File(context.filesDir, "$OPERIT_DATA_ROOT/$pluginId")
+
     /** 执行插件目录下的 Operit 脚本工具，返回 JSON 结果 */
     fun runTool(pluginDir: File, pluginId: String, toolName: String, argsJson: String): ToolResult {
         val operitDir = File(pluginDir, OPERIT_DIR)

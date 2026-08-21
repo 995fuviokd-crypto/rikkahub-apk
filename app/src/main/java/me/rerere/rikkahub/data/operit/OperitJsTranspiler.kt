@@ -131,8 +131,12 @@ function __operitRunGen(gen, self) {
                 }
 
                 t.text == "await" && !t.inString && stack.any { it == BraceKind.GENERATOR_BODY } -> {
-                    out.append("yield")
-                    i++
+                    val exprEnd = findExpressionEnd(tokens, i + 1)
+                    val exprStart = nextSignificant(tokens, i)
+                    out.append("(yield ")
+                    copyRangeTranspiled(tokens, exprStart, exprEnd, out, true)
+                    out.append(")")
+                    i = exprEnd + 1
                 }
 
                 t.text == "{" && !t.inString -> {
