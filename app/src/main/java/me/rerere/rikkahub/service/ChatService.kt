@@ -821,8 +821,20 @@ class ChatService(
                 }
                 // 压缩后上下文已降到阈值以下，继续正常生成
                 if (compressResult.tokensAfter < settings.autoCompressThresholdTokens) continue
-                // 仍超阈值：无法再压缩（保留消息已到下限）或已达重试上限时给出明确提示，避免静默中断
-                if (compressResult.keepRecentAtFloor || autoCompressTries >= MAX_AUTO_COMPRESS_TRIES) {
+                // 仍超阈值：已达到保留下限（keepRecent=0），说明用户设定的阈值过低、
+                // 即使把所有历史压成摘要也无法降到阈值以下。此时不再中断对话，
+                // 而是接受当前压缩结果继续生成，并把压缩重试次数置满，
+                // 避免后续轮次反复触发无意义的重复压缩。
+                if (compressResult.keepRecentAtFloor) {
+                    Logging.log(
+                        TAG,
+                        "auto compress reached floor, continue with compressed context (tokens=${compressResult.tokensAfter}, threshold=${settings.autoCompressThresholdTokens})"
+                    )
+                    autoCompressTries = MAX_AUTO_COMPRESS_TRIES
+                    continue
+                }
+                // 未到保留下限但仍超阈值，且已达重试上限：给出明确提示，避免静默中断
+                if (autoCompressTries >= MAX_AUTO_COMPRESS_TRIES) {
                     addError(
                         IllegalStateException(context.getString(R.string.chat_page_auto_compress_still_over_threshold)),
                         conversationId,
@@ -1252,13 +1264,17 @@ class ChatService(
 
     /**
      * 自动压缩执行体：估算超阈值后，保留最近 N 条消息，将更早历史压缩为摘要。
+     *
+     * 自适应调整：当用户设置的保留条数/阈值无法一次压缩到位时，自动逐步降低
+     * 保留条数重新压缩，直到压缩成功或保留条数降到 0；即使最终仍超阈值
+     * （用户阈值设置过低）也视为已完成压缩，交由调用方继续生成而非中断。
      */
     private suspend fun autoCompressConversation(
         conversationId: Uuid,
         conversation: Conversation,
         settings: Settings
     ): AutoCompressResult {
-        return runCatching {
+        return try {
             val allMessages = conversation.currentMessages
             if (allMessages.size <= 1) {
                 return AutoCompressResult(
@@ -1267,21 +1283,52 @@ class ChatService(
                     keepRecentAtFloor = true,
                 )
             }
-            val keepRecent = settings.autoCompressKeepRecent.coerceIn(0, allMessages.size - 1)
-            compressConversation(
-                conversationId = conversationId,
-                conversation = conversation,
-                additionalPrompt = "",
-                targetTokens = settings.autoCompressThresholdTokens,
-                keepRecentMessages = keepRecent
-            ).getOrThrow()
-            val tokensAfter = TokenEstimate.estimateConversationTokens(getConversationFlow(conversationId).value)
-            AutoCompressResult(
-                compressed = true,
-                tokensAfter = tokensAfter,
-                keepRecentAtFloor = keepRecent == 0,
-            )
-        }.getOrElse {
+            val threshold = settings.autoCompressThresholdTokens
+            var keepRecent = settings.autoCompressKeepRecent.coerceIn(0, allMessages.size - 1)
+            while (true) {
+                val result = runCatching {
+                    compressConversation(
+                        conversationId = conversationId,
+                        conversation = getConversationFlow(conversationId).value,
+                        additionalPrompt = "",
+                        targetTokens = threshold,
+                        keepRecentMessages = keepRecent
+                    ).getOrThrow()
+                }
+                if (result.isFailure) {
+                    // 压缩请求失败（模型不可用/摘要生成失败）：先尝试降低保留条数换更小输入重试
+                    if (keepRecent > 0) {
+                        keepRecent = (keepRecent - 1).coerceAtLeast(0)
+                        continue
+                    }
+                    return AutoCompressResult(
+                        compressed = false,
+                        tokensAfter = TokenEstimate.estimateConversationTokens(getConversationFlow(conversationId).value),
+                        keepRecentAtFloor = true,
+                    )
+                }
+                val tokensAfter = TokenEstimate.estimateConversationTokens(getConversationFlow(conversationId).value)
+                if (tokensAfter < threshold) {
+                    return AutoCompressResult(
+                        compressed = true,
+                        tokensAfter = tokensAfter,
+                        keepRecentAtFloor = keepRecent == 0,
+                    )
+                }
+                if (keepRecent > 0) {
+                    keepRecent = (keepRecent - 1).coerceAtLeast(0)
+                    continue
+                }
+                // 保留条数已到 0 仍超阈值（用户阈值设置过低）：接受当前结果，由调用方继续生成
+                return AutoCompressResult(
+                    compressed = true,
+                    tokensAfter = tokensAfter,
+                    keepRecentAtFloor = true,
+                )
+            }
+            // 理论上不可达；提供明确的 Nothing 结果以满足控制流类型
+            error("unreachable: auto compress loop must return")
+        } catch (e: Throwable) {
             AutoCompressResult(
                 compressed = false,
                 tokensAfter = TokenEstimate.estimateConversationTokens(conversation),

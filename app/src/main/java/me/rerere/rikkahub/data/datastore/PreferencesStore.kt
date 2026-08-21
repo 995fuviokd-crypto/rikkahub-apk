@@ -698,7 +698,7 @@ data class Settings(
     // 屏幕显示缩放：把整个 app 按目标密度（densityDpi）渲染，手机屏幕上呈现平板布局。
     // mode: 0=恢复（跟随设备） 1=平板预设 2=自定义密度
     val displayScaleMode: Int = 0,
-    val displayScaleDensityDpi: Int = 160,
+    val displayScaleDensityDpi: Int = 240,
     // 托管工具自动审批：开启后工作区/系统等需审批的工具调用自动通过（ask_user 仍需人工）
     val autoApproveTools: Boolean = false,
     // 插件市场：已启用插件 id 集合；插件启用后注入 systemPrompt 并显示快捷操作

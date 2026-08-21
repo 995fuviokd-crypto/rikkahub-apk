@@ -37,6 +37,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
@@ -218,6 +219,7 @@ fun WorkspaceDetailPage(id: String) {
                     onDetectDevTools = vm::detectDevTools,
                     onInstallDevTool = vm::installDevTool,
                     onInstallAllDevTools = vm::installAllDevTools,
+                    onSelectDevToolVersion = vm::selectDevToolVersion,
                 )
 
                 1 -> WorkspaceFilesPage(
@@ -349,6 +351,7 @@ private fun WorkspaceBasicPage(
     onDetectDevTools: () -> Unit,
     onInstallDevTool: (String) -> Unit,
     onInstallAllDevTools: () -> Unit,
+    onSelectDevToolVersion: (String, String) -> Unit,
 ) {
     val context = LocalContext.current
     // 手机全部文件访问权限状态, 从系统设置返回后(ON_RESUME)自动刷新
@@ -564,6 +567,7 @@ private fun WorkspaceBasicPage(
                 onDetect = onDetectDevTools,
                 onInstall = onInstallDevTool,
                 onInstallAll = onInstallAllDevTools,
+                onSelectVersion = { toolId, version -> onSelectDevToolVersion(toolId, version) },
             )
         }
 
@@ -585,6 +589,7 @@ private fun WorkspaceDevToolsCard(
     onDetect: () -> Unit,
     onInstall: (String) -> Unit,
     onInstallAll: () -> Unit,
+    onSelectVersion: (String, String) -> Unit,
 ) {
     val rootfsReady = workspace?.shellStatus == WorkspaceShellStatus.READY.name
     var expanded by remember { mutableStateOf(true) }
@@ -665,6 +670,9 @@ private fun WorkspaceDevToolsCard(
                         DevToolRow(
                             state = tool,
                             onInstall = { onInstall(tool.tool.id) },
+                            onSelectVersion = { version ->
+                                onSelectVersion(tool.tool.id, version)
+                            },
                         )
                     }
                 }
@@ -683,6 +691,7 @@ private fun WorkspaceDevToolsCard(
 private fun DevToolRow(
     state: DevToolState,
     onInstall: () -> Unit,
+    onSelectVersion: (String) -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -744,9 +753,61 @@ private fun DevToolRow(
             }
 
             else -> {
-                TextButton(onClick = onInstall) {
+                // 支持选版本的工具：先展示版本选择器，再展示安装按钮
+                if (state.tool.versions.isNotEmpty()) {
+                    DevToolVersionSelector(
+                        versions = state.tool.versions,
+                        selected = state.selectedVersion
+                            ?: state.tool.versions.firstOrNull(),
+                        enabled = !state.installing,
+                        onSelect = onSelectVersion,
+                    )
+                    Spacer(Modifier.size(4.dp))
+                }
+                TextButton(onClick = onInstall, enabled = !state.installing) {
                     Text(stringResource(R.string.workspace_detail_install))
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DevToolVersionSelector(
+    versions: List<String>,
+    selected: String?,
+    enabled: Boolean,
+    onSelect: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(
+            onClick = { expanded = true },
+            enabled = enabled,
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+        ) {
+            Text(
+                text = selected ?: versions.firstOrNull().orEmpty(),
+                style = MaterialTheme.typography.labelSmall,
+            )
+            Icon(
+                imageVector = HugeIcons.ArrowDown01,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            versions.forEach { version ->
+                DropdownMenuItem(
+                    text = { Text("v$version") },
+                    onClick = {
+                        onSelect(version)
+                        expanded = false
+                    },
+                )
             }
         }
     }

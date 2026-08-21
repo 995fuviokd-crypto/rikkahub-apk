@@ -65,6 +65,13 @@ private fun buildWorkspacePrompt(
     appendLine("- Prefer `workspace_shell$toolSuffix` for tasks that standard Unix tools handle well, and prefer `workspace_edit_file$toolSuffix` for targeted edits over rewriting whole files.")
     appendLine("- The skills directory is mounted at `/skills`. Each skill is a subdirectory `/skills/<skill-name>/` containing a `SKILL.md` (with `name` and `description` frontmatter) plus any supporting files. Read a skill's `SKILL.md` before using it, and follow its instructions.")
     appendLine("- Files the user uploaded are mounted at `/upload`. Treat `/upload` as READ-ONLY: read uploaded files from `/upload/<file-name>`, but never modify, overwrite, or delete anything there. If you need to change an uploaded file, copy it into `/workspace` first and edit the copy.")
+    appendLine("- Tool outputs and generated artifacts are mounted at `/tool_outputs`; write files there when you want the app to surface them to the user.")
+    if (workspace.androidLocalAccess) {
+        appendLine("- Your phone's storage is mounted at `/sdcard` when full storage access is granted. Read or write user files directly under `/sdcard/<path>`; if the directory appears empty, full storage access is not granted yet.")
+        if (!workspace.localDirectoryUri.isNullOrBlank()) {
+            appendLine("- A user-selected local folder is mounted at `/local`. It stays in sync: files you write under `/local` are copied back to the phone folder, and files the user places there are available to you under `/local`.")
+        }
+    }
     if (!cwd.isNullOrBlank() && toolSuffix.isEmpty()) {
         appendLine("- Current working directory: `$cwd`. Use this as the default context for file operations and shell commands.")
     }

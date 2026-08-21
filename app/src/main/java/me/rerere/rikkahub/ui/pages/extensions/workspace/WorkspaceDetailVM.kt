@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.InputStream
@@ -253,19 +254,40 @@ class WorkspaceDetailVM(
                 DEV_TOOLS.map { DevToolState(tool = it) }
             }
             _devTools.value = current.map { it.copy(checking = true) }
+            // 单条命令批量检测全部工具，避免每个工具都启动一次 PRoot 进程导致页面卡死
+            val commands = current.map { it.tool.command }
+            val detection = runCatching {
+                repository.executeCommand(
+                    workspace.id,
+                    buildString {
+                        append("for c in ")
+                        append(commands.joinToString(" ") { shellQuote(it) })
+                        append("; do if command -v \"${'$'}c\" >/dev/null 2>&1 ")
+                        append("|| find /opt /usr/local /usr/bin /bin -maxdepth 4 -name \"${'$'}c\" 2>/dev/null | grep -q .; ")
+                        append("then echo \"FOUND:${'$'}c\"; else echo \"MISSING:${'$'}c\"; fi; done")
+                    }
+                )
+            }.getOrNull()
+            val found = detection?.stdout.orEmpty()
+                .lineSequence()
+                .filter { it.startsWith("FOUND:") }
+                .mapNotNull { it.removePrefix("FOUND:").trim().takeIf { it.isNotEmpty() } }
+                .toSet()
             val detected = current.map { state ->
-                val ok = runCatching {
-                    repository.executeCommand(
-                        workspace.id,
-                        "command -v ${state.tool.command} >/dev/null 2>&1 && echo __FOUND__",
-                    )
-                }.getOrNull()?.exitCode == 0
-                state.copy(checking = false, installed = ok, error = null)
+                state.copy(
+                    checking = false,
+                    // 多条命令共用同一检测命令（如 nodejs 用 "node" 检测但包内含 npm）时，
+                    // 只要其中任意一条命令存在即视为已安装
+                    installed = state.tool.command.split(" ").any { it in found },
+                    error = null,
+                )
             }
             _devTools.value = detected
             _devToolsChecking.value = false
         }
     }
+
+    private fun shellQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
 
     /** 单个安装开发工具 */
     fun installDevTool(id: String) {
@@ -276,7 +298,7 @@ class WorkspaceDetailVM(
                 list.map { if (it.tool.id == id) it.copy(installing = true, error = null) else it }
             }
             val tool = _devTools.value.find { it.tool.id == id } ?: return@launch
-            val result = executeToolInstall(workspace.id, tool.tool)
+            val result = executeToolInstall(workspace.id, tool.tool, tool.selectedVersion)
             _devTools.update { list ->
                 list.map {
                     if (it.tool.id == id) {
@@ -288,6 +310,13 @@ class WorkspaceDetailVM(
                     } else it
                 }
             }
+        }
+    }
+
+    /** 选择某个工具要安装的版本（仅支持可选版本的工具） */
+    fun selectDevToolVersion(id: String, version: String) {
+        _devTools.update { list ->
+            list.map { if (it.tool.id == id) it.copy(selectedVersion = version) else it }
         }
     }
 
@@ -306,7 +335,7 @@ class WorkspaceDetailVM(
                             if (it.tool.id == state.tool.id) it.copy(installing = true, error = null) else it
                         }
                     }
-                    val (ok, error) = executeToolInstall(workspace.id, state.tool)
+                    val (ok, error) = executeToolInstall(workspace.id, state.tool, state.selectedVersion)
                     _devTools.update { list ->
                         list.map {
                             if (it.tool.id == state.tool.id) {
@@ -320,30 +349,86 @@ class WorkspaceDetailVM(
         }
     }
 
-    /** 执行安装命令，返回 (是否成功, 错误信息) */
-    private suspend fun executeToolInstall(workspaceId: String, tool: DevToolDef): Pair<Boolean, String?> {
-        return runCatching {
-            val command = buildString {
-                append("export DEBIAN_FRONTEND=noninteractive; ")
-                append("if command -v apt-get >/dev/null 2>&1; then ")
-                append("(apt-get update -qq >/dev/null 2>&1 || true); ")
-                append("apt-get install -y -qq ${tool.packageName} >/dev/null 2>&1 && echo __OK__; ")
-                append("elif command -v apk >/dev/null 2>&1; then ")
-                append("apk add --no-cache -q ${tool.packageName} >/dev/null 2>&1 && echo __OK__; ")
-                append("else echo __NO_PKG_MANAGER__; fi")
-            }
-            val result = repository.executeCommand(workspaceId, command)
-            when {
-                result.exitCode == 0 && result.stdout.contains("__OK__") -> true to null
-                result.exitCode == 0 && result.stdout.contains("__NO_PKG_MANAGER__") -> {
-                    false to "未找到包管理器（仅支持 apt/apk）"
-                }
-                result.timedOut -> false to "安装超时，请稍后在终端中重试"
-                else -> false to (result.stderr.ifBlank { result.stdout }.take(200).ifBlank { "安装失败（退出码 ${result.exitCode}）" })
-            }
-        }.getOrElse { e ->
-            false to (e.message ?: "安装失败")
+    /** 执行安装命令：优先自定义脚本，否则走 apt/apk；失败自动重试；返回 (是否成功, 错误信息) */
+    private suspend fun executeToolInstall(
+        workspaceId: String,
+        tool: DevToolDef,
+        version: String?,
+    ): Pair<Boolean, String?> {
+        val script = tool.installScript
+        if (script != null) {
+            return executeScriptWithRetry(workspaceId, tool, script, version)
         }
+        // apt/apk 包安装：OpenJDK 根据所选版本渲染包名
+        val resolvedPackage = if (tool.id == "openjdk") {
+            val v = version ?: tool.versions.firstOrNull() ?: "17"
+            "openjdk-$v-jdk-headless"
+        } else {
+            tool.packageName
+        }
+        return executePackageWithRetry(workspaceId, tool, resolvedPackage)
+    }
+
+    private suspend fun executeScriptWithRetry(
+        workspaceId: String,
+        tool: DevToolDef,
+        script: String,
+        version: String?,
+    ): Pair<Boolean, String?> {
+        val rendered = script
+            .replace("{{VERSION}}", version ?: tool.versions.firstOrNull() ?: "")
+            .trimIndent()
+        var lastError: String? = null
+        repeat(3) { attempt ->
+            val result = runCatching {
+                repository.executeCommand(workspaceId, rendered, timeoutMillis = TOOL_INSTALL_TIMEOUT_MS)
+            }.getOrNull()
+            val ok = result?.exitCode == 0 && result.stdout.contains("__OK__")
+            if (ok) return true to null
+            lastError = when {
+                result == null -> "命令执行异常"
+                result.timedOut -> "安装超时（已自动重试）"
+                else -> result.stderr.ifBlank { result.stdout }.take(200).ifBlank { "安装失败（退出码 ${result.exitCode}）" }
+            }
+            if (attempt < 2) delay(TOOL_INSTALL_RETRY_DELAY_MS)
+        }
+        return false to lastError
+    }
+
+    private suspend fun executePackageWithRetry(
+        workspaceId: String,
+        tool: DevToolDef,
+        packageName: String,
+    ): Pair<Boolean, String?> {
+        var lastError: String? = null
+        repeat(3) { attempt ->
+            val result = runCatching {
+                repository.executeCommand(
+                    workspaceId,
+                    buildString {
+                        append("export DEBIAN_FRONTEND=noninteractive; ")
+                        append("if command -v apt-get >/dev/null 2>&1; then ")
+                        append("(apt-get update -qq >/dev/null 2>&1 || true); ")
+                        append("apt-get install -y -qq $packageName >/dev/null 2>&1 && echo __OK__; ")
+                        append("elif command -v apk >/dev/null 2>&1; then ")
+                        append("apk add --no-cache -q $packageName >/dev/null 2>&1 && echo __OK__; ")
+                        append("else echo __NO_PKG_MANAGER__; fi")
+                    },
+                    timeoutMillis = TOOL_INSTALL_TIMEOUT_MS,
+                )
+            }.getOrNull()
+            val ok = result?.exitCode == 0 && result.stdout.contains("__OK__")
+            if (ok) return true to null
+            lastError = when {
+                result == null -> "命令执行异常"
+                result.timedOut -> "安装超时（已自动重试）"
+                result.exitCode == 0 && result.stdout.contains("__NO_PKG_MANAGER__") ->
+                    "未找到包管理器（仅支持 apt/apk）"
+                else -> result.stderr.ifBlank { result.stdout }.take(200).ifBlank { "安装失败（退出码 ${result.exitCode}）" }
+            }
+            if (attempt < 2) delay(TOOL_INSTALL_RETRY_DELAY_MS)
+        }
+        return false to lastError
     }
 
     fun executeTerminalCommand(command: String) {
@@ -427,6 +512,10 @@ data class DevToolDef(
     val description: String,
     val packageName: String,
     val command: String,
+    /** 自定义安装脚本（在 Rootfs 内执行）。非空时优先于 apt/apk 包安装 */
+    val installScript: String? = null,
+    /** 可选版本列表；为空表示不支持选版本。选中后渲染到 [installScript]/[packageName] */
+    val versions: List<String> = emptyList(),
 )
 
 data class DevToolState(
@@ -435,7 +524,93 @@ data class DevToolState(
     val checking: Boolean = false,
     val installing: Boolean = false,
     val error: String? = null,
+    val selectedVersion: String? = null,
 )
+
+/** 开发工具安装单次命令超时（apt 更新 + 大文件下载需要较长时间） */
+private const val TOOL_INSTALL_TIMEOUT_MS = 10 * 60 * 1000L
+
+/** 安装失败重试间隔 */
+private const val TOOL_INSTALL_RETRY_DELAY_MS = 1_500L
+
+/** Android SDK Build-Tools 安装脚本（aapt/aapt2/zipalign/apksigner/d8），从 Google 官方镜像下载 */
+private val ANDROID_BUILD_TOOLS_INSTALL_SCRIPT = """
+set -e
+BT_DIR=/opt/android/build-tools
+BT_VERSION=34
+mkdir -p "${'$'}BT_DIR"
+if ! command -v java >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq >/dev/null 2>&1 || true
+  apt-get install -y -qq openjdk-17-jre-headless unzip >/dev/null 2>&1 || true
+fi
+if [ ! -x "${'$'}BT_DIR/aapt2" ]; then
+  ZIP=/tmp/build-tools-${'$'}BT_VERSION.zip
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL -o "${'$'}ZIP" "https://dl.google.com/android/repository/build-tools_r${'$'}BT_VERSION-linux.zip"
+  else
+    wget -q -O "${'$'}ZIP" "https://dl.google.com/android/repository/build-tools_r${'$'}BT_VERSION-linux.zip"
+  fi
+  unzip -qo "${'$'}ZIP" -d "${'$'}BT_DIR" >/dev/null 2>&1 || { echo "unzip failed"; exit 1; }
+  rm -f "${'$'}ZIP"
+  for bin in aapt aapt2 zipalign apksigner d8; do
+    found=$(find "${'$'}BT_DIR" -type f -name "${'$'}bin" 2>/dev/null | head -n1)
+    if [ -n "${'$'}found" ]; then
+      chmod +x "${'$'}found"
+      ln -sf "${'$'}found" /usr/local/bin/"${'$'}bin"
+    fi
+  done
+fi
+command -v aapt2 >/dev/null 2>&1 || { echo "aapt2 missing"; exit 1; }
+echo __OK__
+""".trimIndent()
+
+/** Android platform android.jar 安装脚本，版本通过 {{VERSION}} 占位符注入 */
+private val ANDROID_PLATFORM_INSTALL_SCRIPT = """
+set -e
+PLAT_DIR=/opt/android/platforms
+V={{VERSION}}
+mkdir -p "${'$'}PLAT_DIR"
+if [ ! -f "${'$'}PLAT_DIR/android.jar" ]; then
+  ZIP=/tmp/platform-${'$'}V.zip
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL -o "${'$'}ZIP" "https://dl.google.com/android/repository/platform-${'$'}V_r02.zip"
+  else
+    wget -q -O "${'$'}ZIP" "https://dl.google.com/android/repository/platform-${'$'}V_r02.zip"
+  fi
+  unzip -qo "${'$'}ZIP" -d "${'$'}PLAT_DIR" >/dev/null 2>&1 || { echo "unzip failed"; exit 1; }
+  rm -f "${'$'}ZIP"
+  jar=$(find "${'$'}PLAT_DIR" -type f -name android.jar 2>/dev/null | head -n1)
+  [ -n "${'$'}jar" ] && cp "${'$'}jar" "${'$'}PLAT_DIR/android.jar"
+fi
+[ -f "${'$'}PLAT_DIR/android.jar" ] || { echo "android.jar missing"; exit 1; }
+echo __OK__
+""".trimIndent()
+
+/** D8/R8 安装脚本（r8lib.jar + /usr/local/bin/r8 包装器），从 Google Maven 下载，版本通过 {{VERSION}} 占位符注入 */
+private val R8_INSTALL_SCRIPT = """
+set -e
+R8_DIR=/opt/r8
+V={{VERSION}}
+mkdir -p "${'$'}R8_DIR"
+if ! command -v java >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq >/dev/null 2>&1 || true
+  apt-get install -y -qq openjdk-17-jre-headless >/dev/null 2>&1 || true
+fi
+if [ ! -f "${'$'}R8_DIR/r8.jar" ]; then
+  JAR_URL="https://maven.google.com/com/android/tools/r8/${'$'}V/r8-${'$'}V.jar"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL -o "${'$'}R8_DIR/r8.jar" "${'$'}JAR_URL"
+  else
+    wget -q -O "${'$'}R8_DIR/r8.jar" "${'$'}JAR_URL"
+  fi
+fi
+printf '#!/bin/sh\nexec java -jar /opt/r8/r8.jar "${'$'}@"\n' > /usr/local/bin/r8
+chmod +x /usr/local/bin/r8
+command -v java >/dev/null 2>&1 || { echo "java missing"; exit 1; }
+echo __OK__
+""".trimIndent()
 
 /** 工作区一键安装的常用开发工具（检测命令为 command -v <command>） */
 val DEV_TOOLS = listOf(
@@ -451,4 +626,39 @@ val DEV_TOOLS = listOf(
     DevToolDef("ffmpeg", "FFmpeg", "音视频处理工具", "ffmpeg", "ffmpeg"),
     DevToolDef("openssh-client", "SSH 客户端", "远程连接与文件传输", "openssh-client", "ssh"),
     DevToolDef("vim", "Vim", "文本编辑器", "vim", "vim"),
+    DevToolDef(
+        "openjdk",
+        "OpenJDK",
+        "Java 运行时与开发工具包（JDK）",
+        "openjdk-17-jdk-headless",
+        "java",
+        versions = listOf("17", "21"),
+    ),
+    DevToolDef(
+        "android-sdk",
+        "Android SDK Build-Tools",
+        "aapt/aapt2、zipalign、apksigner、d8 等构建工具",
+        "",
+        "aapt2",
+        installScript = ANDROID_BUILD_TOOLS_INSTALL_SCRIPT,
+    ),
+    DevToolDef(
+        "android-platform",
+        "Android platform android.jar",
+        "Android API 平台库（编译与签名用）",
+        "",
+        "android.jar",
+        installScript = ANDROID_PLATFORM_INSTALL_SCRIPT,
+        versions = listOf("34", "35"),
+    ),
+    DevToolDef(
+        "r8",
+        "D8/R8",
+        "Dex 编译器与代码压缩/混淆工具（r8lib.jar）",
+        "",
+        "r8",
+        installScript = R8_INSTALL_SCRIPT,
+        versions = listOf("8.2.33", "8.3.37"),
+    ),
+    DevToolDef("llvm", "LLVM (llvm-strip)", "llvm-strip 等 LLVM 二进制工具", "llvm", "llvm-strip"),
 )

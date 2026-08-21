@@ -34,7 +34,7 @@ class DeviceScreenMetricsTest {
         val override = DeviceScreenMetrics.buildOverrideConfiguration(
             config, DeviceScreenMetrics.MODE_TABLET, 160
         )!!
-        assertEquals(160, override.densityDpi)
+        assertEquals(240, override.densityDpi)
         assertTrue("tablet mode must produce a wider logical screen", override.screenWidthDp > config.screenWidthDp)
         assertTrue("tablet mode must produce a taller logical screen", override.screenHeightDp > config.screenHeightDp)
         assertEquals(

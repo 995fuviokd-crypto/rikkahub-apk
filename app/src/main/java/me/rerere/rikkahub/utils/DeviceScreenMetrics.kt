@@ -29,8 +29,8 @@ object DeviceScreenMetrics {
     /** 缩放模式：自定义密度 */
     const val MODE_CUSTOM = 2
 
-    /** 平板预设使用的像素密度（mdpi，10 寸平板典型值） */
-    const val DEFAULT_TABLET_DENSITY_DPI = 160
+    /** 平板预设使用的像素密度（默认 240：10 寸平板以 240dpi 呈现更大的逻辑屏幕） */
+    const val DEFAULT_TABLET_DENSITY_DPI = 240
 
     /**
      * 读取设备真实屏幕物理分辨率（像素）。
