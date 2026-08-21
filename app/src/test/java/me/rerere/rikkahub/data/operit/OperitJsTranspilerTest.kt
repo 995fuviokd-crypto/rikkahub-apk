@@ -142,8 +142,10 @@ class OperitJsTranspilerTest {
             }
         """.trimIndent()
         val out = OperitJsTranspiler.transpile(src)
-        assertEquals(countChar(src, '{'), countChar(out, '{'))
-        assertEquals(countChar(src, '}'), countChar(out, '}'))
+        // 转换后 generator body 新增一对花括号（function*() { ... }），输出自身仍须平衡
+        assertEquals(countChar(out, '{'), countChar(out, '}'))
+        assertEquals(countChar(src, '{') + 1, countChar(out, '{'))
+        assertEquals(countChar(src, '}') + 1, countChar(out, '}'))
         assertTrue(out.contains("yield Tools.Files.read"))
     }
 
@@ -163,6 +165,14 @@ class OperitJsTranspilerTest {
         assertTrue(out.contains("yield Tools.Chat.getMessages(ids[i]"))
         assertTrue(out.contains("out = out.concat(m.messages);"))
         assertTrue(out.contains("function collect(ids) { return __operitRunGen(function*()"))
+    }
+
+    @Test
+    fun dumpMissPulseTranspileForNodeCheck() {
+        val src = java.io.File("/tmp/opencode/rh_miss_pulse.js").readText()
+        val out = OperitJsTranspiler.transpile(src)
+        java.io.File("/tmp/opencode/t_miss_kotlin.js").writeText(OperitJsTranspiler.RUN_GEN_RUNTIME + "\n" + out)
+        java.io.File("/tmp/opencode/t_miss_kotlin_len.txt").writeText(out.length.toString())
     }
 
     private fun countChar(s: String, c: Char): Int = s.count { it == c }

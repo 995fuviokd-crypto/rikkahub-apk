@@ -51,7 +51,7 @@ function __operitRunGen(gen, self) {
                                     for (m in fnIdx + 1 until bodyBrace) {
                                         out.append(tokens[m].raw)
                                     }
-                                    out.append("{ return __operitRunGen(function*() ")
+                                    out.append("{ return __operitRunGen(function*() { ")
                                     stack.add(BraceKind.GENERATOR_BODY)
                                     i = bodyBrace + 1
                                     continue
@@ -69,9 +69,9 @@ function __operitRunGen(gen, self) {
                             for (m in nextIdx + 1 until paramsEnd) out.append(tokens[m].raw)
                             if (bodyIdx < tokens.size && tokens[bodyIdx].text == "{") {
                                 val bodyEnd = matchBrace(tokens, bodyIdx)
-                                out.append(") => { return __operitRunGen(function*() ")
+                                out.append(") => { return __operitRunGen(function*() { ")
                                 copyRangeTranspiled(tokens, bodyIdx + 1, bodyEnd, out, true)
-                                out.append("); }")
+                                out.append("}); }")
                                 i = bodyEnd + 1
                             } else {
                                 val exprEnd = findExpressionEnd(tokens, bodyIdx)
@@ -92,9 +92,9 @@ function __operitRunGen(gen, self) {
                             out.append(tokens[nextIdx].raw)
                             if (bodyIdx < tokens.size && tokens[bodyIdx].text == "{") {
                                 val bodyEnd = matchBrace(tokens, bodyIdx)
-                                out.append(" => { return __operitRunGen(function*() ")
+                                out.append(" => { return __operitRunGen(function*() { ")
                                 copyRangeTranspiled(tokens, bodyIdx + 1, bodyEnd, out, true)
-                                out.append("); }")
+                                out.append("}); }")
                                 i = bodyEnd + 1
                             } else {
                                 val exprEnd = findExpressionEnd(tokens, bodyIdx)
@@ -115,7 +115,7 @@ function __operitRunGen(gen, self) {
                                     out.append(" ")
                                     out.append(tokens[nextIdx].raw)
                                     for (m in k until bodyBrace) out.append(tokens[m].raw)
-                                    out.append("{ return __operitRunGen(function*() ")
+                                    out.append("{ return __operitRunGen(function*() { ")
                                     stack.add(BraceKind.GENERATOR_BODY)
                                     i = bodyBrace + 1
                                     continue
@@ -143,7 +143,7 @@ function __operitRunGen(gen, self) {
 
                 t.text == "}" && !t.inString && stack.isNotEmpty() -> {
                     when (stack.removeAt(stack.size - 1)) {
-                        BraceKind.GENERATOR_BODY -> out.append("); }")
+                        BraceKind.GENERATOR_BODY -> out.append("}); }")
                         BraceKind.NORMAL -> out.append("}")
                     }
                     i++
