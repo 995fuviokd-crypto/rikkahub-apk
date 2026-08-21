@@ -271,6 +271,7 @@ private fun parseTools(json: String): List<GroupToolRecord> {
 }
 
 fun MessageKind.icon(): androidx.compose.ui.graphics.vector.ImageVector = when (this) {
+    MessageKind.USER -> HugeIcons.Chat01
     MessageKind.PLAN -> HugeIcons.ListView
     MessageKind.SUBTASK -> HugeIcons.PencilEdit01
     MessageKind.RESULT -> HugeIcons.CheckmarkSquare01
@@ -279,6 +280,7 @@ fun MessageKind.icon(): androidx.compose.ui.graphics.vector.ImageVector = when (
 }
 
 fun MessageKind.color(): androidx.compose.ui.graphics.Color = when (this) {
+    MessageKind.USER -> androidx.compose.ui.graphics.Color(0xFF2962FF)
     MessageKind.PLAN -> androidx.compose.ui.graphics.Color(0xFF7C4DFF)
     MessageKind.SUBTASK -> androidx.compose.ui.graphics.Color(0xFF2962FF)
     MessageKind.RESULT -> androidx.compose.ui.graphics.Color(0xFF00C853)
@@ -287,6 +289,7 @@ fun MessageKind.color(): androidx.compose.ui.graphics.Color = when (this) {
 }
 
 fun MessageKind.label(): String = when (this) {
+    MessageKind.USER -> "补充指令"
     MessageKind.PLAN -> "计划"
     MessageKind.SUBTASK -> "子任务"
     MessageKind.RESULT -> "结果"

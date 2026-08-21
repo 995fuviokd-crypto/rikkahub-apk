@@ -25,6 +25,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -34,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.rikkahub.data.model.GroupMode
@@ -147,15 +150,26 @@ fun GroupEditorPage(
 
             if (mode == GroupMode.DEBATE) {
                 item {
+                    var roundsText by remember(debateRounds) { mutableStateOf(debateRounds.toString()) }
                     OutlinedTextField(
-                        value = debateRounds.toString(),
+                        value = roundsText,
                         onValueChange = { value ->
+                            roundsText = value
                             value.toIntOrNull()?.let { vm.setDebateRounds(it) }
                         },
                         label = { Text("讨论轮次") },
+                        supportingText = {
+                            Text(
+                                text = "全体成员按此轮次轮流发言，结束后生成结论（1-10）",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+                            imeAction = ImeAction.Done,
+                        ),
                     )
                 }
             }

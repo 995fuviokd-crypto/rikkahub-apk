@@ -5,7 +5,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlin.coroutines.coroutineContext
@@ -41,6 +41,8 @@ interface GroupStore {
     suspend fun upsertRun(run: GroupRun)
 
     suspend fun getRunById(id: String): GroupRun?
+
+    suspend fun getMessages(runId: String): List<GroupMessage>
 
     suspend fun addMessage(
         runId: String,
@@ -281,6 +283,7 @@ class GroupRunner(
                 appendLine("- id=${m.id}，角色=${m.role}${m.systemPrompt?.let { "，职责：$it" } ?: ""}")
             }
             appendLine("任务指令：$mission")
+            appendedInstructions(runId)?.let { appendLine(it) }
             appendLine("请输出一个 JSON 数组（不要输出其他内容），每个元素为 {\"id\":\"t1\",\"goal\":\"...\",\"memberId\":\"成员id\",\"dependsOn\":[\"t1\"]}，dependsOn 为该子任务依赖的前置子任务 id 列表，无依赖可省略。")
         }
         val planResult = callOrNull(group, orchestrator, planPrompt) { note ->
@@ -295,7 +298,7 @@ class GroupRunner(
         val executed = mutableSetOf<String>()
 
         while (subtasks.any { it.id !in executed }) {
-            if (!coroutineContext.isActive) return "（已停止）"
+            coroutineContext.ensureActive()
             val ready = subtasks.filter { t -> t.id !in executed && t.dependsOn.all { it in executed } }
             if (ready.isEmpty()) {
                 subtasks.filter { it.id !in executed }.forEach { t ->
@@ -306,6 +309,7 @@ class GroupRunner(
             val results = coroutineScope {
                 ready.map { task ->
                     async {
+                        coroutineContext.ensureActive()
                         val member = group.members.find { it.id == task.memberId } ?: orchestrator
                         val ctx = task.dependsOn.mapNotNull { outputs[it] }
                         val prompt = buildString {
@@ -315,6 +319,7 @@ class GroupRunner(
                                 appendLine("前置子任务结果：")
                                 ctx.forEach { appendLine(it.take(2500)) }
                             }
+                            appendedInstructions(runId)?.let { appendLine(it) }
                             appendLine("子任务目标：${task.goal}")
                             appendLine("整体任务指令：$mission")
                             appendLine("请直接输出结果，不要解释过程。")
@@ -336,6 +341,7 @@ class GroupRunner(
         val summaryPrompt = buildString {
             appendLine("你是主编排器「${orchestrator.role}」，请汇总群组针对任务的执行结果，输出最终结论。")
             appendLine("任务指令：$mission")
+            appendedInstructions(runId)?.let { appendLine(it) }
             outputs.forEach { (id, result) ->
                 val task = subtasks.find { it.id == id }
                 appendLine("- 子任务「${task?.goal ?: id}」：${result.take(3000)}")
@@ -359,10 +365,11 @@ class GroupRunner(
     ): String {
         var current = mission
         group.members.forEachIndexed { index, member ->
-            if (!coroutineContext.isActive) return "（已停止）"
+            coroutineContext.ensureActive()
             val prompt = buildString {
                 appendLine("你是群组成员「${member.role}」，参与流水线协作，任务指令：$mission")
                 member.systemPrompt?.let { appendLine("你的职责：$it") }
+                appendedInstructions(runId)?.let { appendLine(it) }
                 if (index > 0) {
                     appendLine("前一位成员输出：${current.take(4000)}")
                     appendLine("请基于以上输出完成你的环节，直接输出结果。")
@@ -391,14 +398,15 @@ class GroupRunner(
         val history = mutableListOf<Pair<GroupMember, String>>()
 
         for (round in 1..rounds) {
-            if (!coroutineContext.isActive) return "（已停止）"
+            coroutineContext.ensureActive()
             for (member in group.members) {
-                if (!coroutineContext.isActive) return "（已停止）"
+                coroutineContext.ensureActive()
                 val previous = history.takeLast(MAX_CONTEXT_MESSAGES)
                 val prompt = buildString {
                     appendLine("你是群组成员「${member.role}」，参与第 $round 轮讨论。")
                     member.systemPrompt?.let { appendLine("你的职责：$it") }
                     appendLine("讨论主题：$mission")
+                    appendedInstructions(runId)?.let { appendLine(it) }
                     if (previous.isNotEmpty()) {
                         appendLine("已有发言：")
                         previous.forEach { (m, c) -> appendLine("- ${m.role}：${c.take(1500)}") }
@@ -415,6 +423,7 @@ class GroupRunner(
 
         val conclusionPrompt = buildString {
             appendLine("以下是群组围绕「$mission」的全部讨论内容，请综合各方观点，输出最终结论。")
+            appendedInstructions(runId)?.let { appendLine(it) }
             history.takeLast(MAX_CONTEXT_MESSAGES).forEach { (m, c) -> appendLine("- ${m.role}：${c.take(2000)}") }
             appendLine("请输出结构化的最终结论。")
         }
@@ -424,6 +433,26 @@ class GroupRunner(
         }
         onProgress(memberMessage(runId, group, lead, conclusionResult, MessageKind.SYSTEM))
         return conclusionResult.text
+    }
+
+    // ---------- 运行中追加的指令 ----------
+
+    /**
+     * 读取本次运行中用户追加的指令（MessageKind.USER，与初始任务指令无关），
+     * 作为补充说明注入后续成员调用的 prompt，使运行中的追加不会覆盖已产生的讨论。
+     */
+    private suspend fun appendedInstructions(runId: String): String? {
+        val appended = runCatching {
+            repository.getMessages(runId)
+                .filter { it.kind == MessageKind.USER }
+                .sortedBy { it.createdAt }
+                .map { it.content }
+        }.getOrDefault(emptyList())
+        if (appended.isEmpty()) return null
+        return buildString {
+            appendLine("用户补充指令：")
+            appended.forEach { appendLine("- $it") }
+        }
     }
 
     // ---------- 工具 ----------
@@ -505,6 +534,7 @@ class GroupRunner(
 
     companion object {
         const val SYSTEM_MEMBER_ID = "__system__"
+        const val USER_MEMBER_ID = "__user__"
         private const val MAX_CONTEXT_MESSAGES = 20
     }
 }

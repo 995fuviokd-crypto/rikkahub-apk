@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -12,10 +13,12 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.ai.group.GroupRunner
 import me.rerere.rikkahub.data.model.Group
 import me.rerere.rikkahub.data.model.GroupMessage
 import me.rerere.rikkahub.data.model.GroupRun
+import me.rerere.rikkahub.data.model.MessageKind
 import me.rerere.rikkahub.data.model.RunStatus
 import me.rerere.rikkahub.data.repository.GroupRepository
 import kotlin.uuid.Uuid
@@ -46,10 +49,6 @@ class GroupDetailVM(
     private val _launchError = MutableStateFlow<String?>(null)
     val launchError: StateFlow<String?> = _launchError.asStateFlow()
 
-    // 消息展示双模式：true=在详情页内联展示，false=进入独立消息页面查看
-    private val _inlineMessages = MutableStateFlow(true)
-    val inlineMessages: StateFlow<Boolean> = _inlineMessages.asStateFlow()
-
     private var runJob: Job? = null
 
     init {
@@ -67,12 +66,38 @@ class GroupDetailVM(
         _selectedRunId.value = runId
     }
 
-    fun setInlineMessages(inline: Boolean) {
-        _inlineMessages.value = inline
-    }
-
     fun consumeLaunchError() {
         _launchError.value = null
+    }
+
+    /**
+     * 运行中追加指令：不重新生成，而是把新指令作为 USER 消息写入当前 run，
+     * GroupRunner 会在后续成员调用中读取并注入。
+     */
+    fun appendInstruction(text: String) {
+        val runId = _selectedRunId.value
+        if (runId == null) {
+            _launchError.value = "当前没有正在进行的运行，请先发布一条指令"
+            return
+        }
+        if (text.isBlank()) {
+            _launchError.value = "请输入要追加的指令内容"
+            return
+        }
+        viewModelScope.launch {
+            val run = runCatching { repository.getRunById(runId) }.getOrNull()
+            if (run == null || run.status != RunStatus.RUNNING) {
+                _launchError.value = "当前没有正在进行的运行，请先发布一条指令"
+                return@launch
+            }
+            repository.addMessage(
+                runId = runId,
+                memberId = GroupRunner.USER_MEMBER_ID,
+                content = text,
+                kind = MessageKind.USER,
+                memberRole = "用户",
+            )
+        }
     }
 
     fun launchRun(mission: String) {
@@ -93,12 +118,15 @@ class GroupDetailVM(
             try {
                 runner.run(group, mission, runId = runId)
             } catch (e: CancellationException) {
-                val run = repository.getRunById(runId)
-                if (run != null && run.status == RunStatus.RUNNING) {
-                    repository.upsertRun(
-                        run.copy(status = RunStatus.STOPPED, endedAt = System.currentTimeMillis())
-                    )
+                withContext(NonCancellable) {
+                    val run = repository.getRunById(runId)
+                    if (run != null && run.status == RunStatus.RUNNING) {
+                        repository.upsertRun(
+                            run.copy(status = RunStatus.STOPPED, endedAt = System.currentTimeMillis())
+                        )
+                    }
                 }
+                throw e
             } finally {
                 _running.value = false
             }

@@ -239,4 +239,65 @@ class GroupDetailVMTest {
 
             messageJob.cancel()
         }
+
+    @Test
+    fun `appendInstruction adds user message to running run`() =
+        runTest(scheduler) {
+            val dao = FakeGroupDAO()
+            val repository = GroupRepository(dao)
+            repository.save(
+                Group(
+                    id = "g1",
+                    name = "测试群组",
+                    mode = GroupMode.DEBATE,
+                    members = listOf(GroupMember(id = "m1", modelId = Uuid.random(), role = "A")),
+                    debateRounds = 1,
+                )
+            )
+            repository.upsertRun(
+                me.rerere.rikkahub.data.model.GroupRun(
+                    id = "run-1",
+                    groupId = "g1",
+                    mission = "任务",
+                    status = RunStatus.RUNNING,
+                    createdAt = 1000,
+                    startedAt = 1000,
+                )
+            )
+
+            val vm = GroupDetailVM("g1", repository, GroupRunner(FakeCaller(), repository))
+            advanceUntilIdle()
+            vm.selectRun("run-1")
+            advanceUntilIdle()
+
+            vm.appendInstruction("请补充说明")
+            advanceUntilIdle()
+
+            val messages = repository.getMessages("run-1")
+            assertTrue(messages.any { it.content == "请补充说明" && it.kind == MessageKind.USER })
+        }
+
+    @Test
+    fun `appendInstruction rejected when no running run`() =
+        runTest(scheduler) {
+            val dao = FakeGroupDAO()
+            val repository = GroupRepository(dao)
+            repository.save(
+                Group(
+                    id = "g1",
+                    name = "测试群组",
+                    mode = GroupMode.DEBATE,
+                    members = listOf(GroupMember(id = "m1", modelId = Uuid.random(), role = "A")),
+                    debateRounds = 1,
+                )
+            )
+
+            val vm = GroupDetailVM("g1", repository, GroupRunner(FakeCaller(), repository))
+            advanceUntilIdle()
+
+            vm.appendInstruction("没有运行中")
+            advanceUntilIdle()
+
+            assertNotNull(vm.launchError.value)
+        }
 }

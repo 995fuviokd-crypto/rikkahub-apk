@@ -1,6 +1,11 @@
 package me.rerere.rikkahub.data.ai.group
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.model.Group
 import me.rerere.rikkahub.data.model.GroupMember
 import me.rerere.rikkahub.data.model.GroupMessage
@@ -24,6 +29,9 @@ private class FakeStore : GroupStore {
 
     override suspend fun getRunById(id: String): GroupRun? = runs[id]
 
+    override suspend fun getMessages(runId: String): List<GroupMessage> =
+        messages.filter { it.runId == runId }
+
     override suspend fun addMessage(
         runId: String,
         memberId: String,
@@ -44,12 +52,13 @@ private class FakeStore : GroupStore {
             kind = kind,
             reasoning = reasoning,
             tools = tools,
+            createdAt = System.currentTimeMillis(),
         )
     }
 }
 
 private class FakeCaller(
-    private val handler: (GroupMember, String) -> String,
+    private val handler: suspend (GroupMember, String) -> String,
 ) : GroupMemberCaller {
     val calls = mutableListOf<Pair<String, String>>()
 
@@ -247,5 +256,141 @@ class GroupRunnerTest {
         assertEquals("custom-run", result.id)
         assertNotNull(store.getRunById("custom-run"))
         assertTrue(store.messages.all { it.runId == "custom-run" })
+    }
+
+    @Test
+    fun `appended instruction during run is injected into subsequent member prompts`() = runBlocking {
+        val a = member("a", "A")
+        val b = member("b", "B")
+        val group = Group(
+            id = "g1",
+            name = "g",
+            mode = GroupMode.PIPELINE,
+            members = listOf(a, b),
+        )
+        val store = FakeStore()
+        val caller = FakeCaller { m, prompt ->
+            when (m.role) {
+                "A" -> {
+                    store.addMessage(
+                        runId = "run-append",
+                        memberId = GroupRunner.USER_MEMBER_ID,
+                        content = "请改用中文输出",
+                        kind = MessageKind.USER,
+                        memberRole = "用户",
+                    )
+                    "A 的产出"
+                }
+                else -> prompt
+            }
+        }
+        val runner = GroupRunner(caller, store)
+
+        val result = runner.run(group, "任务", runId = "run-append")
+
+        assertEquals(RunStatus.SUCCESS, result.status)
+        val prompts = caller.calls.map { it.second }
+        assertTrue("B 的 prompt 应包含追加指令，实际：${prompts[1]}", prompts[1].contains("请改用中文输出"))
+    }
+
+    @Test
+    fun `appended instruction injected into every debate round`() = runBlocking {
+        val a = member("a", "A")
+        val b = member("b", "B")
+        val group = Group(
+            id = "g1",
+            name = "g",
+            mode = GroupMode.DEBATE,
+            members = listOf(a, b),
+            debateRounds = 2,
+        )
+        val store = FakeStore()
+        store.addMessage(
+            runId = "run-debate",
+            memberId = GroupRunner.USER_MEMBER_ID,
+            content = "补充：需要列出风险",
+            kind = MessageKind.USER,
+            memberRole = "用户",
+            reasoning = "",
+            tools = "",
+        )
+        val caller = FakeCaller { m, prompt ->
+            when {
+                prompt.contains("最终结论") -> "结论"
+                else -> "${m.role}发言"
+            }
+        }
+        val runner = GroupRunner(caller, store)
+
+        val result = runner.run(group, "主题", runId = "run-debate")
+
+        assertEquals(RunStatus.SUCCESS, result.status)
+        val prompts = caller.calls.map { it.second }
+        assertTrue("所有成员调用都应注入补充指令", prompts.all { it.contains("补充：需要列出风险") })
+    }
+
+    @Test
+    fun `cancelling run marks it stopped not success`() = runBlocking {
+        val a = member("a", "A")
+        val group = Group(
+            id = "g1",
+            name = "g",
+            mode = GroupMode.DEBATE,
+            members = listOf(a),
+            debateRounds = 10,
+        )
+        val store = FakeStore()
+        val caller = FakeCaller { m, prompt ->
+            delay(10)
+            "发言"
+        }
+        val runner = GroupRunner(caller, store)
+
+        val job = launch {
+            runner.run(group, "任务", runId = "run-stop")
+        }
+        delay(5)
+        job.cancel()
+
+        val run = store.getRunById("run-stop")
+        assertNotNull(run)
+        assertEquals(RunStatus.RUNNING, run?.status)
+    }
+
+    @Test
+    fun `cancellation propagates for caller to mark stopped`() = runBlocking {
+        val a = member("a", "A")
+        val group = Group(
+            id = "g1",
+            name = "g",
+            mode = GroupMode.DEBATE,
+            members = listOf(a),
+            debateRounds = 10,
+        )
+        val store = FakeStore()
+        val caller = FakeCaller { m, prompt ->
+            delay(10)
+            "发言"
+        }
+        val runner = GroupRunner(caller, store)
+        val runId = "run-stop-prop"
+        val job = launch {
+            try {
+                runner.run(group, "任务", runId = runId)
+            } catch (e: CancellationException) {
+                withContext(NonCancellable) {
+                    val run = store.getRunById(runId)
+                    if (run != null && run.status == RunStatus.RUNNING) {
+                        store.upsertRun(run.copy(status = RunStatus.STOPPED, endedAt = System.currentTimeMillis()))
+                    }
+                }
+                throw e
+            }
+        }
+        delay(5)
+        job.cancel()
+        job.join()
+
+        assertEquals(RunStatus.STOPPED, store.getRunById(runId)?.status)
     }
 }

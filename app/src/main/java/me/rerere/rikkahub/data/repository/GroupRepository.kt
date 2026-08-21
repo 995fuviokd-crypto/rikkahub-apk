@@ -135,7 +135,7 @@ class GroupRepository(
     fun listMessages(runId: String): Flow<List<GroupMessage>> =
         dao.listMessages(runId).map { list -> list.map { it.toMessage() } }
 
-    suspend fun getMessages(runId: String): List<GroupMessage> =
+    override suspend fun getMessages(runId: String): List<GroupMessage> =
         dao.getMessages(runId).map { it.toMessage() }
 
     override suspend fun addMessage(

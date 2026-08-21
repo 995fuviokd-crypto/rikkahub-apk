@@ -89,6 +89,9 @@ data class GroupRun(
  */
 @Serializable
 enum class MessageKind {
+    @SerialName("user")
+    USER,
+
     @SerialName("plan")
     PLAN,
 
