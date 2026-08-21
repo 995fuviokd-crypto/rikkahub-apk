@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -23,6 +25,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -201,10 +205,18 @@ fun ChatDrawerContent(
     ModalDrawerSheet(
         modifier = Modifier.width(300.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp)
         ) {
+            var homePromptAction by remember { mutableStateOf<me.rerere.rikkahub.data.plugin.PluginExtensionAction?>(null) }
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = 60.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
             if (updateChecksEnabled && !isPlayStore) {
                 UpdateCard(vm)
             }
@@ -524,7 +536,6 @@ fun ChatDrawerContent(
             // 插件扩展能力主界面入口（homeActions）：独立纵向区块，避免挤压底部导航按钮
             val homePluginManager: me.rerere.rikkahub.data.plugin.PluginManager = koinInject()
             val homeActions = homePluginManager.enabledExtensionActions(settings.enabledPlugins, "home")
-            var homePromptAction by remember { mutableStateOf<me.rerere.rikkahub.data.plugin.PluginExtensionAction?>(null) }
             if (homeActions.isNotEmpty()) {
                 Column(
                     modifier = Modifier
@@ -574,12 +585,14 @@ fun ChatDrawerContent(
                     }
                 }
             }
+                }
 
             Row(
                 horizontalArrangement = Arrangement.SpaceAround,
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
                     .padding(horizontal = 8.dp)
             ) {
                 DrawerAction(

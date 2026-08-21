@@ -278,12 +278,11 @@ private fun ChatListNormal(
         if (settings.displaySetting.enableAutoScroll) {
             LaunchedEffect(state) {
                 snapshotFlow { state.layoutInfo.visibleItemsInfo }.collect { visibleItemsInfo ->
+                    // 只有在「真正滚到底部」时才跟随新内容：canScrollForward 为 false 表示底部
+                    // 已没有可滚动的项，避免用户正在向上翻阅长消息时被 requestScrollToItem 突然拉回。
                     // println("is bottom = ${visibleItemsInfo.isAtBottom()}, scroll = ${state.isScrollInProgress}, can_scroll = ${state.canScrollForward}, loading = $loading")
-                    if (!state.isScrollInProgress && loadingState) {
-                        if (visibleItemsInfo.isAtBottom()) {
-                            state.requestScrollToItem(conversationUpdated.messageNodes.lastIndex + 10)
-                            // Log.i(TAG, "ChatList: scroll to ${conversationUpdated.messageNodes.lastIndex}")
-                        }
+                    if (!state.isScrollInProgress && !state.canScrollForward && loadingState) {
+                        state.requestScrollToItem(conversationUpdated.messageNodes.lastIndex + 10)
                     }
                 }
             }

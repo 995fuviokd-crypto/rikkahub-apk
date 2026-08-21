@@ -55,12 +55,15 @@ class OperitScriptRuntime(
             .writeTimeout(HTTP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             .build()
 
-        /** ToolPkg 运行时注册 API 的空实现，防止 main.js 执行时崩溃 */
+        /** ToolPkg 运行时注册 API 的适配实现，防止 main.js 执行时崩溃；数据目录落在插件沙箱 data */
         private const val TOOLPKG_SHIM = """
 globalThis.ToolPkg = globalThis.ToolPkg || {
     registerUiRoute: function () { return true; },
     registerNavigationEntry: function () { return true; },
     registerSettingsEntry: function () { return true; },
+    getConfigDir: function () { return 'data'; },
+    readResource: function () { return null; },
+    ipc: { call: function () { return null; }, on: function () { return true; } },
     _m: function () { return true; }
 };
 """
@@ -361,7 +364,7 @@ function __operitLoadEntry(entry) {
         }.getOrNull() ?: emptyList()
         return try {
             when (ns) {
-                "Files" -> handleFiles(dataRoot, method, args)
+                "Files" -> Json.encodeToString(OperitFilesSandbox(dataRoot).handle(method, args))
                 "Net" -> handleNet(method, args)
                 "System" -> handleSystem(method, args)
                 "calc" -> handleCalc(args)
@@ -379,200 +382,6 @@ function __operitLoadEntry(entry) {
             Log.w(TAG, "toolsCall error: $ns.$method", e)
             Json.encodeToString(
                 mapOf("ok" to false, "message" to "执行 $ns.$method 失败：${e.message ?: "未知错误"}")
-            )
-        }
-    }
-
-    // ---------- Files ----------
-
-    private fun handleFiles(root: File, method: String, args: List<JsonElement>): String {
-        fun resolve(p: String?): File? {
-            if (p.isNullOrBlank()) return null
-            val f = File(root, p.trimStart('/'))
-            val canonicalRoot = runCatching { root.canonicalPath }.getOrNull() ?: return null
-            val canonical = runCatching { f.canonicalPath }.getOrNull() ?: return null
-            return if (canonical.startsWith(canonicalRoot)) f else null
-        }
-        fun str(idx: Int): String? = (args.getOrNull(idx) as? JsonPrimitive)?.content
-        fun strOrEmpty(idx: Int): String = str(idx).orEmpty()
-        return when (method) {
-            "mkdir" -> {
-                val f = resolve(str(0)) ?: return Json.encodeToString(okOp("路径无效"))
-                val ok = f.exists() || f.mkdirs()
-                Json.encodeToString(okOp(if (ok) "已创建" else "创建失败", path = f.path))
-            }
-            "exists" -> {
-                val f = resolve(str(0))
-                Json.encodeToString(buildJsonObject { put("exists", f?.exists() == true) })
-            }
-            "read" -> {
-                val f = resolve(str(0))
-                if (f == null || !f.isFile) Json.encodeToString(okOp("文件不存在", content = null, path = str(0).orEmpty()))
-                else Json.encodeToString(okOp("ok", content = runCatching { f.readText() }.getOrDefault(""), path = f.path))
-            }
-            "readPart" -> {
-                val f = resolve(str(0))
-                val start = str(1)?.toIntOrNull() ?: 1
-                val end = str(2)?.toIntOrNull()
-                if (f == null || !f.isFile) Json.encodeToString(okOp("文件不存在", content = null))
-                else {
-                    val lines = runCatching { f.readLines() }.getOrDefault(emptyList())
-                    val slice = if (end == null) lines.drop(start - 1) else lines.subList(
-                        (start - 1).coerceIn(0, lines.size), end.coerceIn(start, lines.size + 1)
-                    )
-                    Json.encodeToString(okOp("ok", content = slice.joinToString("\n"), path = f.path))
-                }
-            }
-            "write" -> {
-                val f = resolve(str(0)) ?: return Json.encodeToString(okOp("路径无效"))
-                val content = str(1).orEmpty()
-                val append = (args.getOrNull(2) as? JsonPrimitive)?.content == "true"
-                f.parentFile?.mkdirs()
-                val ok = runCatching { if (append) f.appendText(content) else f.writeText(content); true }.getOrDefault(false)
-                Json.encodeToString(okOp(if (ok) "已写入" else "写入失败", path = f.path))
-            }
-            "writeBinary" -> {
-                val f = resolve(str(0)) ?: return Json.encodeToString(okOp("路径无效"))
-                val base64 = str(1).orEmpty()
-                val bytes = runCatching { android.util.Base64.decode(base64, android.util.Base64.DEFAULT) }.getOrNull()
-                    ?: return Json.encodeToString(okOp("base64 解析失败"))
-                f.parentFile?.mkdirs()
-                val ok = runCatching { f.writeBytes(bytes); true }.getOrDefault(false)
-                Json.encodeToString(okOp(if (ok) "已写入" else "写入失败", path = f.path))
-            }
-            "readBinary" -> {
-                val f = resolve(str(0))
-                if (f == null || !f.isFile) Json.encodeToString(okOp("文件不存在", content = null))
-                else {
-                    val b64 = runCatching {
-                        android.util.Base64.encodeToString(f.readBytes(), android.util.Base64.DEFAULT)
-                    }.getOrDefault("")
-                    Json.encodeToString(okOp("ok", content = b64, path = f.path))
-                }
-            }
-            "delete" -> {
-                val f = resolve(str(0)) ?: return Json.encodeToString(okOp("路径无效"))
-                val recursive = (args.getOrNull(1) as? JsonPrimitive)?.content == "true"
-                val ok = runCatching {
-                    if (recursive && f.isDirectory) f.deleteRecursively() else f.delete()
-                }.getOrDefault(false)
-                Json.encodeToString(okOp(if (ok) "已删除" else "删除失败", path = f.path))
-            }
-            "list" -> {
-                val f = resolve(str(0))
-                val path = f?.path ?: str(0).orEmpty()
-                if (f == null || !f.isDirectory) {
-                    Json.encodeToString(buildJsonObject {
-                        put("ok", true); put("path", path); put("files", JsonArray(emptyList()))
-                    })
-                } else {
-                    val entries = f.listFiles()?.sortedBy { it.name } ?: emptyList()
-                    Json.encodeToString(buildJsonObject {
-                        put("ok", true)
-                        put("path", path)
-                        put("files", JsonArray(entries.map { e ->
-                            buildJsonObject {
-                                put("name", e.name)
-                                put("path", e.path)
-                                put("type", if (e.isDirectory) "directory" else "file")
-                            }
-                        }))
-                    })
-                }
-            }
-            "move" -> {
-                val src = resolve(str(0)); val dst = resolve(str(1))
-                if (src == null || dst == null) Json.encodeToString(okOp("路径无效"))
-                else {
-                    dst.parentFile?.mkdirs()
-                    val ok = runCatching { src.renameTo(dst) || (src.copyRecursively(dst) && src.deleteRecursively()) }.getOrDefault(false)
-                    Json.encodeToString(okOp(if (ok) "已移动" else "移动失败", path = dst.path))
-                }
-            }
-            "copy" -> {
-                val src = resolve(str(0)); val dst = resolve(str(1))
-                if (src == null || dst == null) Json.encodeToString(okOp("路径无效"))
-                else {
-                    dst.parentFile?.mkdirs()
-                    val ok = runCatching {
-                        if (src.isDirectory) src.copyRecursively(dst) else src.copyTo(dst, overwrite = true)
-                    }.isSuccess
-                    Json.encodeToString(okOp(if (ok) "已复制" else "复制失败", path = dst.path))
-                }
-            }
-            "find" -> {
-                val f = resolve(str(0)) ?: return Json.encodeToString(okOp("路径无效", files = emptyList()))
-                val pattern = str(1).orEmpty()
-                val matcher = runCatching { Regex(pattern) }.getOrNull()
-                val matches = if (f.isDirectory) {
-                    f.walkTopDown().filter { it.isFile }
-                        .filter { matcher?.matches(it.name) == true || (matcher == null && it.name.contains(pattern)) }
-                        .take(200).map { it.path }.toList()
-                } else emptyList()
-                Json.encodeToString(okOp("ok", files = matches))
-            }
-            "grep" -> {
-                val f = resolve(str(0)) ?: return Json.encodeToString(okOp("路径无效", files = emptyList()))
-                val pattern = str(1).orEmpty()
-                val matcher = runCatching { Regex(pattern) }.getOrNull()
-                    ?: return Json.encodeToString(okOp("正则无效", files = emptyList()))
-                val matches = if (f.isDirectory) {
-                    f.walkTopDown().filter { it.isFile && it.extension in setOf("txt", "md", "json", "js", "ts", "xml", "html", "csv", "log") }
-                        .mapNotNull { file ->
-                            val hit = runCatching { file.readLines().firstOrNull { matcher.containsMatchIn(it) } }.getOrNull()
-                            if (hit != null) "${file.path}: $hit" else null
-                        }.take(100).toList()
-                } else emptyList()
-                Json.encodeToString(okOp("ok", files = matches))
-            }
-            "info" -> {
-                val f = resolve(str(0))
-                if (f == null || !f.exists()) Json.encodeToString(okOp("文件不存在", content = null))
-                else Json.encodeToString(buildJsonObject {
-                    put("ok", true)
-                    put("name", f.name)
-                    put("path", f.path)
-                    put("type", if (f.isDirectory) "directory" else "file")
-                    put("size", f.length())
-                    put("lastModified", f.lastModified())
-                })
-            }
-            "edit" -> {
-                val f = resolve(str(0)) ?: return Json.encodeToString(okOp("路径无效"))
-                val old = str(1).orEmpty(); val neu = str(2).orEmpty()
-                if (!f.isFile) Json.encodeToString(okOp("文件不存在"))
-                else {
-                    val content = runCatching { f.readText() }.getOrDefault("")
-                    if (!content.contains(old)) Json.encodeToString(okOp("未找到待替换内容"))
-                    else {
-                        val ok = runCatching { f.writeText(content.replace(old, neu)); true }.getOrDefault(false)
-                        Json.encodeToString(okOp(if (ok) "已替换" else "替换失败", path = f.path))
-                    }
-                }
-            }
-            "download" -> {
-                val url = str(0); val dest = str(1)
-                if (url.isNullOrBlank()) return Json.encodeToString(okOp("缺少 URL"))
-                val f = resolve(dest)
-                if (f == null) Json.encodeToString(okOp("路径无效"))
-                else {
-                    val ok = runCatching {
-                        val request = Request.Builder().url(url).build()
-                        httpClient.newCall(request).execute().use { resp ->
-                            if (!resp.isSuccessful) return@use false
-                            f.parentFile?.mkdirs()
-                            f.outputStream().use { out -> resp.body?.byteStream()?.copyTo(out) }
-                            true
-                        }
-                    }.getOrDefault(false)
-                    Json.encodeToString(okOp(if (ok) "已下载" else "下载失败", path = f.path))
-                }
-            }
-            "open", "share" -> Json.encodeToString(
-                okOp("RikkaHub 无法在脚本中打开/分享本地文件", success = false)
-            )
-            else -> Json.encodeToString(
-                mapOf("ok" to false, "unavailable" to true, "message" to "RikkaHub 不支持 Tools.Files.$method")
             )
         }
     }
