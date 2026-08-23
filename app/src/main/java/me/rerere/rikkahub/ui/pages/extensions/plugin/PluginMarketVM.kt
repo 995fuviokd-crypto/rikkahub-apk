@@ -10,6 +10,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.api.CommunityListItem
 import me.rerere.rikkahub.data.api.CommunityMarketDataSource
+import me.rerere.rikkahub.data.api.DshMarketDataSource
+import me.rerere.rikkahub.data.api.DshMarketPlugin
 import me.rerere.rikkahub.data.api.PluginMarketDataSource
 import me.rerere.rikkahub.data.ai.mcp.serverUrl
 import me.rerere.rikkahub.data.datastore.Settings
@@ -22,6 +24,7 @@ import me.rerere.rikkahub.data.plugin.PluginInfo
 import me.rerere.rikkahub.data.plugin.PluginManager
 import me.rerere.rikkahub.data.plugin.PluginMarketEntry
 import me.rerere.rikkahub.data.plugin.PluginStatus
+import me.rerere.rikkahub.data.api.communityPluginIdFor
 
 class PluginMarketVM(
     private val settingsStore: SettingsStore,
@@ -30,6 +33,7 @@ class PluginMarketVM(
     private val openAIPluginAdapter: OpenAIPluginAdapter,
     private val communityDataSource: CommunityMarketDataSource,
     private val dshPluginAdapter: DshPluginAdapter,
+    private val dshMarketDataSource: DshMarketDataSource,
 ) : ViewModel() {
     private val _installed = MutableStateFlow<List<InstalledPlugin>>(emptyList())
     val installed = _installed.asStateFlow()
@@ -90,6 +94,24 @@ class PluginMarketVM(
             } else {
                 plugin
             }
+        }
+    }
+
+    /**
+     * 社区市场更新检测：已安装 community-* 插件的 version 与市场 latestVersion 对比，
+     * 版本不同即提示可更新（重装覆盖，installZip 自带旧版备份回滚）。
+     */
+    fun communityUpdateFor(entry: CommunityListItem, installed: List<InstalledPlugin>): String? {
+        val marketVersion = entry.latestVersion.version.trim().takeIf { it.isNotEmpty() } ?: return null
+        val pid = communityPluginIdFor(entry.id)
+        val current = installed.firstOrNull {
+            it.id == pid || it.id == pid.replaceFirst("community-", "operit-")
+        } ?: return null
+        val localVersion = current.info?.version?.trim().orEmpty()
+        return if (localVersion.isNotEmpty() && !localVersion.equals(marketVersion, ignoreCase = true)) {
+            marketVersion
+        } else {
+            null
         }
     }
 
@@ -255,11 +277,53 @@ class PluginMarketVM(
         }
     }
 
+    /** DSH 市场列表状态 */
+    private val _dshEntries = MutableStateFlow<List<DshMarketPlugin>>(emptyList())
+    val dshEntries = _dshEntries.asStateFlow()
+
+    private val _dshLoading = MutableStateFlow(false)
+    val dshLoading = _dshLoading.asStateFlow()
+
+    private val _dshError = MutableStateFlow<String?>(null)
+    val dshError = _dshError.asStateFlow()
+
+    private val _dshCategories = MutableStateFlow<List<me.rerere.rikkahub.data.api.DshCategory>>(emptyList())
+    val dshCategories = _dshCategories.asStateFlow()
+
+    private val _dshUpdated = MutableStateFlow("")
+    val dshUpdated = _dshUpdated.asStateFlow()
+
+    private var dshSortByStars = true
+
+    /** 拉取 DSH 插件市场列表（实时 feed，失败自动降级 README 解析） */
+    fun loadDshMarket() {
+        if (_dshLoading.value) return
+        viewModelScope.launch {
+            _dshLoading.value = true
+            _dshError.value = null
+            dshMarketDataSource.fetchList()
+                .onSuccess { list ->
+                    dshSortByStars = true
+                    _dshEntries.value = list.plugins
+                        .sortedWith(compareByDescending<DshMarketPlugin> { it.stars }.thenBy { it.name })
+                    _dshCategories.value = list.categories
+                    _dshUpdated.value = list.updated
+                }
+                .onFailure { _dshError.value = "DSH 市场加载失败: ${it.message}" }
+            _dshLoading.value = false
+        }
+    }
+
+    /** 安装 DSH 市场条目：GitHub 仓库转换为可迁移能力插件（技能/工具定义/npm CLI 工作区命令） */
+    fun installDshMarketEntry(entry: DshMarketPlugin) {
+        installDsh(entry.repoRef, downloadingKey = "dsh-${entry.repoRef}")
+    }
+
     /** 从 DeepSeek Harness（DSH）插件仓库地址安装：github:owner/repo#ref 自动转换为可迁移能力插件 */
-    fun installDsh(repoRef: String) {
+    fun installDsh(repoRef: String, downloadingKey: String = "dsh") {
         if (_downloadingId.value != null) return
         viewModelScope.launch {
-            _downloadingId.value = "dsh"
+            _downloadingId.value = downloadingKey
             _notice.value = null
             dshPluginAdapter.fetchAsZip(repoRef)
                 .onSuccess { bytes ->

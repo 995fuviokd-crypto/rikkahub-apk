@@ -71,6 +71,7 @@ import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.data.api.CommunityListItem
 import me.rerere.rikkahub.data.api.CommunityMarketDataSource
+import me.rerere.rikkahub.data.api.DshMarketPlugin
 import me.rerere.rikkahub.data.api.communityPluginIdFor
 import me.rerere.rikkahub.data.plugin.InstalledPlugin
 import me.rerere.rikkahub.data.plugin.PluginCategories
@@ -111,6 +112,11 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
     val communityLoading by vm.communityLoading.collectAsStateWithLifecycle()
     val communityError by vm.communityError.collectAsStateWithLifecycle()
     val communityInstallingId by vm.communityInstallingId.collectAsStateWithLifecycle()
+    val dshEntries by vm.dshEntries.collectAsStateWithLifecycle()
+    val dshLoading by vm.dshLoading.collectAsStateWithLifecycle()
+    val dshError by vm.dshError.collectAsStateWithLifecycle()
+    val dshCategories by vm.dshCategories.collectAsStateWithLifecycle()
+    val dshUpdated by vm.dshUpdated.collectAsStateWithLifecycle()
 
     var tab by remember { mutableIntStateOf(0) }
     var search by remember { mutableStateOf("") }
@@ -181,6 +187,7 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
                 vm.loadMarket()
                 vm.loadCommunity()
             }
+            2 -> vm.loadDshMarket()
         }
     }
 
@@ -264,6 +271,11 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
                     onClick = { tab = 1 },
                     text = { Text("市场") },
                 )
+                Tab(
+                    selected = tab == 2,
+                    onClick = { tab = 2 },
+                    text = { Text("DSH 市场") },
+                )
             }
 
             when (tab) {
@@ -298,6 +310,22 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
                         vm.loadMarket()
                         vm.loadCommunity()
                     },
+                    communityUpdateFor = vm::communityUpdateFor,
+                )
+
+                2 -> DshMarketTab(
+                    entries = dshEntries,
+                    installed = installed,
+                    loading = dshLoading,
+                    error = dshError,
+                    categories = dshCategories,
+                    updated = dshUpdated,
+                    downloadingId = downloadingId,
+                    search = search,
+                    onSearchChange = { search = it },
+                    onInstall = vm::installDshMarketEntry,
+                    onRetry = vm::loadDshMarket,
+                    onRefresh = vm::loadDshMarket,
                 )
             }
         }
@@ -544,6 +572,7 @@ private fun CommunityEntryCard(
     entry: CommunityListItem,
     installing: Boolean,
     installed: Boolean,
+    availableUpdate: String?,
     onInstall: () -> Unit,
 ) {
     Card {
@@ -598,6 +627,7 @@ private fun CommunityEntryCard(
                 Spacer(Modifier.weight(1f))
                 when {
                     installing -> CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    availableUpdate != null -> Button(onClick = onInstall) { Text("更新 $availableUpdate") }
                     installed -> Text(
                         text = "已安装",
                         style = MaterialTheme.typography.labelMedium,
@@ -631,6 +661,7 @@ private fun MarketTab(
     onRetryMarket: () -> Unit,
     onRetryCommunity: () -> Unit,
     onRefresh: () -> Unit,
+    communityUpdateFor: (CommunityListItem, List<InstalledPlugin>) -> String?,
 ) {
     val installedIds = remember(installed) { installed.map { it.id }.toSet() }
     var source by remember { mutableStateOf(MARKET_SOURCE_ALL) }
@@ -759,19 +790,217 @@ private fun MarketTab(
                                 installed = communityPluginIdFor(entry.id).let { pid ->
                                     pid in installedIds || pid.replaceFirst("community-", "operit-") in installedIds
                                 },
+                                availableUpdate = communityUpdateFor(entry, installed),
                                 onInstall = { onInstallCommunity(entry) },
                             )
                         }
                     } else if (showCommunity && communityError != null) {
                         item {
                             Text(
-                                "社区市场加载失败：$communityError",
+                                 "社区市场加载失败：$communityError",
+                                 style = MaterialTheme.typography.bodySmall,
+                                 color = MaterialTheme.colorScheme.error,
+                             )
+                             TextButton(onClick = onRetryCommunity) { Text("重试") }
+                         }
+                     }
+                 }
+             }
+         }
+     }
+}
+
+/**
+ * DSH（DeepSeek Harness）插件市场 Tab：
+ * 实时 feed 列表 + 分类筛选 + star/名称排序 + 一键安装（仓库转换）。
+ */
+@Composable
+private fun DshMarketTab(
+    entries: List<DshMarketPlugin>,
+    installed: List<InstalledPlugin>,
+    loading: Boolean,
+    error: String?,
+    categories: List<me.rerere.rikkahub.data.api.DshCategory>,
+    updated: String,
+    downloadingId: String?,
+    search: String,
+    onSearchChange: (String) -> Unit,
+    onInstall: (DshMarketPlugin) -> Unit,
+    onRetry: () -> Unit,
+    onRefresh: () -> Unit,
+) {
+    val installedIds = remember(installed) { installed.map { it.id }.toSet() }
+    var category by remember { mutableStateOf("all") }
+
+    val filtered = entries.filter { entry ->
+        val matchSearch = search.isBlank() ||
+            entry.name.contains(search, ignoreCase = true) ||
+            entry.owner.contains(search, ignoreCase = true) ||
+            entry.displayDescription.contains(search, ignoreCase = true)
+        val matchCategory = category == "all" || entry.category == category
+        matchSearch && matchCategory
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        OutlinedTextField(
+            value = search,
+            onValueChange = onSearchChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            placeholder = { Text("搜索 DSH 插件（名称/作者/描述）") },
+            singleLine = true,
+        )
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item(key = "all") {
+                FilterChip(
+                    selected = category == "all",
+                    onClick = { category = "all" },
+                    label = { Text("全部 (${entries.size})") },
+                )
+            }
+            items(categories, key = { it.id }) { cat ->
+                FilterChip(
+                    selected = category == cat.id,
+                    onClick = { category = cat.id },
+                    label = { Text(cat.zh) },
+                )
+            }
+        }
+        PullToRefreshBox(
+            isRefreshing = loading,
+            onRefresh = onRefresh,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            when {
+                loading && entries.isEmpty() -> Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(48.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+
+                error != null && entries.isEmpty() -> Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(48.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(error, color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = onRetry) { Text("重试") }
+                }
+
+                filtered.isEmpty() -> Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(48.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("没有找到插件", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+
+                else -> LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    if (updated.isNotBlank()) {
+                        item(key = "updated-at") {
+                            Text(
+                                text = "数据更新于 $updated · 共 ${entries.size} 个插件",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            TextButton(onClick = onRetryCommunity) { Text("重试") }
                         }
                     }
+                    items(filtered, key = { "dsh-${it.owner}/${it.name}" }) { entry ->
+                        DshEntryCard(
+                            entry = entry,
+                            installed = "dsh-${entry.repoRef.lowercase()
+                                .replace(Regex("[^a-z0-9]+"), "-")
+                                .trim('-')}" in installedIds,
+                            downloading = downloadingId == "dsh-${entry.repoRef}",
+                            onInstall = { onInstall(entry) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DshEntryCard(
+    entry: DshMarketPlugin,
+    installed: Boolean,
+    downloading: Boolean,
+    onInstall: () -> Unit,
+) {
+    val uriHandler = LocalUriHandler.current
+    Card {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AssistChip(
+                    onClick = {},
+                    label = {
+                        Text(
+                            me.rerere.rikkahub.data.api.DshMarketDataSource.categoryLabel(entry.category),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    },
+                )
+                AssistChip(
+                    onClick = {},
+                    label = { Text("DSH", style = MaterialTheme.typography.labelSmall) },
+                )
+                if (entry.npm != null) {
+                    AssistChip(
+                        onClick = {},
+                        label = { Text("CLI", style = MaterialTheme.typography.labelSmall) },
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = "★ ${entry.stars} · ${entry.owner}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = entry.name,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = entry.displayDescription,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { runCatching { uriHandler.openUri(entry.url) } }) {
+                    Text("仓库", style = MaterialTheme.typography.bodySmall)
+                }
+                Spacer(Modifier.weight(1f))
+                when {
+                    downloading -> CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    installed -> Text(
+                        text = "已安装",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    else -> Button(onClick = onInstall) { Text("安装") }
                 }
             }
         }

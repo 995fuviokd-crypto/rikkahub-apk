@@ -148,4 +148,74 @@ class DshPluginAdapterTest {
             dir.deleteRecursively()
         }
     }
+
+    // ---- buildWorkspaceCommandHint：npm bin → 工作区命令 ----
+
+    @Test
+    fun `buildWorkspaceCommandHint generates npx commands for npm bin`() {
+        val dir = tempRepo()
+        try {
+            File(dir, "package.json").writeText(
+                """{"name":"@liustack/modlens","bin":{"modlens":"./dist/main.js"}}"""
+            )
+
+            val hint = adapter.buildWorkspaceCommandHint("@liustack/modlens", dir)
+
+            assertTrue(hint.contains("工作区命令能力"))
+            assertTrue(hint.contains("`modlens`"))
+            assertTrue(hint.contains("npx -y @liustack/modlens"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `buildWorkspaceCommandHint handles string bin form`() {
+        val dir = tempRepo()
+        try {
+            File(dir, "package.json").writeText(
+                """{"name":"simple-cli","bin":"./cli.js"}"""
+            )
+
+            val hint = adapter.buildWorkspaceCommandHint("simple-cli", dir)
+
+            assertTrue(hint.contains("`simple-cli`"))
+            assertTrue(hint.contains("npx -y simple-cli"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `buildWorkspaceCommandHint returns empty without bin or package`() {
+        val dir = tempRepo()
+        try {
+            File(dir, "package.json").writeText("""{"name":"no-bin"}""")
+            assertEquals("", adapter.buildWorkspaceCommandHint("no-bin", dir))
+            assertEquals("", adapter.buildWorkspaceCommandHint(null, dir))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    // ---- convertRepo：npm CLI 分支（无 skills / defineTool 但有 bin） ----
+
+    @Test
+    fun `convertRepo maps npm cli to workspace command plugin`() {
+        val dir = tempRepo()
+        try {
+            File(dir, "package.json").writeText(
+                """{"name":"vision-cli","version":"2.0.0","description":"视觉命令行","bin":{"vision-cli":"./cli.js"}}"""
+            )
+            File(dir, "README.md").writeText("短 readme")
+
+            val info = adapter.convertRepo(dir, DshRepoRef("owner", "vision-cli", "main"))
+
+            assertEquals("tools", info.category)
+            assertTrue(info.tags.contains("cli"))
+            assertTrue(info.systemPrompt.contains("npx -y vision-cli"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }

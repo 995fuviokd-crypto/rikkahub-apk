@@ -108,6 +108,7 @@ val viewModelModule = module {
             openAIPluginAdapter = get(),
             communityDataSource = get(),
             dshPluginAdapter = get(),
+            dshMarketDataSource = get(),
         )
     }
     viewModel<WorkflowEditorVM> {

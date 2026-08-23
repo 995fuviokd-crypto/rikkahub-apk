@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.plugin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -31,7 +32,8 @@ data class DshRepoRef(
  * RikkaHub 无 Cordis/Node 宿主运行时，本适配器提取其中可迁移的能力：
  * - skills 资源（SKILL.md）→ skill 型插件（systemPrompt 注入，完整可用）
  * - defineTool 工具定义 → 提示词型插件（列出能力清单供 AI 参考）
- * 纯 UI 增强 / 宿主 API 深度依赖的插件无法迁移，明确报错说明原因。
+ * - npm 包 bin CLI → 工作区命令能力（工作区已内置 Node.js/npm，AI 可经终端真实执行）
+ * 纯 UI 增强 / 宿主 API 深度依赖的插件无法迁移时，README 兜底为知识参考型插件。
  */
 class DshPluginAdapter(
     private val httpClient: OkHttpClient,
@@ -91,8 +93,8 @@ class DshPluginAdapter(
 
     /**
      * 纯逻辑：把解压后的 DSH 仓库目录转换为 PluginInfo（供单元测试与复用）。
-     * 转换优先级：SKILL.md 技能 > defineTool 工具定义 > README 说明；
-     * 三者皆无（纯 UI/宿主依赖）时抛出异常说明不可迁移。
+     * 转换优先级：SKILL.md 技能 > defineTool 工具定义 > npm CLI 工作区命令 > README 说明；
+     * 能力段落之外始终附加工作区命令说明与文档兜底，最大化可用性。
      */
     internal fun convertRepo(root: File, ref: DshRepoRef): PluginInfo {
         val pkg = root.resolve("package.json").takeIf { it.isFile }
@@ -102,6 +104,9 @@ class DshPluginAdapter(
         }
         val name = pkgString("displayName", "name") ?: ref.repo
         val description = pkgString("description").orEmpty()
+        val npmPackage = (pkg?.get("name") as? JsonPrimitive)?.contentOrNull?.trim()
+            ?.takeIf { it.isNotBlank() && !it.startsWith("github:") }
+        val workspaceCommandHint = buildWorkspaceCommandHint(npmPackage, root)
 
         // 1. skills 资源：根级或 skills/** 的 SKILL.md 合并为技能型插件
         val skillFiles = root.walkTopDown()
@@ -120,7 +125,7 @@ class DshPluginAdapter(
                 author = ref.owner,
                 category = "skill",
                 repository = "https://github.com/${ref.owner}/${ref.repo}",
-                systemPrompt = prompt,
+                systemPrompt = (prompt + workspaceCommandHint).take(PluginManager.MAX_SYSTEM_PROMPT_LEN),
                 type = PluginCategories.TYPE_SKILL,
                 tags = listOf("dsh", "skill"),
             )
@@ -148,13 +153,35 @@ class DshPluginAdapter(
                 author = ref.owner,
                 category = "general",
                 repository = "https://github.com/${ref.owner}/${ref.repo}",
-                systemPrompt = prompt,
+                systemPrompt = (prompt + workspaceCommandHint).take(PluginManager.MAX_SYSTEM_PROMPT_LEN),
                 type = PluginCategories.TYPE_PLUGIN,
                 tags = listOf("dsh"),
             )
         }
 
-        // 3. 兜底 README 说明型（无 SKILL.md / 工具定义但文档丰富时仍可导入为知识参考）
+        // 3. npm CLI 工具：无 skills/defineTool 但发布为 npm 包时，注册为工作区命令能力插件
+        if (workspaceCommandHint.isNotBlank()) {
+            val prompt = buildString {
+                appendLine("该插件来自 DeepSeek Harness（DSH）生态「$name」。")
+                if (description.isNotBlank()) appendLine("简介：$description")
+                appendLine("它以 npm 命令行工具形式提供，RikkaHub 已将其接入工作区终端能力。")
+                append(workspaceCommandHint.trim())
+            }.trim().take(PluginManager.MAX_SYSTEM_PROMPT_LEN)
+            return PluginInfo(
+                id = "dsh-${ref.slug}",
+                name = name,
+                version = pkgString("version") ?: "1.0.0",
+                description = description.ifBlank { "DeepSeek Harness CLI 工具 $name" },
+                author = ref.owner,
+                category = "tools",
+                repository = "https://github.com/${ref.owner}/${ref.repo}",
+                systemPrompt = prompt,
+                type = PluginCategories.TYPE_PLUGIN,
+                tags = listOf("dsh", "cli"),
+            )
+        }
+
+        // 4. 兜底 README 说明型（无 SKILL.md / 工具定义但文档丰富时仍可导入为知识参考）
         val readme = root.walkTopDown()
             .filter { it.isFile && it.name.equals("README.md", ignoreCase = true) }
             .firstOrNull()
@@ -178,6 +205,35 @@ class DshPluginAdapter(
         error(
             "DSH 插件「$name」无可迁移能力（纯 UI 增强 / Node 宿主运行时依赖），无法转换为 RikkaHub 插件"
         )
+    }
+
+    /**
+     * 工作区命令提示：插件发布为 npm 包且带 bin 入口时，
+     * 生成供 AI 在工作区终端真实执行的命令说明（工作区内置 Node.js/npm）。
+     */
+    internal fun buildWorkspaceCommandHint(npmPackage: String?, root: File): String {
+        val pkg = root.resolve("package.json").takeIf { it.isFile }
+            ?.let { runCatching { json.parseToJsonElement(it.readText()).jsonObject }.getOrNull() }
+            ?: return ""
+        val bin = pkg["bin"] ?: return ""
+        // npm 规范：bin 为对象时 key 即命令名；为字符串时命令名取包名末段（值为入口路径）
+        val defaultBinName = npmPackage?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+        val binNames = when (bin) {
+            is JsonObject -> bin.keys.toList()
+            is JsonPrimitive -> listOfNotNull(defaultBinName)
+            else -> emptyList()
+        }
+        if (binNames.isEmpty() || npmPackage.isNullOrBlank()) return ""
+        return buildString {
+            appendLine()
+            appendLine()
+            appendLine("## 工作区命令能力")
+            appendLine("本插件提供 npm 命令行工具，可在 RikkaHub 工作区终端中直接执行（需先完成 Node.js 安装）：")
+            binNames.take(MAX_BIN_HINTS).forEach { binName ->
+                appendLine("- `$binName`：`npx -y $npmPackage`（参数原样追加，例如 `npx -y $npmPackage --help`）")
+            }
+            append("在用户请求相关能力而当前环境缺少对应工具时，优先尝试上述命令。")
+        }
     }
 
     /** 静态扫描源码中 defineTool({ name: 'x', description: 'y' }) 声明 */
@@ -236,5 +292,8 @@ class DshPluginAdapter(
     private companion object {
         /** README 兜底转换所需的最小说明长度，过短视为无有效文档 */
         const val MIN_README_LEN = 200
+
+        /** 工作区命令提示中最多列出的 bin 入口数量 */
+        const val MAX_BIN_HINTS = 3
     }
 }

@@ -778,7 +778,21 @@ data class PluginSkillInfo(
     val description: String,
     val enabled: Boolean,
     val dir: File,
-)
+) {
+    /** 技能来源分组（防止不同渠道安装混在一个列表里难以区分） */
+    val source: SkillSource
+        get() = when {
+            pluginId.startsWith("dsh-") -> SkillSource.DSH_MARKET
+            pluginId.startsWith("community-") || pluginId.startsWith("operit-") -> SkillSource.COMMUNITY_MARKET
+            else -> SkillSource.OFFICIAL_OR_LOCAL
+        }
+}
+
+enum class SkillSource(val label: String, val hint: String) {
+    OFFICIAL_OR_LOCAL("官方市场 / 本地导入", "来自官方插件市场或手动导入"),
+    COMMUNITY_MARKET("社区市场", "来自 Operit 社区资源库"),
+    DSH_MARKET("DSH 市场", "来自 DeepSeek Harness 插件生态"),
+}
 
 object PluginJson {
     val json = kotlinx.serialization.json.Json {

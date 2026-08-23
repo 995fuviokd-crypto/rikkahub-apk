@@ -171,31 +171,35 @@ fun SkillsPage() {
             }
 
             if (pluginSkills.isNotEmpty()) {
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text(
-                            text = "插件技能",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        Text(
-                            text = "来自已安装 skill 类型插件的技能，可在下方开关启用/卸载",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // 按来源分组展示，防止不同渠道安装的技能混在一起难以区分
+                val grouped = pluginSkills.groupBy { it.source }
+                grouped.forEach { (source, groupSkills) ->
+                    item(key = "group-${source.name}") {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                text = source.label,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Text(
+                                text = source.hint + "，共 ${groupSkills.size} 项，可在下方开关启用/卸载",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    items(groupSkills, key = { "${source.name}-${it.pluginId}" }) { skill ->
+                        PluginSkillCard(
+                            skill = skill,
+                            onClick = { selectedPlugin = skill },
+                            onToggle = { vm.togglePluginSkill(skill.pluginId) },
                         )
                     }
-                }
-                items(pluginSkills, key = { it.pluginId }) { skill ->
-                    PluginSkillCard(
-                        skill = skill,
-                        onClick = { selectedPlugin = skill },
-                        onToggle = { vm.togglePluginSkill(skill.pluginId) },
-                    )
                 }
             }
         }
