@@ -1633,7 +1633,12 @@ private fun TavernEntryCard(
                             when {
                                 downloading -> "下载中"
                                 installed -> "已导入"
-                                else -> "添加为助手"
+                                else -> when (entry.type) {
+                                    "worldbook" -> "导入世界书"
+                                    "preset" -> "应用预设"
+                                    "regex" -> "导入正则"
+                                    else -> "添加为助手"
+                                }
                             }
                         )
                     }

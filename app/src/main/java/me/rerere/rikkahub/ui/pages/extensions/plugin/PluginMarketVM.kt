@@ -488,7 +488,7 @@ class PluginMarketVM(
         }
     }
 
-    /** 从市场安装角色卡：下载文件 → 解析 → 注册助手 */
+    /** 从市场安装条目：按 type 分流（card/worldbook/preset/regex），下载后解析注册 */
     fun installTavernEntry(entry: TavernListing) {
         if (_downloadingId.value != null) return
         viewModelScope.launch {
@@ -496,20 +496,27 @@ class PluginMarketVM(
             _notice.value = null
             tavernMarketDataSource.downloadCard(_marketRepo.value, entry.file)
                 .onSuccess { bytes ->
-                    val isPng = entry.file.endsWith(".png", ignoreCase = true)
-                    runCatching {
-                        val jsonText = withContext(Dispatchers.IO) {
-                            if (isPng) {
-                                TavernPng.extractCharaJson(bytes) ?: error("PNG 中不含酒馆角色数据")
-                            } else {
-                                bytes.toString(Charsets.UTF_8)
+                    when (entry.type) {
+                        "worldbook" -> importWorldInfo(bytes.toString(Charsets.UTF_8), entry.name)
+                        "preset" -> applyPreset(bytes.toString(Charsets.UTF_8))
+                        "regex" -> importRegexScripts(bytes.toString(Charsets.UTF_8))
+                        else -> {
+                            val isPng = entry.file.endsWith(".png", ignoreCase = true)
+                            runCatching {
+                                val jsonText = withContext(Dispatchers.IO) {
+                                    if (isPng) {
+                                        TavernPng.extractCharaJson(bytes) ?: error("PNG 中不含酒馆角色数据")
+                                    } else {
+                                        bytes.toString(Charsets.UTF_8)
+                                    }
+                                }
+                                TavernCardConverter.parseCard(jsonText)
+                            }.onSuccess { card ->
+                                importCardInternal(card)
+                            }.onFailure { e ->
+                                _notice.value = "角色卡解析失败: ${e.message}"
                             }
                         }
-                        TavernCardConverter.parseCard(jsonText)
-                    }.onSuccess { card ->
-                        importCardInternal(card)
-                    }.onFailure { e ->
-                        _notice.value = "角色卡解析失败: ${e.message}"
                     }
                 }
                 .onFailure { _notice.value = "下载失败: ${it.message}" }

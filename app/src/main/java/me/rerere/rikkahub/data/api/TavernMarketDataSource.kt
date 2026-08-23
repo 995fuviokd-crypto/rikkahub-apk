@@ -20,8 +20,10 @@ data class TavernListing(
     val description: String = "",
     val tags: List<String> = emptyList(),
     val emoji: String = "🎭",
-    /** 卡片文件相对仓库根路径（.json 或 .png），空则视为纯展示占位 */
+    /** 卡片文件路径：仓库相对路径或完整 https 直链，空则视为纯展示占位 */
     val file: String = "",
+    /** 资产类型：card=角色卡 worldbook=世界书 preset=预设 regex=正则脚本 */
+    val type: String = "card",
 )
 
 /**
@@ -72,13 +74,16 @@ class TavernMarketDataSource(
             }
         }
 
-    /** 下载卡片文件字节（JSON 或 PNG） */
+    /** 下载卡片文件字节（JSON 或 PNG），支持仓库相对路径与完整直链 */
     suspend fun downloadCard(repo: String, file: String): Result<ByteArray> =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
-                val parts = repo.trim().trim('/').split('/')
-                val path = file.trimStart('/')
+                val path = file.trim().trimStart('/')
                 require(path.isNotBlank()) { "条目缺少文件路径" }
+                if (path.startsWith("http://") || path.startsWith("https://")) {
+                    return@runCatching download(path)
+                }
+                val parts = repo.trim().trim('/').split('/')
                 var lastError: Throwable? = null
                 for (candidate in candidates("${parts[0]}/${parts[1]}/main/$path")) {
                     try {
@@ -107,6 +112,7 @@ class TavernMarketDataSource(
                     tags = obj["tags"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty(),
                     emoji = obj["emoji"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: "🎭",
                     file = obj["file"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                    type = obj["type"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: "card",
                 )
             }
         }
