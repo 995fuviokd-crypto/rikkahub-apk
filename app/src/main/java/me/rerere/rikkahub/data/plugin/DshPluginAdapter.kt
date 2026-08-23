@@ -308,7 +308,6 @@ class DshPluginAdapter(
         val docsFolded = docsPageHtml
             .substringAfter("<body>", "")
             .substringBefore("</body>")
-            .replace("</details>", "</details></section>")
             .let { """<section id="docs-fallback" style="display:none">$it</section>""" }
         return buildString {
             appendLine("<!DOCTYPE html>")
@@ -666,7 +665,23 @@ window.__dshPanelMountAll__ = function () {
             .build()
         client.newCall(Request.Builder().url(url).build()).execute().use { response ->
             if (!response.isSuccessful) error("拉取 DSH 仓库失败: HTTP ${response.code}")
-            return response.body?.bytes() ?: error("空响应")
+            val body = response.body ?: error("空响应")
+            // 防御超大仓库把内存打爆（codeload 是全仓库 zip）
+            val declared = body.contentLength()
+            if (declared > MAX_REPO_ZIP_BYTES) error("仓库包过大（${declared / 1024 / 1024}MB），超过上限")
+            val out = java.io.ByteArrayOutputStream()
+            body.byteStream().use { input ->
+                val buf = ByteArray(64 * 1024)
+                var total = 0
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    total += n
+                    if (total > MAX_REPO_ZIP_BYTES) error("仓库包过大，超过下载上限")
+                    out.write(buf, 0, n)
+                }
+            }
+            return out.toByteArray()
         }
     }
 
@@ -684,5 +699,6 @@ window.__dshPanelMountAll__ = function () {
 
         /** client.js 打包体积上限（防止超大 bundle 拖垮 WebView） */
         const val MAX_CLIENT_JS_BYTES = 3 * 1024 * 1024
+        const val MAX_REPO_ZIP_BYTES = 64L * 1024 * 1024
     }
 }

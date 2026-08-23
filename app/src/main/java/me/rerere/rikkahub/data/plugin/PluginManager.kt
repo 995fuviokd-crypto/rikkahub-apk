@@ -179,7 +179,8 @@ class PluginManager(
         val file = File(webRoot, relativePath)
         val canonicalRoot = runCatching { webRoot.canonicalPath }.getOrNull() ?: return null
         val canonicalFile = runCatching { file.canonicalPath }.getOrNull() ?: return null
-        if (!canonicalFile.startsWith(canonicalRoot)) return null
+        // 目录前缀必须带分隔符，避免 "/x/web2" 误通过 "/x/web" 前缀校验
+        if (canonicalFile != canonicalRoot && !canonicalFile.startsWith(canonicalRoot + File.separator)) return null
         if (!file.isFile) return null
         return file
     }
