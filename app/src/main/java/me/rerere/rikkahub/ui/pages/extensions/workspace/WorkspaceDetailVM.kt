@@ -539,10 +539,23 @@ set -e
 BT_DIR=/opt/android/build-tools
 BT_VERSION=34
 mkdir -p "${'$'}BT_DIR"
+# 自举下载与解压工具: Rootfs 默认无 curl/wget/unzip, 缺失时先经 apt 补装
+if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq >/dev/null 2>&1 || true
+  apt-get install -y -qq curl unzip >/dev/null 2>&1 || true
+fi
+if ! command -v unzip >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq >/dev/null 2>&1 || true
+  apt-get install -y -qq unzip >/dev/null 2>&1 || true
+fi
+command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || { echo "no curl/wget available"; exit 1; }
+command -v unzip >/dev/null 2>&1 || { echo "unzip missing"; exit 1; }
 if ! command -v java >/dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq >/dev/null 2>&1 || true
-  apt-get install -y -qq openjdk-17-jre-headless unzip >/dev/null 2>&1 || true
+  apt-get install -y -qq openjdk-17-jre-headless >/dev/null 2>&1 || true
 fi
 if [ ! -x "${'$'}BT_DIR/aapt2" ]; then
   ZIP=/tmp/build-tools-${'$'}BT_VERSION.zip
@@ -571,6 +584,19 @@ set -e
 PLAT_DIR=/opt/android/platforms
 V={{VERSION}}
 mkdir -p "${'$'}PLAT_DIR"
+# 自举下载与解压工具: Rootfs 默认无 curl/wget/unzip, 缺失时先经 apt 补装
+if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq >/dev/null 2>&1 || true
+  apt-get install -y -qq curl unzip >/dev/null 2>&1 || true
+fi
+if ! command -v unzip >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq >/dev/null 2>&1 || true
+  apt-get install -y -qq unzip >/dev/null 2>&1 || true
+fi
+command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || { echo "no curl/wget available"; exit 1; }
+command -v unzip >/dev/null 2>&1 || { echo "unzip missing"; exit 1; }
 if [ ! -f "${'$'}PLAT_DIR/android.jar" ]; then
   ZIP=/tmp/platform-${'$'}V.zip
   if command -v curl >/dev/null 2>&1; then
@@ -593,6 +619,13 @@ set -e
 R8_DIR=/opt/r8
 V={{VERSION}}
 mkdir -p "${'$'}R8_DIR"
+# 自举下载工具: Rootfs 默认无 curl/wget, 缺失时先经 apt 补装
+if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq >/dev/null 2>&1 || true
+  apt-get install -y -qq curl >/dev/null 2>&1 || true
+fi
+command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || { echo "no curl/wget available"; exit 1; }
 if ! command -v java >/dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq >/dev/null 2>&1 || true
