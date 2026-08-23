@@ -584,7 +584,7 @@ class CommunityMarketDataSource(
         return withContext(Dispatchers.IO) {
             // GitHub 资源直连失败（被墙/超时）时自动切换镜像加速源重试
             val candidates = if (isGitHubUrl(url)) {
-                listOf(url) + GitHubPluginAPI.MIRROR_PREFIXES.map { it + url }
+                listOf(url) + PluginMarketDataSource.MIRROR_PREFIXES.map { it + url }
             } else {
                 listOf(url)
             }
