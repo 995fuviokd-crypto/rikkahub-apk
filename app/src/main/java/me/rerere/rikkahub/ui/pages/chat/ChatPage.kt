@@ -306,8 +306,10 @@ private fun ChatPageContent(
     val canRecall by vm.canRecall.collectAsStateWithLifecycle()
     val canRedo by vm.canRedo.collectAsStateWithLifecycle()
 
-    val completionProviders = remember(assistant.workspaceId, conversation.workspaceCwd, workspaceRepository) {
-        assistant.workspaceId?.let { workspaceId ->
+    // 主工作区取自 effectiveWorkspaceIds 首个(集合优先, 旧单字段回退), 与绑定写入逻辑一致
+    val primaryWorkspaceId = assistant.effectiveWorkspaceIds.firstOrNull()
+    val completionProviders = remember(primaryWorkspaceId, conversation.workspaceCwd, workspaceRepository) {
+        primaryWorkspaceId?.let { workspaceId ->
             listOf(
                 WorkspaceCompletionProvider(
                     workspaceId = workspaceId.toString(),

@@ -59,7 +59,8 @@ internal fun EditedFilesList(
     parts: List<UIMessagePart>,
     assistant: Assistant?,
 ) {
-    val workspaceId = assistant?.workspaceId?.toString() ?: return
+    // 集合绑定时 workspaceId 旧字段可能为空, 用 effectiveWorkspaceIds 主工作区回退
+    val workspaceId = assistant?.effectiveWorkspaceIds?.firstOrNull()?.toString() ?: return
     val editedFiles = remember(parts) {
         parts.filterIsInstance<UIMessagePart.Tool>()
             .filter { it.toolName in WORKSPACE_FILE_TOOL_NAMES && it.isExecuted }

@@ -281,8 +281,11 @@ internal fun FilesPicker(
         )
 
         // Workspace CWD
-        val boundWorkspace = remember(workspaces, assistant.workspaceId) {
-            workspaces.find { it.id == assistant.workspaceId?.toString() }
+        // 绑定信息在 workspaceIds 集合(首个为主工作区), 旧字段 workspaceId 仅回退兼容;
+        // 只查旧字段会导致集合绑定的助手误显示"未绑定"
+        val boundWorkspace = remember(workspaces, assistant.effectiveWorkspaceIds) {
+            val primaryId = assistant.effectiveWorkspaceIds.firstOrNull()?.toString()
+            workspaces.find { it.id == primaryId }
         }
         if (boundWorkspace != null && boundWorkspace.shellStatus == WorkspaceShellStatus.READY.name) {
             var showCwdSheet by remember { mutableStateOf(false) }
@@ -368,9 +371,11 @@ private fun WorkspacePickerListItem(
     onNavigateToTerminal: (String) -> Unit,
     onNavigateToManage: () -> Unit,
 ) {
+    // 主工作区取自 effectiveWorkspaceIds 首个(集合优先, 旧单字段回退), 与选择面板的写入逻辑一致
     var showSheet by remember { mutableStateOf(false) }
-    val boundWorkspace = remember(workspaces, assistant.workspaceId) {
-        workspaces.find { it.id == assistant.workspaceId?.toString() }
+    val boundWorkspace = remember(workspaces, assistant.effectiveWorkspaceIds) {
+        val primaryId = assistant.effectiveWorkspaceIds.firstOrNull()?.toString()
+        workspaces.find { it.id == primaryId }
     }
 
     ListItem(
