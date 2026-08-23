@@ -84,7 +84,7 @@ class DshPluginAdapter(
                 PluginManager.unzipTo(bytes, tempRoot)
                 val root = locateRepoRoot(tempRoot, ref.repo)
                     ?: error("仓库内容为空或无法解压")
-                convertToZip(convertRepo(root, ref))
+                convertToZip(convertRepo(root, ref), buildDocsPage(root, ref))
             } finally {
                 tempRoot.deleteRecursively()
             }
@@ -128,6 +128,10 @@ class DshPluginAdapter(
                 systemPrompt = (prompt + workspaceCommandHint).take(PluginManager.MAX_SYSTEM_PROMPT_LEN),
                 type = PluginCategories.TYPE_SKILL,
                 tags = listOf("dsh", "skill"),
+                extensionPoints = docsSidebarEntry(
+                    PluginInfo(id = "dsh-${ref.slug}", name = name, version = "1.0.0",
+                        repository = "https://github.com/${ref.owner}/${ref.repo}")
+                ) ?: PluginExtensionPoints(),
             )
         }
 
@@ -156,6 +160,10 @@ class DshPluginAdapter(
                 systemPrompt = (prompt + workspaceCommandHint).take(PluginManager.MAX_SYSTEM_PROMPT_LEN),
                 type = PluginCategories.TYPE_PLUGIN,
                 tags = listOf("dsh"),
+                extensionPoints = docsSidebarEntry(
+                    PluginInfo(id = "dsh-${ref.slug}", name = name, version = "1.0.0",
+                        repository = "https://github.com/${ref.owner}/${ref.repo}")
+                ) ?: PluginExtensionPoints(),
             )
         }
 
@@ -178,32 +186,44 @@ class DshPluginAdapter(
                 systemPrompt = prompt,
                 type = PluginCategories.TYPE_PLUGIN,
                 tags = listOf("dsh", "cli"),
+                extensionPoints = docsSidebarEntry(
+                    PluginInfo(id = "dsh-${ref.slug}", name = name, version = "1.0.0",
+                        repository = "https://github.com/${ref.owner}/${ref.repo}")
+                ) ?: PluginExtensionPoints(),
             )
         }
 
-        // 4. 兜底 README 说明型（无 SKILL.md / 工具定义但文档丰富时仍可导入为知识参考）
+        // 4. 兜底 README 说明型 / 纯 UI 面板型：不再拒装，转为文档承载型插件，
+        //    面板入口在侧边栏可见（web/index.html 由 buildDocsPage 生成）
         val readme = root.walkTopDown()
             .filter { it.isFile && it.name.equals("README.md", ignoreCase = true) }
             .firstOrNull()
             ?.let { runCatching { it.readText().trim() }.getOrNull() }
             .orEmpty()
-        if (readme.length >= MIN_README_LEN) {
-            return PluginInfo(
-                id = "dsh-${ref.slug}",
-                name = name,
-                version = pkgString("version") ?: "1.0.0",
-                description = description.ifBlank { "DeepSeek Harness 插件 $name" },
-                author = ref.owner,
-                category = "knowledge",
-                repository = "https://github.com/${ref.owner}/${ref.repo}",
-                systemPrompt = "以下是 DeepSeek Harness 插件「$name」的说明文档：\n\n${readme.take(PluginManager.MAX_SYSTEM_PROMPT_LEN)}",
-                type = PluginCategories.TYPE_SKILL,
-                tags = listOf("dsh", "docs"),
-            )
-        }
-
-        error(
-            "DSH 插件「$name」无可迁移能力（纯 UI 增强 / Node 宿主运行时依赖），无法转换为 RikkaHub 插件"
+        return PluginInfo(
+            id = "dsh-${ref.slug}",
+            name = name,
+            version = pkgString("version") ?: "1.0.0",
+            description = description.ifBlank { "DeepSeek Harness 插件 $name" },
+            author = ref.owner,
+            category = if (readme.length >= MIN_README_LEN) "knowledge" else "ui",
+            repository = "https://github.com/${ref.owner}/${ref.repo}",
+            systemPrompt = (
+                if (readme.length >= MIN_README_LEN) {
+                    "以下是 DeepSeek Harness 插件「$name」的说明文档：\n\n${readme.take(PluginManager.MAX_SYSTEM_PROMPT_LEN)}"
+                } else {
+                    "该插件来自 DeepSeek Harness（DSH）生态「$name」。" +
+                        (if (description.isNotBlank()) "简介：$description。" else "") +
+                        "原生为 DSH Web UI 增强/面板类插件，RikkaHub 以文档与仓库链接形式承载，" +
+                        "完整功能请通过面板入口查看其 GitHub 仓库。"
+                }
+                ).take(PluginManager.MAX_SYSTEM_PROMPT_LEN),
+            type = PluginCategories.TYPE_SKILL,
+            tags = listOf("dsh", if (readme.length >= MIN_README_LEN) "docs" else "ui"),
+            extensionPoints = docsSidebarEntry(
+                PluginInfo(id = "dsh-${ref.slug}", name = name, version = "1.0.0",
+                    repository = "https://github.com/${ref.owner}/${ref.repo}")
+            ) ?: PluginExtensionPoints(),
         )
     }
 
@@ -268,15 +288,178 @@ class DshPluginAdapter(
             ?: dirs.first()
     }
 
-    private fun convertToZip(info: PluginInfo): ByteArray {
+    /**
+     * 生成插件文档页 HTML（写入 zip 的 web/index.html）。
+     * 以仓库 README 为内容源，图片/相对链接解析为 GitHub 绝对地址；
+     * 安装后在聊天抽屉侧边栏与详情对话框可见可打开，让 UI/面板类插件"看得见"。
+     */
+    internal fun buildDocsPage(root: File, ref: DshRepoRef): String {
+        val readme = root.walkTopDown()
+            .filter { it.isFile && it.name.equals("README.md", ignoreCase = true) }
+            .firstOrNull()
+            ?.let { runCatching { it.readText() }.getOrNull() }
+            .orEmpty()
+        val rawBase = "https://raw.githubusercontent.com/${ref.owner}/${ref.repo}/${ref.ref}/"
+        val body = if (readme.isBlank()) {
+            "<p>该插件未提供 README 文档。</p>"
+        } else {
+            markdownToHtml(readme, ref)
+        }
+        return buildString {
+            appendLine("<!DOCTYPE html>")
+            appendLine("""<html lang="zh"><head><meta charset="utf-8">""")
+            appendLine("""<meta name="viewport" content="width=device-width, initial-scale=1">""")
+            appendLine("<title>${escapeHtml(ref.repo)}</title>")
+            appendLine(DOCS_PAGE_CSS)
+            appendLine("</head><body>")
+            appendLine(
+                """<p class="meta">DSH 插件 · <a href="https://github.com/${escapeHtml(ref.owner)}/${
+                    escapeHtml(ref.repo)
+                }">GitHub 仓库</a></p>"""
+            )
+            appendLine(body)
+            appendLine("</body></html>")
+        }.replace("__RAW_BASE__", rawBase)
+    }
+
+    /**
+     * 轻量 Markdown → HTML：标题/列表/引用/围栏代码块/行内样式/链接/图片。
+     * 相对路径资源以 __RAW_BASE__ 前缀占位（渲染前替换为 GitHub raw 地址）。
+     */
+    internal fun markdownToHtml(md: String, ref: DshRepoRef): String {
+        val out = StringBuilder()
+        var inCode = false
+        var listOpen = false
+        fun closeList() {
+            if (listOpen) {
+                out.append("</ul>\n")
+                listOpen = false
+            }
+        }
+        md.lines().forEach { raw ->
+            val line = raw.trimEnd('\n')
+            when {
+                line.trimStart().startsWith("```") -> {
+                    closeList()
+                    if (inCode) {
+                        out.append("</code></pre>\n")
+                    } else {
+                        out.append("<pre><code>")
+                    }
+                    inCode = !inCode
+                }
+                inCode -> out.append(escapeHtml(line)).append('\n')
+                line.isBlank() -> closeList()
+                line.startsWith("#") -> {
+                    closeList()
+                    val level = line.takeWhile { it == '#' }.length.coerceAtMost(6)
+                    val text = inline(line.dropWhile { it == '#' }.trim(), ref)
+                    out.append("<h$level>$text</h$level>\n")
+                }
+                line.trimStart().startsWith("- ") || line.trimStart().startsWith("* ") -> {
+                    if (!listOpen) {
+                        out.append("<ul>\n")
+                        listOpen = true
+                    }
+                    out.append("<li>").append(inline(line.trimStart().drop(2).trim(), ref)).append("</li>\n")
+                }
+                line.startsWith(">") -> {
+                    closeList()
+                    out.append("<blockquote>").append(inline(line.removePrefix(">").trim(), ref)).append("</blockquote>\n")
+                }
+                else -> {
+                    closeList()
+                    out.append("<p>").append(inline(line, ref)).append("</p>\n")
+                }
+            }
+        }
+        if (inCode) out.append("</code></pre>\n")
+        closeList()
+        return out.toString()
+    }
+
+    /** 行内 Markdown：图片、链接、粗体、斜体、行内代码；相对链接指向 GitHub 页面 */
+    private fun inline(text: String, ref: DshRepoRef): String {
+        var s = escapeHtml(text)
+        // 图片：![alt](src)，相对路径走 __RAW_BASE__ 占位
+        s = s.replace(Regex("""!\[([^\]]*)]\(([^)\s]+)\)""")) { m ->
+            val alt = m.groupValues[1]
+            val src = m.groupValues[2]
+            val resolved = if (src.startsWith("http")) src else "__RAW_BASE__${src.trimStart('/')}"
+            """<img src="${escapeAttr(resolved)}" alt="${escapeAttr(alt)}" loading="lazy">"""
+        }
+        // 链接：[text](url)，相对路径指向仓库 blob 页面
+        s = s.replace(Regex("""\[([^\]]+)]\(([^)\s]+)\)""")) { m ->
+            val label = m.groupValues[1]
+            val href = m.groupValues[2]
+            val resolved = if (href.startsWith("http") || href.startsWith("#")) {
+                href
+            } else {
+                "https://github.com/${ref.owner}/${ref.repo}/blob/${ref.ref}/${href.trimStart('/')}"
+            }
+            """<a href="${escapeAttr(resolved)}">${label}</a>"""
+        }
+        s = s.replace(Regex("""\*\*([^*]+)\*\*"""), "<b>$1</b>")
+        s = s.replace(Regex("""\*([^*\n]+)\*"""), "<i>$1</i>")
+        s = s.replace(Regex("""`([^`]+)`"""), "<code>$1</code>")
+        return s
+    }
+
+    private fun escapeHtml(s: String): String = s
+        .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    private fun escapeAttr(s: String): String = escapeHtml(s).replace("\"", "&quot;")
+
+    private val DOCS_PAGE_CSS = """<style>
+        body { font-family: -apple-system, sans-serif; padding: 16px; max-width: 760px;
+               margin: 0 auto; color: #1c1b1f; line-height: 1.6; }
+        img { max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0; }
+        pre { background: #f5f4f8; padding: 12px; border-radius: 8px; overflow-x: auto; }
+        code { background: #f5f4f8; padding: 2px 4px; border-radius: 4px; font-size: 0.9em; }
+        pre code { background: none; padding: 0; }
+        blockquote { border-left: 3px solid #ccc; margin: 8px 0; padding: 2px 12px; color: #555; }
+        a { color: #0061a4; }
+        .meta { color: #666; font-size: 0.85em; border-bottom: 1px solid #eee; padding-bottom: 8px; }
+        @media (prefers-color-scheme: dark) {
+            body { background: #141218; color: #e6e0e9; }
+            pre, code { background: #211f26; }
+            blockquote { border-color: #444; color: #aaa; }
+            a { color: #9acbff; }
+            .meta { border-color: #333; }
+        }
+    </style>"""
+
+    private fun convertToZip(info: PluginInfo, docsPageHtml: String?): ByteArray {
         val baos = java.io.ByteArrayOutputStream()
         ZipOutputStream(baos).use { zip ->
             zip.putNextEntry(ZipEntry(PluginManager.METADATA_FILE))
             zip.write(PluginJson.toJson(info).toByteArray(Charsets.UTF_8))
             zip.closeEntry()
+            if (docsPageHtml != null) {
+                zip.putNextEntry(ZipEntry("web/index.html"))
+                zip.write(docsPageHtml.toByteArray(Charsets.UTF_8))
+                zip.closeEntry()
+            }
         }
         return baos.toByteArray()
     }
+
+    /**
+     * 面板入口扩展点：注册侧边栏 webview 动作（payload 指向包内 web/index.html），
+     * 使插件在聊天抽屉侧边栏与详情对话框中可见可打开。
+     */
+    internal fun docsSidebarEntry(info: PluginInfo): PluginExtensionPoints? =
+        info.takeIf { it.repository.isNotBlank() }?.let {
+            PluginExtensionPoints(
+                sidebarActions = listOf(
+                    PluginExtensionAction(
+                        id = "${it.id}_panel",
+                        label = it.name,
+                        target = "webview",
+                        payload = "plugin://${it.id}/index.html",
+                    )
+                )
+            )
+        }
 
     private fun download(url: String): ByteArray {
         val client = httpClient.newBuilder()

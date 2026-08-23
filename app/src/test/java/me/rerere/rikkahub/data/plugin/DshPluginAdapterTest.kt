@@ -134,16 +134,76 @@ class DshPluginAdapterTest {
     }
 
     @Test
-    fun `convertRepo rejects ui only plugins`() {
+    fun `convertRepo converts ui only plugins to docs carrier with sidebar entry`() {
         val dir = tempRepo()
         try {
             File(dir, "package.json").writeText("""{"name":"ui-panel","description":"纯 UI 增强"}""")
             File(dir, "lib/client.js").apply { parentFile.mkdirs() }.writeText("export function apply(ctx) {}")
 
-            val error = runCatching { adapter.convertRepo(dir, DshRepoRef("owner", "ui-panel", "main")) }
-                .exceptionOrNull()
-            assertNotNull(error)
-            assertTrue(error!!.message.orEmpty().contains("无可迁移能力"))
+            val info = adapter.convertRepo(dir, DshRepoRef("owner", "ui-panel", "main"))
+
+            // UI 面板类不再拒装：以文档承载型 skill 落地，侧边栏注册面板入口
+            assertEquals("skill", info.type)
+            assertEquals("ui", info.category)
+            assertTrue(info.tags.contains("ui"))
+            val sidebar = info.extensionPoints.sidebarActions
+            assertEquals(1, sidebar.size)
+            assertEquals("webview", sidebar[0].target)
+            assertEquals("plugin://dsh-owner-ui-panel/index.html", sidebar[0].payload)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    // ---- markdownToHtml / 文档页 ----
+
+    @Test
+    fun `markdownToHtml renders headings lists code and resolves relative images`() {
+        val md = """
+            # 标题一
+            一些 **粗体** 与 `code` 文本。
+            - 列表项 [链接](docs/guide.md)
+            ![截图](images/demo.png)
+
+            ```js
+            console.log("<script>");
+            ```
+        """.trimIndent()
+        val ref = DshRepoRef("owner", "repo", "main")
+        val html = adapter.markdownToHtml(md, ref)
+
+        assertTrue(html.contains("<h1>标题一</h1>"))
+        assertTrue(html.contains("<b>粗体</b>"))
+        assertTrue(html.contains("<code>code</code>"))
+        assertTrue(html.contains("<li>列表项 <a href=\"https://github.com/owner/repo/blob/main/docs/guide.md\">链接</a></li>"))
+        assertTrue(html.contains("__RAW_BASE__images/demo.png"))
+        assertTrue(html.contains("&lt;script&gt;"))
+    }
+
+    @Test
+    fun `buildDocsPage embeds readme and meta link`() {
+        val dir = tempRepo()
+        try {
+            File(dir, "README.md").writeText("# My Panel\n\n功能说明正文。")
+            val page = adapter.buildDocsPage(dir, DshRepoRef("my", "panel", "v2"))
+
+            assertTrue(page.startsWith("<!DOCTYPE html>"))
+            assertTrue(page.contains("<h1>My Panel</h1>"))
+            assertTrue(page.contains("https://github.com/my/panel"))
+            assertTrue(page.replace("__RAW_BASE__", "x").contains("<body>"))
+            // raw base 已注入供相对图片解析
+            assertTrue(page.contains("__RAW_BASE__") || !page.contains("images/"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `buildDocsPage handles missing readme`() {
+        val dir = tempRepo()
+        try {
+            val page = adapter.buildDocsPage(dir, DshRepoRef("o", "r", "main"))
+            assertTrue(page.contains("未提供 README"))
         } finally {
             dir.deleteRecursively()
         }
