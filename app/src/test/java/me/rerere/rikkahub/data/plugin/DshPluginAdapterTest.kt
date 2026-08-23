@@ -209,6 +209,63 @@ class DshPluginAdapterTest {
         }
     }
 
+    // ---- findClientEntry / 面板运行壳 ----
+
+    @Test
+    fun `findClientEntry prefers dsh plugin json declaration`() {
+        val dir = tempRepo()
+        try {
+            File(dir, "dsh.plugin.json").writeText(
+                """{"id":"x","client":{"main":"./ui/panel.js"}}"""
+            )
+            File(dir, "lib/client.js").apply { parentFile.mkdirs() }.writeText("// fallback")
+            File(dir, "ui/panel.js").apply { parentFile.mkdirs() }.writeText("// declared")
+
+            assertEquals(File(dir, "ui/panel.js"), adapter.findClientEntry(dir))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `findClientEntry falls back to common bundle paths`() {
+        val dir = tempRepo()
+        try {
+            File(dir, "lib/client.js").apply { parentFile.mkdirs() }.writeText("// client")
+            assertEquals(File(dir, "lib/client.js"), adapter.findClientEntry(dir))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `findClientEntry returns null without client code`() {
+        val dir = tempRepo()
+        try {
+            assertEquals(null, adapter.findClientEntry(dir))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `buildPanelPage embeds host shim and client reference`() {
+        val docs = "<!DOCTYPE html><html><head></head><body><p>doc body</p></body></html>"
+        val page = adapter.buildPanelPage(
+            DshRepoRef("owner", "repo", "main"),
+            clientJs = "window.__ModuleLoader__.load({});",
+            docsPageHtml = docs,
+        )
+
+        assertTrue(page.contains("__ModuleLoader__"))
+        assertTrue(page.contains("""<script src="./plugin.client.js">"""))
+        assertTrue(page.contains("docs-fallback"))
+        assertTrue(page.contains("<p>doc body</p>"))
+        // 面板壳与状态条
+        assertTrue(page.contains("id=\"panel-root\""))
+        assertTrue(page.contains("__dshPanelMountAll__"))
+    }
+
     // ---- buildWorkspaceCommandHint：npm bin → 工作区命令 ----
 
     @Test

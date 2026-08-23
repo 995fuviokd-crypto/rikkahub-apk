@@ -84,11 +84,54 @@ class DshPluginAdapter(
                 PluginManager.unzipTo(bytes, tempRoot)
                 val root = locateRepoRoot(tempRoot, ref.repo)
                     ?: error("仓库内容为空或无法解压")
-                convertToZip(convertRepo(root, ref), buildDocsPage(root, ref))
+                val info = convertRepo(root, ref)
+                // 面板优先：带 client 入口的仓库生成可交互运行壳，否则退回纯文档页
+                val clientEntry = findClientEntry(root)
+                val docsPage = buildDocsPage(root, ref)
+                val indexHtml = if (clientEntry != null) {
+                    buildPanelPage(ref, runCatching { clientEntry.readText() }.getOrDefault(""), docsPage)
+                } else {
+                    docsPage
+                }
+                convertToZip(
+                    info,
+                    indexHtml = indexHtml,
+                    clientJs = clientEntry?.let { runCatching { it.readText() }.getOrNull() },
+                )
             } finally {
                 tempRoot.deleteRecursively()
             }
         }
+    }
+
+    /**
+     * 探测客户端 UI 入口：dsh.plugin.json 的 client.main 声明优先，
+     * 其余按社区常见打包路径兜底。
+     */
+    internal fun findClientEntry(root: File): File? {
+        val declared = root.resolve("dsh.plugin.json").takeIf { it.isFile }
+            ?.let { file ->
+                runCatching {
+                    (json.parseToJsonElement(file.readText()).jsonObject["client"] as? JsonObject)
+                        ?.get("main") as? JsonPrimitive
+                }.getOrNull()?.contentOrNull
+            }
+            ?.trim('/')
+            ?.takeIf { it.isNotBlank() }
+        val candidates = listOfNotNull(
+            declared,
+            "lib/client.js", "client/client.js", "dist/client.js", "client.js",
+        )
+        return candidates.firstNotNullOfOrNull { rel ->
+            root.resolve(rel).normalizeFile().takeIf { it.isFile && it.length() in 1..MAX_CLIENT_JS_BYTES }
+        }
+    }
+
+    /** java.io.File 无 canonical 开销的规范化（消除 "./" 与冗余段），便于路径相等比较 */
+    private fun File.normalizeFile(): File {
+        val segments = absolutePath.split('/').filter { it.isNotEmpty() && it != "." }
+        val prefix = if (absolutePath.startsWith("/")) "/" else ""
+        return File(prefix + segments.joinToString("/"))
     }
 
     /**
@@ -256,7 +299,162 @@ class DshPluginAdapter(
         }
     }
 
-    /** 静态扫描源码中 defineTool({ name: 'x', description: 'y' }) 声明 */
+    /**
+     * 面板运行壳：shim DSH 客户端宿主（window.__ModuleLoader__ + cordis ctx +
+     * react/react-dom require），在 WebView 中真实执行插件 client.js 并挂载其 React UI。
+     * 挂载失败或超时时降级为 README 文档页，保证"看得见"。
+     */
+    internal fun buildPanelPage(ref: DshRepoRef, clientJs: String, docsPageHtml: String): String {
+        val docsFolded = docsPageHtml
+            .substringAfter("<body>", "")
+            .substringBefore("</body>")
+            .replace("</details>", "</details></section>")
+            .let { """<section id="docs-fallback" style="display:none">$it</section>""" }
+        return buildString {
+            appendLine("<!DOCTYPE html>")
+            appendLine("""<html lang="zh"><head><meta charset="utf-8">""")
+            appendLine("""<meta name="viewport" content="width=device-width, initial-scale=1">""")
+            appendLine("<title>${escapeHtml(ref.repo)}</title>")
+            appendLine(DOCS_PAGE_CSS)
+            appendLine(PANEL_PAGE_CSS)
+            appendLine("""<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"
+                onerror="this.onerror=null;var s=document.createElement('script');s.src='https://fastly.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js';s.onload=function(){window.__dshReactReady__&amp;&amp;window.__dshReactReady__()};document.head.appendChild(s)"></script>""")
+            appendLine("""<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"
+                onerror="this.onerror=null;var s=document.createElement('script');s.src='https://fastly.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js';document.head.appendChild(s)"></script>""")
+            appendLine("<script>$PANEL_HOST_SHIM</script>")
+            appendLine("</head><body>")
+            appendLine("""<div id="status" class="meta">正在启动插件面板…（依赖 CDN，首次加载稍慢）</div>""")
+            appendLine("""<div id="panel-root"></div>""")
+            appendLine(docsFolded)
+            appendLine("""<script src="./plugin.client.js"></script>""")
+            appendLine("<script>window.__dshPanelMountAll__ && window.__dshPanelMountAll__();</script>")
+            appendLine("</body></html>")
+        }.replace("__RAW_BASE__", "https://raw.githubusercontent.com/${ref.owner}/${ref.repo}/${ref.ref}/")
+    }
+
+    /**
+     * 宿主 shim 脚本：模块加载器、cordis ctx、react 三件套 require 映射与
+     * 未知模块 stub；mountAll 在 client.js 注册后统一调用 apply 挂载面板 DOM。
+     */
+    internal val PANEL_HOST_SHIM = """
+window.__ModuleLoader__ = (function () {
+    var plugins = [];
+    function makeRequire() {
+        return function (name) {
+            var key = String(name || '').toLowerCase();
+            if (key === 'react') {
+                if (!window.React) throw new Error('React not loaded');
+                return window.React;
+            }
+            if (key === 'react-dom' || key === 'react-dom/client') {
+                if (!window.ReactDOM) throw new Error('ReactDOM not loaded');
+                return window.ReactDOM;
+            }
+            if (key === 'react/jsx-runtime' || key === 'react/jsx-dev-runtime') {
+                var R = window.React;
+                if (!R) throw new Error('React not loaded');
+                function jsx(type, props, keyArg) {
+                    if (keyArg !== undefined) {
+                        props = Object.assign({}, props, { key: keyArg });
+                    }
+                    return R.createElement(type, props);
+                }
+                jsx.Fragment = R.Fragment;
+                return { jsx: jsx, jsxs: jsx, jsxDEV: jsx, Fragment: R.Fragment };
+            }
+            // 未知模块：宽松 stub，属性取值返回 noop 函数
+            console.warn('[dsh-shim] stub module:', name);
+            return new Proxy(function () {}, {
+                get: function (t, p) {
+                    if (p === Symbol.toStringTag || p === 'default') return t;
+                    return function () {};
+                }
+            });
+        };
+    }
+    var ctx = {
+        effect: function (fn) { try { return fn(ctx); } catch (e) { console.error(e); } }
+    };
+    function setStatus(text, showDocs) {
+        var el = document.getElementById('status');
+        if (el) el.textContent = text;
+        if (showDocs) {
+            var docs = document.getElementById('docs-fallback');
+            if (docs) docs.style.display = '';
+            if (el && !el.querySelector('a')) {
+                var link = document.createElement('a');
+                link.href = '#docs-fallback';
+                link.textContent = ' 查看文档';
+                link.onclick = function (ev) { ev.preventDefault(); docs.scrollIntoView(); };
+                el.appendChild(link);
+            }
+        }
+    }
+    }
+    function mountAll() {
+        var mounted = false;
+        plugins.forEach(function (p) {
+            try {
+                var exports = p.exports;
+                if (exports && typeof exports.apply === 'function') {
+                    exports.apply(ctx);
+                    mounted = true;
+                } else if (typeof p.result === 'function') {
+                    p.result(ctx);
+                    mounted = true;
+                }
+            } catch (e) {
+                console.error('[dsh-shim] apply failed', e);
+            }
+        });
+        if (mounted) {
+            setTimeout(function () { setStatus('面板已加载'); }, 300);
+            setTimeout(function () {
+                var root = document.getElementById('panel-root');
+                if (root && root.childElementCount === 0) setStatus('面板未渲染内容', true);
+            }, 4000);
+        } else {
+            setStatus('该插件的界面无法在本环境运行（依赖 DSH 宿主专有能力）', true);
+        }
+    }
+    return {
+        load: function (def) {
+            try {
+                var module = { exports: {} };
+                var result = def.factory(makeRequire(), module, module.exports);
+                plugins.push({ id: def.id, exports: module.exports, result: result });
+            } catch (e) {
+                console.error('[dsh-shim] factory failed', e);
+                setStatus('插件代码加载失败：' + e.message, true);
+            }
+        },
+        _mountAll: mountAll
+    };
+})();
+window.__dshReactReady__ = null;
+window.__dshPanelMountAll__ = function () {
+    function go() { try { window.__ModuleLoader__._mountAll(); } catch (e) { console.error(e); } }
+    if (window.React && window.ReactDOM) {
+        window.addEventListener('load', function () { setTimeout(go, 30); });
+        setTimeout(go, 2500); // 兜底：load 事件被 CDN 阻塞时仍尝试挂载
+    } else {
+        // 等 fallback CDN 就绪
+        var tries = 0;
+        var timer = setInterval(function () {
+            tries++;
+            if (window.React && window.ReactDOM) {
+                clearInterval(timer); go();
+            } else if (tries > 20) {
+                clearInterval(timer);
+                var el = document.getElementById('status');
+                if (el) el.textContent = 'UI 运行时加载失败（网络受限）';
+                var docs = document.getElementById('docs-fallback');
+                if (docs) docs.style.display = '';
+            }
+        }, 500);
+    }
+};
+""".trimIndent()
     internal fun extractDefineTools(root: File): List<ScriptToolDef> {
         val regex = Regex(
             pattern = """defineTool\s*\(\s*\{[\s\S]{0,400}?name\s*:\s*["'`]([\w.\-/]+)["'`][\s\S]{0,800}?description\s*:\s*["'`]([\s\S]{0,300}?)["'`]""",
@@ -428,15 +626,18 @@ class DshPluginAdapter(
         }
     </style>"""
 
-    private fun convertToZip(info: PluginInfo, docsPageHtml: String?): ByteArray {
+    private fun convertToZip(info: PluginInfo, indexHtml: String, clientJs: String?): ByteArray {
         val baos = java.io.ByteArrayOutputStream()
         ZipOutputStream(baos).use { zip ->
             zip.putNextEntry(ZipEntry(PluginManager.METADATA_FILE))
             zip.write(PluginJson.toJson(info).toByteArray(Charsets.UTF_8))
             zip.closeEntry()
-            if (docsPageHtml != null) {
-                zip.putNextEntry(ZipEntry("web/index.html"))
-                zip.write(docsPageHtml.toByteArray(Charsets.UTF_8))
+            zip.putNextEntry(ZipEntry("web/index.html"))
+            zip.write(indexHtml.toByteArray(Charsets.UTF_8))
+            zip.closeEntry()
+            if (clientJs != null) {
+                zip.putNextEntry(ZipEntry("web/plugin.client.js"))
+                zip.write(clientJs.toByteArray(Charsets.UTF_8))
                 zip.closeEntry()
             }
         }
@@ -472,11 +673,19 @@ class DshPluginAdapter(
         }
     }
 
+    private val PANEL_PAGE_CSS = """<style>
+        #panel-root { min-height: 60vh; }
+        #status a { color: #0061a4; }
+    </style>"""
+
     private companion object {
         /** README 兜底转换所需的最小说明长度，过短视为无有效文档 */
         const val MIN_README_LEN = 200
 
         /** 工作区命令提示中最多列出的 bin 入口数量 */
         const val MAX_BIN_HINTS = 3
+
+        /** client.js 打包体积上限（防止超大 bundle 拖垮 WebView） */
+        const val MAX_CLIENT_JS_BYTES = 3 * 1024 * 1024
     }
 }
