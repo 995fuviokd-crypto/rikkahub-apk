@@ -533,12 +533,33 @@ private const val TOOL_INSTALL_TIMEOUT_MS = 10 * 60 * 1000L
 /** 安装失败重试间隔 */
 private const val TOOL_INSTALL_RETRY_DELAY_MS = 1_500L
 
+/**
+ * 多源下载函数: 按候选 URL 顺序逐个尝试(优先直连, 失败自动切国内镜像)。
+ * gh-proxy 仅代理 GitHub 域名, dl.google.com/maven.google.com 需用腾讯/阿里镜像兜底。
+ */
+private val DOWNLOAD_HELPER_SCRIPT = """
+dl() {
+  out="$1"
+  shift
+  for url in "${'$'}@"; do
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL --connect-timeout 15 --max-time 900 -o "${'$'}out" "${'$'}url" && return 0
+    else
+      wget -q -T 15 --tries=1 -O "${'$'}out" "${'$'}url" && return 0
+    fi
+    rm -f "${'$'}out"
+  done
+  return 1
+}
+""".trimIndent()
+
 /** Android SDK Build-Tools 安装脚本（aapt/aapt2/zipalign/apksigner/d8），从 Google 官方镜像下载 */
-private val ANDROID_BUILD_TOOLS_INSTALL_SCRIPT = """
+internal val ANDROID_BUILD_TOOLS_INSTALL_SCRIPT = """
 set -e
 BT_DIR=/opt/android/build-tools
 BT_VERSION=34
 mkdir -p "${'$'}BT_DIR"
+${DOWNLOAD_HELPER_SCRIPT.trimIndent()}
 # 自举下载与解压工具: Rootfs 默认无 curl/wget/unzip, 缺失时先经 apt 补装
 if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
@@ -559,11 +580,10 @@ if ! command -v java >/dev/null 2>&1; then
 fi
 if [ ! -x "${'$'}BT_DIR/aapt2" ]; then
   ZIP=/tmp/build-tools-${'$'}BT_VERSION.zip
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL -o "${'$'}ZIP" "https://dl.google.com/android/repository/build-tools_r${'$'}BT_VERSION-linux.zip"
-  else
-    wget -q -O "${'$'}ZIP" "https://dl.google.com/android/repository/build-tools_r${'$'}BT_VERSION-linux.zip"
-  fi
+  dl "${'$'}ZIP" \
+    "https://dl.google.com/android/repository/build-tools_r${'$'}BT_VERSION-linux.zip" \
+    "https://mirrors.cloud.tencent.com/AndroidSDK/build-tools_r${'$'}BT_VERSION-linux.zip" \
+    || { echo "all download sources failed for build-tools_r${'$'}BT_VERSION-linux.zip"; exit 1; }
   unzip -qo "${'$'}ZIP" -d "${'$'}BT_DIR" >/dev/null 2>&1 || { echo "unzip failed"; exit 1; }
   rm -f "${'$'}ZIP"
   for bin in aapt aapt2 zipalign apksigner d8; do
@@ -579,11 +599,12 @@ echo __OK__
 """.trimIndent()
 
 /** Android platform android.jar 安装脚本，版本通过 {{VERSION}} 占位符注入 */
-private val ANDROID_PLATFORM_INSTALL_SCRIPT = """
+internal val ANDROID_PLATFORM_INSTALL_SCRIPT = """
 set -e
 PLAT_DIR=/opt/android/platforms
 V={{VERSION}}
 mkdir -p "${'$'}PLAT_DIR"
+${DOWNLOAD_HELPER_SCRIPT.trimIndent()}
 # 自举下载与解压工具: Rootfs 默认无 curl/wget/unzip, 缺失时先经 apt 补装
 if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
@@ -598,12 +619,17 @@ fi
 command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || { echo "no curl/wget available"; exit 1; }
 command -v unzip >/dev/null 2>&1 || { echo "unzip missing"; exit 1; }
 if [ ! -f "${'$'}PLAT_DIR/android.jar" ]; then
+  # 官方 platform 包文件名带 ext 变体(如 platform-34-ext7_r02.zip), 按版本映射
+  case "${'$'}V" in
+    34) NAME=platform-34-ext7_r02.zip ;;
+    35) NAME=platform-35_r02.zip ;;
+    *) NAME="platform-${'$'}{V}_r02.zip" ;;
+  esac
   ZIP=/tmp/platform-${'$'}V.zip
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL -o "${'$'}ZIP" "https://dl.google.com/android/repository/platform-${'$'}V_r02.zip"
-  else
-    wget -q -O "${'$'}ZIP" "https://dl.google.com/android/repository/platform-${'$'}V_r02.zip"
-  fi
+  dl "${'$'}ZIP" \
+    "https://dl.google.com/android/repository/${'$'}NAME" \
+    "https://mirrors.cloud.tencent.com/AndroidSDK/${'$'}NAME" \
+    || { echo "all download sources failed for ${'$'}NAME"; exit 1; }
   unzip -qo "${'$'}ZIP" -d "${'$'}PLAT_DIR" >/dev/null 2>&1 || { echo "unzip failed"; exit 1; }
   rm -f "${'$'}ZIP"
   jar=$(find "${'$'}PLAT_DIR" -type f -name android.jar 2>/dev/null | head -n1)
@@ -614,11 +640,12 @@ echo __OK__
 """.trimIndent()
 
 /** D8/R8 安装脚本（r8lib.jar + /usr/local/bin/r8 包装器），从 Google Maven 下载，版本通过 {{VERSION}} 占位符注入 */
-private val R8_INSTALL_SCRIPT = """
+internal val R8_INSTALL_SCRIPT = """
 set -e
 R8_DIR=/opt/r8
 V={{VERSION}}
 mkdir -p "${'$'}R8_DIR"
+${DOWNLOAD_HELPER_SCRIPT.trimIndent()}
 # 自举下载工具: Rootfs 默认无 curl/wget, 缺失时先经 apt 补装
 if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
@@ -632,12 +659,10 @@ if ! command -v java >/dev/null 2>&1; then
   apt-get install -y -qq openjdk-17-jre-headless >/dev/null 2>&1 || true
 fi
 if [ ! -f "${'$'}R8_DIR/r8.jar" ]; then
-  JAR_URL="https://maven.google.com/com/android/tools/r8/${'$'}V/r8-${'$'}V.jar"
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL -o "${'$'}R8_DIR/r8.jar" "${'$'}JAR_URL"
-  else
-    wget -q -O "${'$'}R8_DIR/r8.jar" "${'$'}JAR_URL"
-  fi
+  dl "${'$'}R8_DIR/r8.jar" \
+    "https://maven.google.com/com/android/tools/r8/${'$'}V/r8-${'$'}V.jar" \
+    "https://maven.aliyun.com/repository/google/com/android/tools/r8/${'$'}V/r8-${'$'}V.jar" \
+    || { echo "all download sources failed for r8-${'$'}V.jar"; exit 1; }
 fi
 printf '#!/bin/sh\nexec java -jar /opt/r8/r8.jar "${'$'}@"\n' > /usr/local/bin/r8
 chmod +x /usr/local/bin/r8
