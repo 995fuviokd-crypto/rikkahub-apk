@@ -361,6 +361,7 @@ class WorkspaceRepository(
         cwd: String = "",
         timeoutMillis: Long = WorkspaceManager.DEFAULT_COMMAND_TIMEOUT_MS,
         stdin: ByteArray? = null,
+        onOutput: ((String) -> Unit)? = null,
     ): WorkspaceCommandResult {
         val workspace = dao.getById(id) ?: error("Workspace not found: $id")
         // 仅当命令确实涉及 /local 时才同步本地目录到镜像并挂载 /local，
@@ -392,6 +393,7 @@ class WorkspaceRepository(
                 stdin,
                 includeAndroidLocal = workspace.androidLocalAccess,
                 extraBindMounts = extraBindMounts,
+                onOutput = onOutput,
             )
         }
         if (localUri != null) {

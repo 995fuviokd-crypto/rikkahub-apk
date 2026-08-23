@@ -237,6 +237,7 @@ class WorkspaceManager(
         stdin: ByteArray? = null,
         includeAndroidLocal: Boolean = true,
         extraBindMounts: List<WorkspaceBindMount> = emptyList(),
+        onOutput: ((String) -> Unit)? = null,
     ): WorkspaceCommandResult {
         require(command.isNotBlank()) { "Command is required" }
         val workingDir = fileSystem.resolve(filesDir(root), cwd)
@@ -258,6 +259,7 @@ class WorkspaceManager(
                 stdin = stdin,
                 bindMounts = effectiveBindMounts,
                 extraBindMounts = extraBindMounts,
+                onOutput = onOutput,
             )
         )
     }

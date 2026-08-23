@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -346,6 +348,17 @@ private fun AgentStatusTag(status: AgentEnvStatus) {
 @Composable
 private fun InstallProgressBlock(progress: AgentInstallProgress?) {
     val phase = progress?.phase
+    // 目标百分比: 完成为 100, 失败归零; 进行中取真实里程碑或估算值, 缺失时交给不定进度条
+    val targetFraction = when {
+        phase == AgentInstallPhase.DONE -> 1f
+        phase == AgentInstallPhase.FAILED -> 0f
+        else -> (progress?.percent ?: -1) / 100f
+    }
+    val animatedFraction by animateFloatAsState(
+        targetValue = targetFraction.coerceIn(0f, 1f),
+        animationSpec = tween(durationMillis = 400),
+        label = "agentInstallProgress",
+    )
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -354,10 +367,15 @@ private fun InstallProgressBlock(progress: AgentInstallProgress?) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (phase == AgentInstallPhase.DONE || phase == AgentInstallPhase.FAILED) {
+            if (phase == AgentInstallPhase.DONE || phase == AgentInstallPhase.FAILED || progress?.percent != null) {
                 LinearProgressIndicator(
-                    progress = { if (phase == AgentInstallPhase.DONE) 1f else 0f },
+                    progress = { animatedFraction },
                     modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = "${(animatedFraction * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
                 LinearProgressIndicator(modifier = Modifier.weight(1f))

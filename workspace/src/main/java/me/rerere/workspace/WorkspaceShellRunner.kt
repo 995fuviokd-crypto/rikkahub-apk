@@ -21,6 +21,8 @@ data class WorkspaceShellContext(
     val stdin: ByteArray? = null,
     val bindMounts: List<WorkspaceBindMount> = emptyList(),
     val extraBindMounts: List<WorkspaceBindMount> = emptyList(),
+    /** 实时 stdout 回调: 用于长任务(如安装)解析里程碑进度; 异常由采集线程吞掉不影响命令执行 */
+    val onOutput: ((String) -> Unit)? = null,
 )
 
 class HostShellRunner : WorkspaceShellRunner {
@@ -29,7 +31,7 @@ class HostShellRunner : WorkspaceShellRunner {
             .directory(context.workingDir)
             .redirectErrorStream(false)
             .start()
-        return process.readResult(context.timeoutMillis, context.stdin)
+        return process.readResult(context.timeoutMillis, context.stdin, context.onOutput)
     }
 
     private fun defaultShell(): String =
@@ -39,8 +41,12 @@ class HostShellRunner : WorkspaceShellRunner {
 // 单个流保留的最大字符数, 防止命令疯狂输出导致 OOM 或撑爆 LLM 上下文
 const val MAX_OUTPUT_CHARS = 128 * 1024
 
-fun Process.readResult(timeoutMillis: Long, stdin: ByteArray? = null): WorkspaceCommandResult {
-    val stdout = StreamCollector(inputStream)
+fun Process.readResult(
+    timeoutMillis: Long,
+    stdin: ByteArray? = null,
+    onOutput: ((String) -> Unit)? = null,
+): WorkspaceCommandResult {
+    val stdout = StreamCollector(inputStream, onOutput = onOutput)
     val stderr = StreamCollector(errorStream)
     val stdinWriter = stdin?.let { bytes -> StreamWriter(outputStream, bytes) }
     try {
@@ -93,6 +99,7 @@ private class StreamWriter(
 private class StreamCollector(
     stream: InputStream,
     private val maxChars: Int = MAX_OUTPUT_CHARS,
+    private val onOutput: ((String) -> Unit)? = null,
 ) {
     private val builder = StringBuilder()
 
@@ -108,7 +115,7 @@ private class StreamCollector(
                     val read = reader.read(buffer)
                     if (read < 0) break
                     // 超出上限后继续读到 EOF 并丢弃，否则管道写满会阻塞子进程导致其无法退出
-                    synchronized(builder) {
+                    val chunk = synchronized(builder) {
                         val remaining = maxChars - builder.length
                         if (remaining > 0) {
                             builder.append(buffer, 0, minOf(read, remaining))
@@ -116,6 +123,11 @@ private class StreamCollector(
                         if (read > remaining) {
                             truncated = true
                         }
+                        String(buffer, 0, read)
+                    }
+                    // 回调在锁外执行: 回调异常不影响采集线程与命令本身
+                    if (onOutput != null && chunk.isNotEmpty()) {
+                        runCatching { onOutput(chunk) }
                     }
                 }
             }
