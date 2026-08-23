@@ -168,6 +168,42 @@ class ScriptJsTranspilerTest {
     }
 
     @Test
+    fun `ternary await in both branches keeps balanced parens`() {
+        val src = """
+            async function f(params) {
+                var state = params.preset === "custom"
+                    ? await setCustomTheme(params)
+                    : await setPresetTheme(params.preset);
+                return state;
+            }
+        """.trimIndent()
+        val out = ScriptJsTranspiler.transpile(src)
+        // 两个 await 都包裹为 (yield ...)，: 不再被吃进第一个表达式（闭括号在 : 后）
+        assertEquals(countChar(out, '{'), countChar(out, '}'))
+        assertEquals(countChar(out, '('), countChar(out, ')'))
+        assertTrue(out.contains("? (yield setCustomTheme(params)"))
+        assertTrue(out.contains(": (yield setPresetTheme(params.preset))"))
+        assertFalse(out.contains("await"))
+    }
+
+    @Test
+    fun `optional chain await expression continues past dot`() {
+        val src = """
+            async function f() {
+                var a = await obj?.method?.deep(x);
+                var b = await arr[0];
+                return a && b;
+            }
+        """.trimIndent()
+        val out = ScriptJsTranspiler.transpile(src)
+        // 可选链 ? 后接 .，不当作三元终止符
+        assertTrue(out.contains("(yield obj?.method?.deep(x))"))
+        assertTrue(out.contains("(yield arr[0])"))
+        assertEquals(countChar(out, '('), countChar(out, ')'))
+        assertFalse(out.contains("await"))
+    }
+
+    @Test
     fun dumpMissPulseTranspileForNodeCheck() {
         val src = java.io.File("/tmp/opencode/rh_miss_pulse.js").readText()
         val out = ScriptJsTranspiler.transpile(src)

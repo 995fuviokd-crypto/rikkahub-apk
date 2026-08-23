@@ -194,6 +194,16 @@ function __scriptRunGen(gen, self) {
                     depth--
                 }
                 ";", ",", "=>" -> if (depth == 0) return i - 1
+                "?" -> {
+                    // 三元的 ? 终止表达式；但可选链 a?.b 与空值合并 a ?? b 中的 ? 不终止
+                    val next = tokens.getOrNull(i + 1)
+                    if (next?.text == "." || next?.text == "?") {
+                        // 可选链 / 空值合并：继续
+                    } else if (depth == 0) {
+                        return i - 1
+                    }
+                }
+                ":" -> if (depth == 0) return i - 1
             }
         }
         return tokens.size - 1

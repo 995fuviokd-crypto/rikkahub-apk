@@ -85,6 +85,9 @@ android {
 
     buildTypes {
         release {
+            // 与 debug 构建保持相同 applicationId 后缀: 自有渠道分发的历史安装包均为 .debug 包名,
+            // 保持一致才能覆盖更新; 签名同为 debug keystore, 可互相覆盖安装
+            applicationIdSuffix = ".debug"
             signingConfig = signingConfigs.getByName("release")
             optimization {
                 enable = true

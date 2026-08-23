@@ -582,11 +582,31 @@ class CommunityMarketDataSource(
 
     private suspend fun downloadBytes(url: String): ByteArray {
         return withContext(Dispatchers.IO) {
-            httpClient.newCall(Request.Builder().url(url).build()).execute().use { response ->
-                if (!response.isSuccessful) error("HTTP ${response.code}")
-                response.body?.bytes() ?: error("空响应")
+            // GitHub 资源直连失败（被墙/超时）时自动切换镜像加速源重试
+            val candidates = if (isGitHubUrl(url)) {
+                listOf(url) + GitHubPluginAPI.MIRROR_PREFIXES.map { it + url }
+            } else {
+                listOf(url)
             }
+            var lastError: Throwable? = null
+            for (candidate in candidates) {
+                try {
+                    val bytes = httpClient.newCall(Request.Builder().url(candidate).build()).execute().use { response ->
+                        if (!response.isSuccessful) error("HTTP ${response.code}")
+                        response.body?.bytes() ?: error("空响应")
+                    }
+                    return@withContext bytes
+                } catch (e: Throwable) {
+                    lastError = e
+                }
+            }
+            throw lastError ?: IllegalStateException("Download failed: $url")
         }
+    }
+
+    private fun isGitHubUrl(url: String): Boolean {
+        val host = runCatching { java.net.URL(url).host }.getOrNull() ?: return false
+        return host.endsWith("github.com") || host.endsWith("githubusercontent.com")
     }
 
     companion object {

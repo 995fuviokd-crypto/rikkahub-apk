@@ -67,6 +67,10 @@ val dataSourceModule = module {
     }
 
     single {
+        me.rerere.rikkahub.data.plugin.DshPluginAdapter(httpClient = get())
+    }
+
+    single {
         val context: Context = get()
         Room.databaseBuilder(context, AppDatabase::class.java, "rikka_hub")
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)

@@ -92,7 +92,9 @@ class SettingAgentVM(
             }.onSuccess {
                 _statuses.value = _statuses.value + (platform to AgentEnvStatus.READY)
             }.onFailure {
-                // 失败信息已通过 FAILED 阶段进度体现
+                // 失败详情保留在 FAILED 阶段进度中持续展示；同时重查真实环境状态
+                val status = environmentManager.checkStatus(root, platform)
+                _statuses.value = _statuses.value + (platform to status)
             }
             _installing.value = null
         }

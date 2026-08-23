@@ -69,9 +69,14 @@ object ScriptToolManifest {
     }
 
     /** 生成描述脚本工具能力的 systemPrompt 片段 */
-    fun describeSystemPrompt(name: String, description: String, tools: List<ScriptToolDef>): String {
+    fun describeSystemPrompt(
+        name: String,
+        description: String,
+        tools: List<ScriptToolDef>,
+        source: String = "社区市场",
+    ): String {
         val sb = StringBuilder()
-        sb.append("这是来自 社区市场的资源「").append(name).append("」。")
+        sb.append("这是来自 ").append(source).append("的资源「").append(name).append("」。")
         if (description.isNotBlank()) sb.append("简介：").append(description).append("\n")
         if (tools.isNotEmpty()) {
             sb.append("该资源已通过 RikkaHub 本地引擎真实加载，提供以下工具，可用 `run_script_tool` 工具按需调用（需在助手工具设置中开启「脚本」）：\n")

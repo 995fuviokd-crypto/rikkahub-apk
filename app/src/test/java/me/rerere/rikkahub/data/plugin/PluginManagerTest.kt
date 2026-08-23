@@ -348,4 +348,129 @@ class PluginManagerTest {
             dir.deleteRecursively()
         }
     }
+
+    // ---- 第三方 schema 归一化（Operit 原生格式等） ----
+
+    /** 市场真实样例：operit-agent-diary 的 Operit 原生 plugin.json */
+    private fun operitNativeJson(): String =
+        """
+        {
+          "name": "Agent日记本",
+          "package": "operit-agent-diary",
+          "version": "1.0.0",
+          "description": "让 AI Agent 写日记和感想的插件，日记存储在本地，读取权限由 AI 审批管控，附侧边栏可视化界面。",
+          "author": "MonkeyCode",
+          "icon": "📔",
+          "permissions": [],
+          "web_path": "web/index.html",
+          "sidebar": true
+        }
+        """.trimIndent()
+
+    private fun toolManifestJson(): String =
+        """
+        {
+          "name": "Agent日记本",
+          "description": "让 AI Agent 写日记和感想的插件，带侧边栏可视化界面。",
+          "tools": [
+            {"name": "write_diary", "description": "写一篇新日记"},
+            {"name": "list_diaries", "description": "列出所有日记的摘要"}
+          ]
+        }
+        """.trimIndent()
+
+    @Test
+    fun `normalize maps operit native schema with sidebar entry and tool prompt`() {
+        val dir = kotlin.io.path.createTempDirectory("norm-operit").toFile()
+        try {
+            File(dir, "plugin.json").writeText(operitNativeJson())
+            File(dir, "operit/toolmanifest.json").apply { parentFile.mkdirs() }.writeText(toolManifestJson())
+            val normalized = PluginManager.normalizePluginJson(operitNativeJson(), dir)
+            assertNotNull(normalized)
+            val info = PluginJson.fromJson(normalized!!)
+            assertEquals("operit-agent-diary", info.id)
+            assertEquals("Agent日记本", info.name)
+            assertEquals("plugin", info.type)
+            // 侧边栏入口：web_path 转 webview payload
+            assertEquals(1, info.extensionPoints.sidebarActions.size)
+            val action = info.extensionPoints.sidebarActions[0]
+            assertEquals("webview", action.target)
+            assertEquals("plugin://operit-agent-diary/index.html", action.payload)
+            // 能力提示词从 toolmanifest 生成，指向真实的 run_script_tool
+            assertTrue(info.systemPrompt.contains("run_script_tool"))
+            assertTrue(info.systemPrompt.contains("write_diary"))
+            assertTrue(info.systemPrompt.contains("list_diaries"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `normalize passes standard json through unchanged`() {
+        assertEquals(null, PluginManager.normalizePluginJson(validPluginJson(), null))
+    }
+
+    @Test
+    fun `normalize fixes legacy operit tool reference in standard packages`() {
+val legacy = validPluginJson().replace(
+            "\"You are helpful with demos.\"",
+            "\"可用 `run_operit_tool` 工具调用能力\""
+        )
+        val fixed = PluginManager.normalizePluginJson(legacy, null)
+        assertNotNull(fixed)
+        assertTrue(fixed!!.contains("run_script_tool"))
+        assertEquals(false, fixed.contains("run_operit_tool"))
+    }
+
+    @Test
+    fun `normalize infers skill type and prompt from SKILL md`() {
+        val dir = kotlin.io.path.createTempDirectory("norm-skill").toFile()
+        try {
+            File(dir, "SKILL.md").writeText("# 技能正文\n整理经验的方法论。")
+            val raw = """{"name":"经验笔记","version":"1.0.0"}"""
+            val normalized = PluginManager.normalizePluginJson(raw, dir)
+            assertNotNull(normalized)
+            val info = PluginJson.fromJson(normalized!!)
+            assertEquals("skill", info.type)
+            assertTrue(info.systemPrompt.contains("技能正文"))
+            assertTrue(info.id.startsWith("resource-") || info.id.isNotBlank())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `extractPluginInfo tolerates operit schema zip`() {
+        val zip = zipWith(
+            "plugin.json" to operitNativeJson().toByteArray(),
+            "operit/main.js" to "module.exports = {}".toByteArray(),
+        )
+        val result = PluginManager.extractPluginInfo(zip)
+        assertTrue(result.isSuccess)
+        assertEquals("operit-agent-diary", result.getOrThrow().id)
+    }
+
+    @Test
+    fun `extractPluginInfo still fails on malformed json`() {
+        val zip = zipWith("plugin.json" to "{not json".toByteArray())
+        assertTrue(PluginManager.extractPluginInfo(zip).isFailure)
+    }
+
+    @Test
+    fun `autoAdapt generates script plugin from operit directory`() {
+        val dir = kotlin.io.path.createTempDirectory("adapt-script").toFile()
+        try {
+            File(dir, "operit/toolmanifest.json").apply { parentFile.mkdirs() }.writeText(toolManifestJson())
+            File(dir, "operit/main.js").writeText("module.exports = {}")
+            val info = PluginManager.autoAdapt(dir)
+            assertNotNull(info)
+            info!!
+            assertEquals("plugin", info.type)
+            assertEquals("Agent日记本", info.name)
+            assertTrue(info.systemPrompt.contains("write_diary"))
+            assertTrue(info.systemPrompt.contains("run_script_tool"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }

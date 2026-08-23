@@ -5,7 +5,9 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -13,6 +15,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.rikkahub.data.ai.mcp.McpCommonOptions
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.mcp.serverUrl
+import me.rerere.rikkahub.data.script.ScriptRuntime
+import me.rerere.rikkahub.data.script.ScriptToolManifest
 import java.io.File
 import java.util.zip.ZipInputStream
 
@@ -31,19 +35,27 @@ class PluginManager(
 
     fun getPluginDir(pluginId: String): File = getPluginsDir().resolve(pluginId)
 
-    /** 列出已安装插件，目录缺失 plugin.json 或解析失败的标记为损坏 */
+    /** 列出已安装插件，目录缺失 plugin.json 或解析失败的标记为损坏；第三方格式包尝试归一化自愈 */
     fun listPlugins(): List<InstalledPlugin> {
         return getPluginsDir().listFiles()
             ?.filter { it.isDirectory }
             ?.mapNotNull { dir ->
                 val infoFile = dir.resolve(METADATA_FILE)
-                val info = if (infoFile.exists()) {
+                var info = if (infoFile.exists()) {
                     runCatching {
                         PluginJson.fromJson(infoFile.readText())
                     }.onFailure { Log.w(TAG, "parse plugin.json failed: ${dir.name}", it) }
                         .getOrNull()
                 } else {
                     null
+                }
+                if (info == null && infoFile.exists()) {
+                    // 旧版本安装的第三方格式包自愈：schema 归一化写回后重读，避免升级后仍显示损坏
+                    info = runCatching {
+                        Companion.normalizePluginJson(infoFile.readText(), dir)?.let { infoFile.writeText(it) }
+                        PluginJson.fromJson(infoFile.readText())
+                    }.onFailure { Log.w(TAG, "self-heal plugin.json failed: ${dir.name}", it) }
+                        .getOrNull()
                 }
                 if (info == null) {
                     InstalledPlugin(
@@ -215,7 +227,9 @@ class PluginManager(
                 }
                 infoFile.writeText(PluginJson.toJson(adapted))
             } else {
-                // 已有 plugin.json：补全缺失的能力提示词，保证第三方/收录包安装后真正生效
+                // 已有 plugin.json：先做第三方 schema 归一化（Operit 原生格式等，安装即可用），
+                // 再补全缺失的能力提示词，保证第三方/收录包安装后真正生效
+                Companion.normalizePluginJson(infoFile.readText(), staging)?.let { infoFile.writeText(it) }
                 Companion.ensurePluginJson(staging)
             }
             val info = runCatching { PluginJson.fromJson(infoFile.readText()) }
@@ -259,7 +273,13 @@ class PluginManager(
         const val PLUGIN_DIR_NAME = "plugins"
         const val METADATA_FILE = "plugin.json"
         const val BUILTIN_PLUGIN_MAKER_ID = "builtin-plugin-maker"
-        private const val MAX_SYSTEM_PROMPT_LEN = 30000
+
+        /** 插件 systemPrompt 最大长度 */
+        const val MAX_SYSTEM_PROMPT_LEN = 30000
+
+        /** 历史适配包中错误的脚本工具引用；app 内真实注册的脚本调用工具为 run_script_tool */
+        private const val LEGACY_OPERIT_TOOL_REF = "run_operit_tool"
+        private const val RUNNER_TOOL_REF = "run_script_tool"
 
         /**
          * 补全已有 plugin.json 的插件能力提示词：type=skill / character 但 systemPrompt 为空时，
@@ -283,6 +303,161 @@ class PluginManager(
             if (prompt.isNullOrBlank()) return false
             infoFile.writeText(PluginJson.toJson(info.copy(systemPrompt = prompt.take(MAX_SYSTEM_PROMPT_LEN))))
             return true
+        }
+
+        /**
+         * 第三方插件包 schema 归一化：
+         * 1. 标准包（可正常解析）：仅修正历史适配包中错误的工具引用后返回；无需处理返回 null
+         * 2. Operit 原生格式等非标准 plugin.json（package 字段当 id、web_path/sidebar 声明入口、
+         *    缺 type/systemPrompt）：自动映射字段、推断类型、生成能力提示词与侧边栏入口，
+         *    保证第三方市场收录包安装即可用，无需人工修补
+         * 无法识别时返回 null，由调用方走原有失败路径。
+         */
+        fun normalizePluginJson(text: String, dir: File?): String? {
+            val standard = runCatching { PluginJson.fromJson(text) }.getOrNull()
+            if (standard != null) {
+                if (!text.contains(LEGACY_OPERIT_TOOL_REF)) return null
+                return PluginJson.toJson(
+                    standard.copy(
+                        systemPrompt = standard.systemPrompt.replace(LEGACY_OPERIT_TOOL_REF, RUNNER_TOOL_REF),
+                    )
+                )
+            }
+            val root = runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return null
+
+            fun str(vararg keys: String): String? = keys.firstNotNullOfOrNull { key ->
+                (root[key] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+            }
+            val rawId = str("id", "package", "packageName", "slug")
+            val rawName = str("name", "title")
+            if (rawId == null && rawName == null) {
+                // 无任何标识字段时仅可依赖目录名兜底（安装场景）；上传校验场景（dir=null）放弃
+                if (dir == null || dir.name.startsWith(".")) return null
+            }
+            val id = rawId ?: rawName?.let(::slugifyId) ?: dir!!.name
+            val name = rawName ?: rawId ?: id
+            val type = resolveNormalizedType(str("type"), dir)
+            val tags = (root["tags"] as? JsonArray)
+                ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.takeIf { v -> v.isNotBlank() } }
+                .orEmpty()
+            val webPath = str("web_path", "webPath", "web")
+            val sidebar = (root["sidebar"] as? JsonPrimitive)?.booleanOrNull == true
+            return PluginJson.toJson(
+                PluginInfo(
+                    id = id,
+                    name = name,
+                    version = str("version") ?: "1.0.0",
+                    description = str("description", "desc", "summary").orEmpty(),
+                    author = str("author", "publisher").orEmpty(),
+                    category = str("category") ?: "general",
+                    repository = str("repository", "repo").orEmpty(),
+                    systemPrompt = buildNormalizedSystemPrompt(type, dir),
+                    type = type,
+                    tags = tags,
+                    extensionPoints = buildNormalizedSidebarEntry(id, name, webPath, sidebar, dir),
+                )
+            )
+        }
+
+        /** 推断插件资源类型：显式声明优先，其次按包内特征文件识别 */
+        private fun resolveNormalizedType(raw: String?, dir: File?): String {
+            when (raw) {
+                PluginCategories.TYPE_PLUGIN,
+                PluginCategories.TYPE_SKILL,
+                PluginCategories.TYPE_MCP,
+                PluginCategories.TYPE_JSON,
+                PluginCategories.TYPE_CHARACTER,
+                -> return raw!!
+            }
+            if (dir != null) {
+                if (findFile(dir) { it.equals("SKILL.md", ignoreCase = true) } != null) {
+                    return PluginCategories.TYPE_SKILL
+                }
+                if (findFile(dir) {
+                        it.equals("mcp.json", ignoreCase = true) || it.equals(".mcp.json", ignoreCase = true)
+                    } != null
+                ) {
+                    return PluginCategories.TYPE_MCP
+                }
+                if (findFile(dir) {
+                        it.endsWith(".card.json", ignoreCase = true) || it.equals("character.json", ignoreCase = true)
+                    } != null
+                ) {
+                    return PluginCategories.TYPE_CHARACTER
+                }
+            }
+            return PluginCategories.TYPE_PLUGIN
+        }
+
+        /** 归一化场景的能力提示词生成：skill 取 SKILL.md、角色卡取卡片内容、脚本型聚合 toolmanifest 工具清单 */
+        private fun buildNormalizedSystemPrompt(type: String, dir: File?): String {
+            if (dir == null) return ""
+            return when (type) {
+                PluginCategories.TYPE_SKILL ->
+                    findFile(dir) { it.equals("SKILL.md", ignoreCase = true) }
+                        ?.readText()?.trim()?.take(MAX_SYSTEM_PROMPT_LEN).orEmpty()
+                PluginCategories.TYPE_CHARACTER ->
+                    findFile(dir) {
+                        it.endsWith(".card.json", ignoreCase = true) || it.equals("character.json", ignoreCase = true)
+                    }?.let { runCatching { parseCharacterJson(it.readText()) }.getOrNull()?.systemPrompt }
+                        .orEmpty()
+                else -> describeNormalizedScriptTools(dir)
+            }
+        }
+
+        /** 从 script|operit 目录的 toolmanifest.json（或脚本 METADATA 注释）生成工具能力提示词 */
+        private fun describeNormalizedScriptTools(dir: File): String {
+            val scriptDir = ScriptRuntime.scriptDir(dir)
+            if (!scriptDir.isDirectory) return ""
+            val manifest = scriptDir.resolve(ScriptRuntime.TOOL_MANIFEST).takeIf { it.isFile }
+                ?.let { runCatching { ScriptToolManifest.parseJson(it.readText()) }.getOrNull() }
+            val tools = manifest?.tools?.takeIf { it.isNotEmpty() }
+                ?: ScriptToolManifest.toolsFromDirectory(scriptDir)
+            if (tools.isEmpty()) return ""
+            return buildString {
+                appendLine("该插件提供以下脚本工具，可在对话中通过 `$RUNNER_TOOL_REF` 按需调用（需在助手工具设置中开启「脚本」）：")
+                tools.forEach { tool ->
+                    append("- ").append(tool.name)
+                    if (tool.description.isNotBlank()) append("：").append(tool.description)
+                    appendLine()
+                }
+            }.trim()
+        }
+
+        /**
+         * Operit 原生入口声明转侧边栏 webview 扩展点：
+         * web_path 相对包根（如 web/index.html），payload 转为 plugin://<id>/<web目录内相对路径>
+         */
+        private fun buildNormalizedSidebarEntry(
+            id: String,
+            name: String,
+            webPath: String?,
+            sidebar: Boolean,
+            dir: File?,
+        ): PluginExtensionPoints {
+            if (!sidebar && webPath.isNullOrBlank()) return PluginExtensionPoints()
+            val relative = webPath?.trim('/')?.removePrefix("web/")?.takeIf { it.isNotBlank() }
+                ?: dir?.let { File(it, "web/index.html") }?.takeIf { it.isFile }?.let { "index.html" }
+                ?: return PluginExtensionPoints()
+            return PluginExtensionPoints(
+                sidebarActions = listOf(
+                    PluginExtensionAction(
+                        id = "${id}_panel",
+                        label = name,
+                        target = "webview",
+                        payload = "plugin://$id/$relative",
+                    )
+                )
+            )
+        }
+
+        /** 中文名转安全 id：ASCII slug 化，全中文等无法 slug 时退化为短哈希 */
+        private fun slugifyId(raw: String): String {
+            val ascii = raw.lowercase().trim()
+                .replace(Regex("[^a-z0-9]+"), "-")
+                .trim('-')
+                .take(40)
+            return ascii.ifBlank { "plugin-${Integer.toHexString(raw.hashCode() and 0xffff)}" }
         }
 
         /**
@@ -325,7 +500,33 @@ class PluginManager(
                         )
                     }
                 }
+            // 4. 脚本资源包：script/ 或 operit/ 目录含 .js 脚本 → 生成本地可执行的脚本插件
+            runCatching { adaptScriptPackage(stagingDir) }.getOrNull()?.let { return it }
             return null
+        }
+
+        /** 脚本目录资源包识别：从 toolmanifest.json / 脚本 METADATA 注释聚合工具清单 */
+        private fun adaptScriptPackage(stagingDir: File): PluginInfo? {
+            val scriptDir = ScriptRuntime.scriptDir(stagingDir)
+            if (!scriptDir.isDirectory) return null
+            if (scriptDir.listFiles()?.any { it.extension == "js" } != true) return null
+            val manifest = scriptDir.resolve(ScriptRuntime.TOOL_MANIFEST).takeIf { it.isFile }
+                ?.let { runCatching { ScriptToolManifest.parseJson(it.readText()) }.getOrNull() }
+            val tools = manifest?.tools?.takeIf { it.isNotEmpty() }
+                ?: ScriptToolManifest.toolsFromDirectory(scriptDir)
+            if (tools.isEmpty()) return null
+            val name = manifest?.name?.takeIf { it.isNotBlank() } ?: "脚本资源包"
+            val description = manifest?.description?.takeIf { it.isNotBlank() }
+                ?: "本地脚本资源包，含 ${tools.size} 个可调用工具"
+            return PluginInfo(
+                id = resourceId("script-$name"),
+                name = name,
+                version = "1.0.0",
+                description = description,
+                category = "automation",
+                type = PluginCategories.TYPE_PLUGIN,
+                systemPrompt = ScriptToolManifest.describeSystemPrompt(name, description, tools, source = "本地"),
+            )
         }
 
         private fun parseCharacterJson(text: String): PluginInfo? {
@@ -512,7 +713,11 @@ class PluginManager(
                     }
                 }
                 val jsonBytes = rootInfo ?: fallbackInfo ?: error("插件包缺少 $METADATA_FILE")
-                PluginJson.fromJson(jsonBytes.toString(Charsets.UTF_8))
+                val text = jsonBytes.toString(Charsets.UTF_8)
+                runCatching { PluginJson.fromJson(text) }.getOrElse {
+                    // 第三方 schema（Operit 原生格式等）容错：归一化后再解析
+                    PluginJson.fromJson(normalizePluginJson(text, null) ?: error("plugin.json 解析失败"))
+                }
             }
         }
 

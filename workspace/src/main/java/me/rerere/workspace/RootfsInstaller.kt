@@ -32,7 +32,17 @@ class RootfsInstaller(
         try {
             stagingDir.deleteRecursively()
             stagingDir.mkdirs()
-            download(url, archive, onProgress)
+            try {
+                download(url, archive, onProgress)
+            } catch (e: InterruptedException) {
+                throw e
+            } catch (e: Exception) {
+                // GitHub 直连失败（被墙/超时）时自动走 gh-proxy 镜像重试一次
+                val proxied = githubProxyUrl(url)
+                if (proxied == null) throw e
+                println("Rootfs direct download failed (${e.message}), retrying via gh-proxy")
+                download(proxied, archive, onProgress)
+            }
             extractTar(archive, stagingDir, format, onProgress)
             linuxDir.deleteRecursively()
             require(stagingDir.renameTo(linuxDir)) {
@@ -414,5 +424,18 @@ class RootfsInstaller(
         private const val PROGRESS_STEP_BYTES = 512 * 1024
         private const val CONNECT_TIMEOUT_MS = 30_000
         private const val READ_TIMEOUT_MS = 60_000
+
+        /** gh-proxy 镜像前缀：GitHub 资源直连失败时的下载加速兜底 */
+        private const val GH_PROXY_PREFIX = "https://gh-proxy.com/"
+    }
+
+    /** GitHub 链接返回镜像代理地址；其余链接返回 null（不适用代理） */
+    private fun githubProxyUrl(url: String): String? {
+        val host = runCatching { URL(url).host }.getOrNull() ?: return null
+        return if (host.endsWith("github.com") || host.endsWith("githubusercontent.com")) {
+            GH_PROXY_PREFIX + url
+        } else {
+            null
+        }
     }
 }

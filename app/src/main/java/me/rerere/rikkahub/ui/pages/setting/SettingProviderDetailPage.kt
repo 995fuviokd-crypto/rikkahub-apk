@@ -4,6 +4,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.Connect
 import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Refresh03
 import me.rerere.hugeicons.stroke.Tools
@@ -11,6 +12,7 @@ import me.rerere.hugeicons.stroke.Share01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Cancel01
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -281,6 +283,11 @@ private fun SettingProviderConfigPage(
             }
         )
 
+        AgentModeConfigSection(
+            provider = internalProvider,
+            onEdit = { internalProvider = it }
+        )
+
         if (internalProvider is ProviderSetting.OpenAI) {
             SettingProviderBalanceOption(
                 provider = internalProvider,
@@ -368,6 +375,174 @@ private fun SettingProviderConfigPage(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun AgentModeConfigSection(
+    provider: ProviderSetting,
+    onEdit: (ProviderSetting) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    val agentModel = provider.models.firstOrNull { it.platformAgent != null }
+    val platformAgent = agentModel?.platformAgent
+    val agentArguments = agentModel?.agentArguments ?: emptyList()
+    val agentEnvironment = agentModel?.agentEnvironment ?: emptyMap()
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.setting_provider_page_platform_agent),
+                    style = MaterialTheme.typography.titleMedium
+                )
+                if (platformAgent != null) {
+                    Tag(type = TagType.INFO) {
+                        Text(platformAgent.label())
+                    }
+                }
+            }
+            Icon(
+                imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+
+        AnimatedVisibility(visible = expanded) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val options = listOf<AgentPlatform?>(
+                    null,
+                    AgentPlatform.CODEX,
+                    AgentPlatform.CLAUDE_CODE,
+                    AgentPlatform.GEMINI_CLI,
+                    AgentPlatform.ANTHROPIC_CLAUDE_CODE,
+                    AgentPlatform.OPENCODE,
+                    AgentPlatform.DEEPSEEK_HARNESS,
+                )
+                val labels = options.map {
+                    stringResource(
+                        when (it) {
+                            null -> R.string.setting_provider_page_platform_agent_none
+                            AgentPlatform.CODEX -> R.string.setting_provider_page_platform_agent_codex
+                            AgentPlatform.CLAUDE_CODE -> R.string.setting_provider_page_platform_agent_claude_code
+                            AgentPlatform.GEMINI_CLI -> R.string.setting_provider_page_platform_agent_gemini_cli
+                            AgentPlatform.ANTHROPIC_CLAUDE_CODE -> R.string.setting_provider_page_platform_agent_anthropic_claude_code
+                            AgentPlatform.OPENCODE -> R.string.setting_provider_page_platform_agent_opencode
+                            AgentPlatform.DEEPSEEK_HARNESS -> R.string.setting_provider_page_platform_agent_dsh
+                        }
+                    )
+                }
+
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    options.forEachIndexed { index, option ->
+                        FilterChip(
+                            selected = platformAgent == option,
+                            onClick = {
+                                val updated = if (option == null) {
+                                    provider.copyProvider(
+                                        models = provider.models.map { it.copy(platformAgent = null, agentArguments = emptyList(), agentEnvironment = emptyMap()) }
+                                    )
+                                } else {
+                                    val targetModel = agentModel ?: provider.models.firstOrNull()
+                                    if (targetModel != null) {
+                                        provider.editModel(
+                                            targetModel.copy(platformAgent = option, agentArguments = emptyList(), agentEnvironment = emptyMap())
+                                        )
+                                    } else {
+                                        provider.addModel(
+                                            Model(
+                                                modelId = option.name.lowercase(),
+                                                displayName = labels[index],
+                                                abilities = listOf(ModelAbility.TOOL, ModelAbility.REASONING),
+                                                platformAgent = option,
+                                            )
+                                        )
+                                    }
+                                }
+                                onEdit(updated)
+                            },
+                            label = {
+                                Text(
+                                    text = labels[index],
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                        )
+                    }
+                }
+
+                if (agentModel != null) {
+                    OutlinedTextField(
+                        value = agentArguments.joinToString(" "),
+                        onValueChange = { raw ->
+                            val updated = provider.editModel(
+                                agentModel.copy(
+                                    platformAgent = platformAgent,
+                                    agentArguments = raw.split(" ").filter { it.isNotBlank() },
+                                    agentEnvironment = agentEnvironment
+                                )
+                            )
+                            onEdit(updated)
+                        },
+                        label = { Text(stringResource(R.string.setting_provider_page_platform_agent_args_label)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+
+                    OutlinedTextField(
+                        value = agentEnvironment.entries.joinToString("\n") { "${it.key}=${it.value}" },
+                        onValueChange = { raw ->
+                            val env = raw.lineSequence()
+                                .map { it.trim() }
+                                .filter { it.isNotBlank() && '=' in it }
+                                .associate { line ->
+                                    val idx = line.indexOf('=')
+                                    line.substring(0, idx) to line.substring(idx + 1)
+                                }
+                            val updated = provider.editModel(
+                                agentModel.copy(
+                                    platformAgent = platformAgent,
+                                    agentArguments = agentArguments,
+                                    agentEnvironment = env
+                                )
+                            )
+                            onEdit(updated)
+                        },
+                        label = { Text(stringResource(R.string.setting_provider_page_platform_agent_env_label)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3,
+                    )
+
+                    Text(
+                        stringResource(R.string.setting_provider_page_platform_agent_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
     }
 }
 

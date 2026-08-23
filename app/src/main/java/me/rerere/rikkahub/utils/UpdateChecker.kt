@@ -26,7 +26,7 @@ private const val API_URL = "https://api.github.com/repos/995fuviokd-crypto/rikk
 private const val ASSET_NAME_PREFIX = "RikkaHub-"
 
 // gh-proxy 加速前缀：弱网环境代理 GitHub 下载，提升更新包下载速度
-private const val GH_PROXY_PREFIX = "https://v6.gh-proxy.org/"
+private const val GH_PROXY_PREFIX = "https://gh-proxy.com/"
 
 class UpdateChecker(private val client: OkHttpClient) {
     private val json = Json { ignoreUnknownKeys = true }

@@ -14,6 +14,7 @@ import me.rerere.rikkahub.data.api.PluginMarketDataSource
 import me.rerere.rikkahub.data.ai.mcp.serverUrl
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.plugin.DshPluginAdapter
 import me.rerere.rikkahub.data.plugin.InstalledPlugin
 import me.rerere.rikkahub.data.plugin.OpenAIPluginAdapter
 import me.rerere.rikkahub.data.plugin.PluginCategories
@@ -28,6 +29,7 @@ class PluginMarketVM(
     private val marketDataSource: PluginMarketDataSource,
     private val openAIPluginAdapter: OpenAIPluginAdapter,
     private val communityDataSource: CommunityMarketDataSource,
+    private val dshPluginAdapter: DshPluginAdapter,
 ) : ViewModel() {
     private val _installed = MutableStateFlow<List<InstalledPlugin>>(emptyList())
     val installed = _installed.asStateFlow()
@@ -244,6 +246,27 @@ class PluginMarketVM(
                         .onSuccess { info ->
                             autoEnablePlugin(info.id)
                             _notice.value = "已安装并启用 ${info.name}（OpenAI 插件）"
+                        }
+                        .onFailure { _notice.value = "安装失败: ${it.message}" }
+                }
+                .onFailure { _notice.value = "获取失败: ${it.message}" }
+            _downloadingId.value = null
+            refreshInstalled()
+        }
+    }
+
+    /** 从 DeepSeek Harness（DSH）插件仓库地址安装：github:owner/repo#ref 自动转换为可迁移能力插件 */
+    fun installDsh(repoRef: String) {
+        if (_downloadingId.value != null) return
+        viewModelScope.launch {
+            _downloadingId.value = "dsh"
+            _notice.value = null
+            dshPluginAdapter.fetchAsZip(repoRef)
+                .onSuccess { bytes ->
+                    pluginManager.installZip(bytes)
+                        .onSuccess { info ->
+                            autoEnablePlugin(info.id)
+                            _notice.value = "已安装并启用 ${info.name}（DSH 插件）"
                         }
                         .onFailure { _notice.value = "安装失败: ${it.message}" }
                 }

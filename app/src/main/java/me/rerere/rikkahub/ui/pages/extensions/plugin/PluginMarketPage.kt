@@ -66,6 +66,7 @@ import me.rerere.hugeicons.stroke.CloudDownload
 import me.rerere.hugeicons.stroke.CloudUpload
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Menu01
+import me.rerere.hugeicons.stroke.Github
 import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.data.api.CommunityListItem
@@ -118,6 +119,7 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
     var showUploadDialog by remember { mutableStateOf(false) }
     var showTutorialDialog by remember { mutableStateOf(false) }
     var showOpenAIDialog by remember { mutableStateOf(false) }
+    var showDshDialog by remember { mutableStateOf(false) }
     var uploadType by remember { mutableStateOf(PluginCategories.TYPE_PLUGIN) }
     var deleteTarget by remember { mutableStateOf<InstalledPlugin?>(null) }
     var selectedEntry by remember { mutableStateOf<PluginMarketEntry?>(null) }
@@ -213,6 +215,16 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
                                 onClick = {
                                     showMenu = false
                                     showOpenAIDialog = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("导入 DSH 插件") },
+                                leadingIcon = {
+                                    Icon(HugeIcons.Github, contentDescription = null, modifier = Modifier.size(18.dp))
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    showDshDialog = true
                                 },
                             )
                             DropdownMenuItem(
@@ -326,6 +338,14 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
             installing = downloadingId == "openai",
             onImport = vm::installOpenAIPlugin,
             onDismiss = { showOpenAIDialog = false },
+        )
+    }
+
+    if (showDshDialog) {
+        DshImportDialog(
+            installing = downloadingId == "dsh",
+            onImport = vm::installDsh,
+            onDismiss = { showDshDialog = false },
         )
     }
 
@@ -979,6 +999,53 @@ private fun OpenAIImportDialog(
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp))
                         Text("正在获取并安装...", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onImport(url)
+                    onDismiss()
+                },
+                enabled = url.isNotBlank() && !installing,
+            ) { Text("导入") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
+}
+
+@Composable
+private fun DshImportDialog(
+    installing: Boolean,
+    onImport: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var url by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("导入 DSH 插件") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "填写 DeepSeek Harness（DSH）插件仓库地址。App 会自动拉取仓库并提取可迁移能力：技能资源转为技能、工具定义转为能力提示词；纯 UI / Node 宿主依赖的插件无法迁移。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text("仓库地址，如 github:owner/repo 或 owner/repo") },
+                    singleLine = true,
+                    enabled = !installing,
+                )
+                if (installing) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                        Text("正在获取并转换...", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }

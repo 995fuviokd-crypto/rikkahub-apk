@@ -286,8 +286,20 @@ private fun AgentItemCard(
                 }
             }
 
-            if (isInstalling) {
+            // 安装中或上次安装失败时都展示进度块，避免失败详情随 installing 置空而被吞掉
+            val failed = !isInstalling && installProgress?.phase == AgentInstallPhase.FAILED
+            if (isInstalling || failed) {
                 InstallProgressBlock(installProgress)
+                if (failed) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        Button(onClick = onInstall, enabled = workspaceReady) {
+                            Text("重试")
+                        }
+                    }
+                }
             } else {
                 Row(
                     modifier = Modifier.fillMaxWidth(),

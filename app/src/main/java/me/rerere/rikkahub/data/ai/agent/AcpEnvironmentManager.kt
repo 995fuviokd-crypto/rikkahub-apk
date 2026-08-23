@@ -122,13 +122,17 @@ class AcpEnvironmentManager(
                         "正在下载并安装 ${platform.cliPackage}（可能需要数分钟）…",
                     )
                 )
+                // 官方 registry 失败后自动降级 npmmirror 国内镜像重试（npm 源被墙时的兜底）
                 runWithRetry(platform.cliPackage) {
                     workspaceManager.executeCommand(
                         root = root,
-                        command = "npm install -g ${platform.cliPackage} 2>&1 && echo __OK__ || true",
+                        command = buildString {
+                            append("npm install -g ${platform.cliPackage} 2>&1 && echo __OK__ || ")
+                            append("(npm install -g ${platform.cliPackage} --registry=$NPM_MIRROR_REGISTRY 2>&1 && echo __OK__) || true")
+                        },
                         timeoutMillis = INSTALL_TIMEOUT_MS,
                     )
-                } ?: error("CLI 安装失败：${platform.cliPackage}")
+                } ?: error("CLI 安装失败：${platform.cliPackage}（官方源与国内镜像均失败，请检查网络）")
                 check(hasCli(root, platform)) { "CLI 安装后校验失败" }
             }
 
@@ -224,6 +228,9 @@ class AcpEnvironmentManager(
         private const val RETRY_DELAY_MS = 3_000L
         private const val CHECK_TIMEOUT_MS = 60_000L
         private const val INSTALL_TIMEOUT_MS = 10 * 60 * 1000L
+
+        /** npmmirror（原淘宝）npm 镜像，官方 registry 不可达时的降级源 */
+        private const val NPM_MIRROR_REGISTRY = "https://registry.npmmirror.com"
 
         private val NODE_INSTALL_SCRIPT = """
             export DEBIAN_FRONTEND=noninteractive;

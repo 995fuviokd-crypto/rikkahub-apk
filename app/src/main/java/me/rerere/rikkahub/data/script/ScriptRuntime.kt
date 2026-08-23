@@ -305,7 +305,7 @@ function __scriptLoadEntry(entry) {
             )
             contextQ.evaluate(TOOLPKG_SHIM)
             contextQ.evaluate(TOOLS_SHIM)
-            val sources = buildSources(scriptDir, files)
+            val sources = buildSources(scriptDir, pluginDir, files)
             val script = buildString {
                 append(ScriptJsTranspiler.RUN_GEN_RUNTIME)
                 append("\nvar __scriptSources = {\n")
@@ -363,12 +363,32 @@ function __scriptLoadEntry(entry) {
         return files.firstOrNull()?.relativeTo(scriptDir)?.path
     }
 
-    private fun buildSources(scriptDir: File, files: List<File>): List<Pair<String, String>> {
-        return files.mapNotNull { file ->
+    private fun buildSources(
+        scriptDir: File,
+        pluginDir: File,
+        files: List<File>,
+    ): List<Pair<String, String>> {
+        val result = linkedMapOf<String, String>()
+        files.forEach { file ->
             val rel = file.relativeTo(scriptDir).path.replace('\\', '/')
-            val source = runCatching { file.readText() }.getOrNull() ?: return@mapNotNull null
-            rel to ScriptJsTranspiler.transpile(source)
+            if (result.containsKey(rel)) return@forEach
+            val source = runCatching { file.readText() }.getOrNull() ?: return@forEach
+            result[rel] = ScriptJsTranspiler.transpile(source)
         }
+        // 包根 shared/ 共享目录：逻辑 key 为 "shared/<rel>"，兼容 ../shared/xxx require（loader 会 normalize）
+        val sharedDir = File(pluginDir, "shared")
+        if (sharedDir.isDirectory) {
+            sharedDir.walkTopDown()
+                .filter { it.isFile && it.extension == "js" }
+                .sortedBy { it.relativeTo(sharedDir).path }
+                .forEach { file ->
+                    val rel = "shared/" + file.relativeTo(sharedDir).path.replace('\\', '/')
+                    if (result.containsKey(rel)) return@forEach
+                    val source = runCatching { file.readText() }.getOrNull() ?: return@forEach
+                    result[rel] = ScriptJsTranspiler.transpile(source)
+                }
+        }
+        return result.toList()
     }
 
     private fun parseResult(raw: String?): ToolResult {

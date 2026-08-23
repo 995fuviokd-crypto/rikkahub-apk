@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.extensions.workspace
 
 import android.graphics.Typeface
+import android.util.Log
 import android.view.MotionEvent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -47,6 +48,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.theme.ColorMode
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -119,37 +121,45 @@ private fun WorkspaceTerminalContent(
         sessionClient,
     ) {
         val current = root
-        value = if (current == null) {
-            TerminalSessionUiState.Loading
-        } else {
-            // rootfs stat 与 RootfsPatcher().patch()/DNS 查询都是阻塞 I/O, 放到 IO 线程执行;
-            // TerminalSession 构造内部会创建 Handler, 必须回到主线程执行
-            val prepared = withContext(Dispatchers.IO) {
-                if (!workspaceRootfsReady(context, current)) {
-                    false
-                } else {
-                    prepareWorkspaceTerminalSession(context, current, androidLocalAccess, localDirectoryUri)
-                    true
-                }
-            }
-            if (!prepared) {
-                TerminalSessionUiState.NotInstalled
+        value = try {
+            if (current == null) {
+                TerminalSessionUiState.Loading
             } else {
-                if (!isActive) return@produceState
-                val created = createWorkspaceTerminalSession(
-                    context,
-                    current,
-                    androidLocalAccess,
-                    localDirectoryUri,
-                    sessionClient,
-                )
-                // 创建后若组合已离开, 主动回收以免泄漏 proot 进程, 且不再把已 finish 的 session 暴露为 Ready
-                if (!isActive) {
-                    created.finishIfRunning()
-                    return@produceState
+                // rootfs stat 与 RootfsPatcher().patch()/DNS 查询都是阻塞 I/O, 放到 IO 线程执行;
+                // TerminalSession 构造内部会创建 Handler, 必须回到主线程执行
+                val prepared = withContext(Dispatchers.IO) {
+                    if (!workspaceRootfsReady(context, current)) {
+                        false
+                    } else {
+                        prepareWorkspaceTerminalSession(context, current, androidLocalAccess, localDirectoryUri)
+                        true
+                    }
                 }
-                TerminalSessionUiState.Ready(created)
+                if (!prepared) {
+                    TerminalSessionUiState.NotInstalled
+                } else {
+                    if (!isActive) return@produceState
+                    val created = createWorkspaceTerminalSession(
+                        context,
+                        current,
+                        androidLocalAccess,
+                        localDirectoryUri,
+                        sessionClient,
+                    )
+                    // 创建后若组合已离开, 主动回收以免泄漏 proot 进程, 且不再把已 finish 的 session 暴露为 Ready
+                    if (!isActive) {
+                        created.finishIfRunning()
+                        return@produceState
+                    }
+                    TerminalSessionUiState.Ready(created)
+                }
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            // 兜底展示初始化异常, 避免状态卡在 Loading 无任何反馈
+            Log.e("WorkspaceTerminal", "terminal session init failed", e)
+            TerminalSessionUiState.Error(e.message ?: "终端初始化失败")
         }
     }
 
@@ -163,13 +173,15 @@ private fun WorkspaceTerminalContent(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = if (currentState is TerminalSessionUiState.NotInstalled) {
-                    stringResource(R.string.workspace_terminal_not_installed)
-                } else {
-                    stringResource(R.string.workspace_terminal_loading)
+                text = when (currentState) {
+                    is TerminalSessionUiState.NotInstalled ->
+                        stringResource(R.string.workspace_terminal_not_installed)
+                    is TerminalSessionUiState.Error -> currentState.message
+                    else -> stringResource(R.string.workspace_terminal_loading)
                 },
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
         }
         return
@@ -335,6 +347,10 @@ private fun TerminalSession.writeText(text: String) {
 
 private sealed interface TerminalSessionUiState {
     data object Loading : TerminalSessionUiState
+
     data object NotInstalled : TerminalSessionUiState
+
     data class Ready(val session: TerminalSession) : TerminalSessionUiState
+
+    data class Error(val message: String) : TerminalSessionUiState
 }

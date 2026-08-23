@@ -7,7 +7,6 @@ import me.rerere.hugeicons.stroke.DragDropHorizontal
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowUp01
@@ -30,12 +29,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
@@ -75,7 +72,6 @@ import io.github.g00fy2.quickie.ScanQRCode
 import me.rerere.ai.provider.AgentMode
 import me.rerere.ai.provider.AgentPlatform
 import me.rerere.ai.provider.Model
-import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.agentMode
 import me.rerere.ai.provider.withAgentMode
@@ -104,24 +100,12 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val navController = LocalNavController.current
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    var searchQuery by remember { mutableStateOf("") }
-    var selectedModelType by remember { mutableStateOf<ModelType?>(null) }
     val lazyListState = rememberLazyListState()
     val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
         val newProviders = settings.providers.toMutableList().apply {
             add(to.index, removeAt(from.index))
         }
         vm.updateSettings(settings.copy(providers = newProviders))
-    }
-
-    val filteredProviders = remember(settings.providers, searchQuery, selectedModelType) {
-        settings.providers.filter { provider ->
-            val matchesQuery = searchQuery.isBlank() ||
-                provider.name.contains(searchQuery, ignoreCase = true) ||
-                provider.models.any { it.displayName.contains(searchQuery, ignoreCase = true) }
-            val matchesType = selectedModelType == null || provider.models.any { it.type == selectedModelType }
-            matchesQuery && matchesType
-        }
     }
 
     Scaffold(
@@ -161,52 +145,6 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                 .fillMaxSize()
                 .padding(top = innerPadding.calculateTopPadding())
         ) {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                placeholder = { Text(stringResource(R.string.setting_provider_page_search_providers)) },
-                leadingIcon = {
-                    Icon(HugeIcons.Search01, contentDescription = null)
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(HugeIcons.Cancel01, contentDescription = "Clear")
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = CircleShape,
-            )
-
-            FlowRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                val filterChips = listOf(
-                    null to "全部",
-                    ModelType.CHAT to "对话",
-                    ModelType.IMAGE to "图片",
-                    ModelType.VIDEO to "视频",
-                    ModelType.EMBEDDING to "嵌入",
-                )
-                filterChips.forEach { (type, label) ->
-                    FilterChip(
-                        selected = selectedModelType == type,
-                        onClick = {
-                            selectedModelType = type
-                        },
-                        label = { Text(label) },
-                    )
-                }
-            }
-
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -217,7 +155,7 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 state = lazyListState,
             ) {
-                items(filteredProviders, key = { it.id }) { provider ->
+                items(settings.providers, key = { it.id }) { provider ->
                     ReorderableItem(
                         state = reorderableState,
                         key = provider.id
@@ -503,51 +441,7 @@ private fun AddProviderButton(onAdd: (ProviderSetting) -> Unit) {
     }
 }
 
-private val agentPlatformTemplates: List<AgentPlatformTemplate> = listOf(
-    AgentPlatformTemplate(
-        platform = me.rerere.ai.provider.AgentPlatform.GEMINI_CLI,
-        labelRes = R.string.setting_provider_page_platform_agent_gemini_cli,
-        descRes = R.string.setting_provider_page_platform_agent_gemini_cli_desc,
-        defaultModelId = "gemini-cli",
-    ),
-    AgentPlatformTemplate(
-        platform = me.rerere.ai.provider.AgentPlatform.CODEX,
-        labelRes = R.string.setting_provider_page_platform_agent_codex,
-        descRes = R.string.setting_provider_page_platform_agent_codex_desc,
-        defaultModelId = "codex",
-    ),
-    AgentPlatformTemplate(
-        platform = me.rerere.ai.provider.AgentPlatform.CLAUDE_CODE,
-        labelRes = R.string.setting_provider_page_platform_agent_claude_code,
-        descRes = R.string.setting_provider_page_platform_agent_claude_code_desc,
-        defaultModelId = "claude-code",
-    ),
-    AgentPlatformTemplate(
-        platform = me.rerere.ai.provider.AgentPlatform.ANTHROPIC_CLAUDE_CODE,
-        labelRes = R.string.setting_provider_page_platform_agent_anthropic_claude_code,
-        descRes = R.string.setting_provider_page_platform_agent_anthropic_claude_code_desc,
-        defaultModelId = "claude",
-    ),
-    AgentPlatformTemplate(
-        platform = me.rerere.ai.provider.AgentPlatform.OPENCODE,
-        labelRes = R.string.setting_provider_page_platform_agent_opencode,
-        descRes = R.string.setting_provider_page_platform_agent_opencode_desc,
-        defaultModelId = "opencode",
-    ),
-    AgentPlatformTemplate(
-        platform = me.rerere.ai.provider.AgentPlatform.DEEPSEEK_HARNESS,
-        labelRes = R.string.setting_provider_page_platform_agent_dsh,
-        descRes = R.string.setting_provider_page_platform_agent_dsh_desc,
-        defaultModelId = "dsh",
-    ),
-)
 
-private data class AgentPlatformTemplate(
-    val platform: me.rerere.ai.provider.AgentPlatform,
-    val labelRes: Int,
-    val descRes: Int,
-    val defaultModelId: String,
-)
 
 private data class ApiTemplate(
     val label: String,
@@ -611,127 +505,31 @@ private fun AddProviderSheet(
                 .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            var searchQuery by remember { mutableStateOf("") }
-            var agentsExpanded by remember { mutableStateOf(true) }
-            var apiExpanded by remember { mutableStateOf(false) }
-            val isSearching = searchQuery.isNotBlank()
-
             Text(
                 text = stringResource(R.string.setting_provider_page_add_provider),
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.padding(bottom = 4.dp)
             )
 
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("搜索供应商或 Agent 模式") },
-                leadingIcon = {
-                    Icon(HugeIcons.Search01, contentDescription = null)
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(HugeIcons.Cancel01, contentDescription = "Clear")
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = CircleShape,
+            var apiExpanded by remember { mutableStateOf(true) }
+
+            GroupHeader(
+                title = "标准 API",
+                subtitle = "通过 REST 接口接入的通用供应商",
+                expanded = apiExpanded,
+                onToggle = { apiExpanded = !apiExpanded },
             )
-
-            // ---- Agent 模式分组 ----
-            val filteredAgents = if (isSearching) {
-                agentPlatformTemplates.filter { template ->
-                    val label = stringResource(template.labelRes)
-                    val desc = stringResource(template.descRes)
-                    label.contains(searchQuery, ignoreCase = true) ||
-                        desc.contains(searchQuery, ignoreCase = true)
+            if (apiExpanded) {
+                apiTemplates.forEach { template ->
+                    ProviderTemplateItem(
+                        name = template.label,
+                        desc = template.desc,
+                        tag = "API",
+                        onClick = {
+                            onSelect(template.factory())
+                        }
+                    )
                 }
-            } else {
-                agentPlatformTemplates
-            }
-            if (filteredAgents.isNotEmpty() && (isSearching || agentsExpanded)) {
-                GroupHeader(
-                    title = "Agent 模式",
-                    subtitle = "${agentPlatformTemplates.size} 种编码智能体，安装后即可绑定",
-                    expanded = agentsExpanded,
-                    onToggle = { agentsExpanded = !agentsExpanded },
-                )
-                if (agentsExpanded || isSearching) {
-                    filteredAgents.forEach { template ->
-                        val label = stringResource(template.labelRes)
-                        ProviderTemplateItem(
-                            name = label,
-                            desc = stringResource(template.descRes),
-                            tag = "Agent",
-                            onClick = {
-                                onSelect(
-                                    ProviderSetting.OpenAI(
-                                        id = Uuid.random(),
-                                        name = label,
-                                        baseUrl = "",
-                                        apiKey = "",
-                                        enabled = true,
-                                        models = listOf(
-                                            Model(
-                                                modelId = template.defaultModelId,
-                                                displayName = label,
-                                                abilities = listOf(
-                                                    me.rerere.ai.provider.ModelAbility.TOOL,
-                                                    me.rerere.ai.provider.ModelAbility.REASONING,
-                                                ),
-                                                platformAgent = template.platform,
-                                            )
-                                        ),
-                                    )
-                                )
-                            }
-                        )
-                    }
-                }
-            }
-
-            // ---- 标准 API 分组 ----
-            val filteredApis = if (isSearching) {
-                apiTemplates.filter { template ->
-                    template.label.contains(searchQuery, ignoreCase = true) ||
-                        template.desc.contains(searchQuery, ignoreCase = true)
-                }
-            } else {
-                apiTemplates
-            }
-            if (filteredApis.isNotEmpty() && (isSearching || apiExpanded)) {
-                GroupHeader(
-                    title = "标准 API",
-                    subtitle = "通过 REST 接口接入的通用供应商",
-                    expanded = apiExpanded,
-                    onToggle = { apiExpanded = !apiExpanded },
-                )
-                if (apiExpanded || isSearching) {
-                    filteredApis.forEach { template ->
-                        ProviderTemplateItem(
-                            name = template.label,
-                            desc = template.desc,
-                            tag = "API",
-                            onClick = {
-                                onSelect(template.factory())
-                            }
-                        )
-                    }
-                }
-            }
-
-            if (filteredAgents.isEmpty() && filteredApis.isEmpty()) {
-                Text(
-                    text = "未找到匹配项",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 16.dp),
-                )
             }
         }
     }
@@ -952,7 +750,7 @@ private fun AgentBindingTag(
 }
 
 @Composable
-private fun AgentPlatform.label(): String = stringResource(
+internal fun AgentPlatform.label(): String = stringResource(
     when (this) {
         AgentPlatform.CODEX -> R.string.setting_provider_page_platform_agent_codex
         AgentPlatform.CLAUDE_CODE -> R.string.setting_provider_page_platform_agent_claude_code
