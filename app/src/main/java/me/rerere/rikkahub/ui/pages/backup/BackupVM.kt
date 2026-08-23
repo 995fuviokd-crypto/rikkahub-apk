@@ -38,6 +38,7 @@ class BackupVM(
 
     val webDavBackupItems = MutableStateFlow<UiState<List<WebDavBackupItem>>>(UiState.Idle)
     val s3BackupItems = MutableStateFlow<UiState<List<S3BackupItem>>>(UiState.Idle)
+    val localBackupItems = MutableStateFlow(WebDavConfig.BackupItem.entries.toList())
 
     init {
         loadBackupFileItems()
@@ -48,6 +49,10 @@ class BackupVM(
         viewModelScope.launch {
             settingsStore.update(settings)
         }
+    }
+
+    fun updateLocalBackupItems(items: List<WebDavConfig.BackupItem>) {
+        localBackupItems.value = items
     }
 
     fun loadBackupFileItems() {
@@ -86,7 +91,7 @@ class BackupVM(
 
     suspend fun exportToFile(): File {
         val file = webDavSync.prepareBackupFile(
-            settings.value.webDavConfig.copy(items = WebDavConfig.BackupItem.entries)
+            settings.value.webDavConfig.copy(items = localBackupItems.value)
         )
         recordBackupTime()
         return file
@@ -95,7 +100,7 @@ class BackupVM(
     suspend fun restoreFromLocalFile(file: File) {
         webDavSync.restoreFromLocalFile(
             file,
-            settings.value.webDavConfig.copy(items = WebDavConfig.BackupItem.entries),
+            settings.value.webDavConfig.copy(items = localBackupItems.value),
         )
     }
 

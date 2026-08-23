@@ -1378,4 +1378,12 @@
   <string name="setting_tts_page_fish_audio_speed_description">語速（0.5 - 2.0，1.0 為正常）</string>
   <string name="setting_tts_page_temperature">溫度</string>
   <string name="setting_tts_page_temperature_description">控制語音的隨機性（0.0 - 1.0，越高越有表現力）</string>
+  <string name="backup_page_import_overwrite_confirm">匯入備份將覆寫應用程式資料。是否繼續？</string>
+  <string name="setting_page_preferences_network">網路</string>
+  <string name="setting_page_preferences_network_desc">User-Agent 和網路請求設定</string>
+  <string name="setting_page_preferences_network_user_agent">User-Agent</string>
+  <string name="setting_page_preferences_network_user_agent_desc">留空以使用 %1$s</string>
+  <string name="setting_page_preferences_network_proxy">代理</string>
+  <string name="setting_page_preferences_network_proxy_desc">支援 HTTP 和 SOCKS5 代理網址。留空以使用系統設定。</string>
+  <string name="setting_page_preferences_network_proxy_invalid">請輸入包含主機和連接埠的有效代理 URL。</string>
 </resources>

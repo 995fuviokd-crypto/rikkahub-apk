@@ -7,9 +7,12 @@ import android.widget.Toast
 import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
@@ -17,6 +20,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.common.http.await
+import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -28,7 +32,10 @@ private const val ASSET_NAME_PREFIX = "RikkaHub-"
 // gh-proxy 加速前缀：弱网环境代理 GitHub 下载，提升更新包下载速度
 private const val GH_PROXY_PREFIX = "https://gh-proxy.com/"
 
-class UpdateChecker(private val client: OkHttpClient) {
+class UpdateChecker(
+    private val client: OkHttpClient,
+    appScope: AppScope,
+) {
     private val json = Json { ignoreUnknownKeys = true }
 
     companion object {
@@ -42,7 +49,14 @@ class UpdateChecker(private val client: OkHttpClient) {
     private var cachedAt: Long = 0L
     private val cacheTtlMillis = 10 * 60 * 1000L // 10 分钟
 
-    fun checkUpdate(): Flow<UiState<UpdateInfo>> = flow {
+    // stateIn 单例共享: 多处订阅复用同一结果, 修复更新检查被频繁触发的问题
+    val updateState: StateFlow<UiState<UpdateInfo>> = checkUpdate().stateIn(
+        scope = appScope,
+        started = SharingStarted.Lazily,
+        initialValue = UiState.Loading,
+    )
+
+    private fun checkUpdate(): Flow<UiState<UpdateInfo>> = flow {
         emit(UiState.Loading)
         emit(
             UiState.Success(
