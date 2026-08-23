@@ -25,6 +25,12 @@ import me.rerere.rikkahub.data.plugin.PluginManager
 import me.rerere.rikkahub.data.plugin.PluginMarketEntry
 import me.rerere.rikkahub.data.plugin.PluginStatus
 import me.rerere.rikkahub.data.api.communityPluginIdFor
+import me.rerere.rikkahub.data.model.Lorebook
+import me.rerere.rikkahub.data.tavern.FeaturedTavernCards
+import me.rerere.rikkahub.data.tavern.TavernCardConverter
+import me.rerere.rikkahub.data.tavern.TavernCard
+import me.rerere.rikkahub.data.tavern.TavernPng
+import kotlin.uuid.Uuid
 
 class PluginMarketVM(
     private val settingsStore: SettingsStore,
@@ -435,6 +441,116 @@ class PluginMarketVM(
 
     fun clearNotice() {
         _notice.value = null
+    }
+
+    // ---- 酒馆（SillyTavern）角色卡 / 世界书 ----
+
+    /** 内置精选角色卡（离线可用，内容健康实用向） */
+    val featuredTavernCards: List<TavernCard> = FeaturedTavernCards.cards
+
+    private val _tavernImportedKeys = MutableStateFlow<Set<String>>(emptySet())
+    val tavernImportedKeys = _tavernImportedKeys.asStateFlow()
+
+    private val _tavernLorebooks = MutableStateFlow<List<Lorebook>>(emptyList())
+    val tavernLorebooks = _tavernLorebooks.asStateFlow()
+
+    private val _tavernImporting = MutableStateFlow(false)
+    val tavernImporting = _tavernImporting.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            settingsStore.settingsFlow.collect { settings ->
+                _tavernImportedKeys.value = settings.tavernImportedKeys
+                _tavernLorebooks.value = settings.lorebooks
+            }
+        }
+    }
+
+    /** 导入内置/解析好的角色卡：注册为本地助手，内嵌世界书同步注册并关联 */
+    fun importTavernCard(card: TavernCard) {
+        if (_tavernImporting.value) return
+        viewModelScope.launch {
+            _tavernImporting.value = true
+            _notice.value = null
+            runCatching {
+                val current = settingsStore.settingsFlow.value
+                if (current.assistants.any { it.name == card.name }) {
+                    error("助手「${card.name}」已存在，无需重复导入")
+                }
+                val assistant = TavernCardConverter.toAssistant(card)
+                val lorebook = TavernCardConverter.cardToLorebook(card)
+                val linkedAssistant = if (lorebook != null) {
+                    assistant.copy(lorebookIds = assistant.lorebookIds + lorebook.id)
+                } else {
+                    assistant
+                }
+                settingsStore.update { settings ->
+                    settings.copy(
+                        assistants = settings.assistants + linkedAssistant,
+                        lorebooks = if (lorebook != null) settings.lorebooks + lorebook else settings.lorebooks,
+                        tavernImportedKeys = settings.tavernImportedKeys + importedKeyOf(card),
+                    )
+                }
+                _notice.value = "已导入「${card.name}」为本地助手" + if (lorebook != null) "（含世界书）" else ""
+            }.onFailure { e ->
+                _notice.value = "导入失败: ${e.message}"
+            }
+            _tavernImporting.value = false
+        }
+    }
+
+    /**
+     * 从文件字节导入角色卡：JSON 直接解析；PNG 提取 tEXt chara chunk 后 Base64 解码。
+     * 成功后回调卡片名供 UI 提示。
+     */
+    fun importTavernCardFromBytes(bytes: ByteArray, fileName: String, isPng: Boolean) {
+        if (_tavernImporting.value) return
+        viewModelScope.launch {
+            _tavernImporting.value = true
+            _notice.value = null
+            try {
+                val jsonText = withContext(Dispatchers.IO) {
+                    if (isPng) {
+                        TavernPng.extractCharaJson(bytes) ?: error("该 PNG 不含酒馆角色数据（chara chunk）")
+                    } else {
+                        bytes.toString(Charsets.UTF_8)
+                    }
+                }
+                val card = TavernCardConverter.parseCard(jsonText)
+                importTavernCard(card)
+            } catch (e: Throwable) {
+                _notice.value = "角色卡导入失败: ${e.message}"
+                _tavernImporting.value = false
+            }
+        }
+    }
+
+    /** 导入 SillyTavern 世界书 JSON 为 Lorebook（在 助手详情→提示词注入 中关联启用） */
+    fun importWorldInfo(jsonText: String, fileName: String?) {
+        viewModelScope.launch {
+            _notice.value = null
+            runCatching { TavernCardConverter.parseWorldInfo(jsonText, fileName) }
+                .onSuccess { book ->
+                    settingsStore.update { it.copy(lorebooks = it.lorebooks + book) }
+                    _notice.value = "已导入世界书「${book.name}」（${book.entries.size} 条目）"
+                }
+                .onFailure { e -> _notice.value = "世界书导入失败: ${e.message}" }
+        }
+    }
+
+    /** 删除已导入的世界书 */
+    fun removeLorebook(bookId: Uuid) {
+        viewModelScope.launch {
+            settingsStore.update { settings ->
+                settings.copy(lorebooks = settings.lorebooks.filterNot { it.id == bookId })
+            }
+        }
+    }
+
+    companion object {
+        /** 卡片导入去重 key 生成（UI 判断"已导入"用） */
+        fun importedKeyOf(card: TavernCard): String =
+            "${card.name}@${card.creatorNotes.take(24).ifEmpty { "custom" }}"
     }
 }
 

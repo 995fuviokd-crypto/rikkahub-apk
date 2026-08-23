@@ -34,6 +34,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -118,6 +119,12 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
     val dshCategories by vm.dshCategories.collectAsStateWithLifecycle()
     val dshUpdated by vm.dshUpdated.collectAsStateWithLifecycle()
 
+    // 酒馆（角色卡/世界书）
+    val featuredTavernCards = vm.featuredTavernCards
+    val tavernImportedKeys by vm.tavernImportedKeys.collectAsStateWithLifecycle()
+    val tavernLorebooks by vm.tavernLorebooks.collectAsStateWithLifecycle()
+    val tavernImporting by vm.tavernImporting.collectAsStateWithLifecycle()
+
     var tab by remember { mutableIntStateOf(0) }
     var search by remember { mutableStateOf("") }
     var category by remember { mutableStateOf(PluginCategories.ALL) }
@@ -140,6 +147,33 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
         uri?.let {
             context.contentResolver.openInputStream(uri)?.use { input ->
                 vm.installFromZip(input.readBytes())
+            }
+        }
+    }
+
+    // 酒馆角色卡导入（PNG 内嵌卡或 JSON 卡）
+    val tavernCardLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            context.contentResolver.openInputStream(uri)?.use { input -> input.readBytes() }?.let { bytes ->
+                val mime = context.contentResolver.getType(uri) ?: ""
+                val name = uri.lastPathSegment ?: ""
+                val isPng = mime == "image/png" || name.endsWith(".png", ignoreCase = true)
+                vm.importTavernCardFromBytes(bytes, name, isPng)
+            }
+        }
+    }
+
+    // 酒馆世界书 JSON 导入
+    val tavernWorldBookLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                input.bufferedReader().use { it.readText() }
+            }?.let { text ->
+                vm.importWorldInfo(text, it.lastPathSegment)
             }
         }
     }
@@ -276,6 +310,11 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
                     onClick = { tab = 2 },
                     text = { Text("DSH 市场") },
                 )
+                Tab(
+                    selected = tab == 3,
+                    onClick = { tab = 3 },
+                    text = { Text("酒馆") },
+                )
             }
 
             when (tab) {
@@ -326,6 +365,19 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
                     onInstall = vm::installDshMarketEntry,
                     onRetry = vm::loadDshMarket,
                     onRefresh = vm::loadDshMarket,
+                )
+
+                3 -> TavernMarketTab(
+                    cards = featuredTavernCards,
+                    importedKeys = tavernImportedKeys,
+                    lorebooks = tavernLorebooks,
+                    importing = tavernImporting,
+                    search = search,
+                    onSearchChange = { search = it },
+                    onImportCard = vm::importTavernCard,
+                    onImportCardFile = { tavernCardLauncher.launch(arrayOf("image/png", "application/json", "*/*")) },
+                    onImportWorldBook = { tavernWorldBookLauncher.launch(arrayOf("application/json", "*/*")) },
+                    onDeleteLorebook = vm::removeLorebook,
                 )
             }
         }
@@ -1347,4 +1399,156 @@ private fun PluginTutorialDialog(
             TextButton(onClick = onDismiss) { Text("知道了") }
         },
     )
+}
+
+/**
+ * 酒馆（SillyTavern）Tab：精选角色卡一键注册为本地助手 + 本地卡/世界书导入。
+ * 角色卡内嵌 character_book 时同步注册 Lorebook 并关联到生成的助手。
+ */
+@Composable
+private fun TavernMarketTab(
+    cards: List<me.rerere.rikkahub.data.tavern.TavernCard>,
+    importedKeys: Set<String>,
+    lorebooks: List<me.rerere.rikkahub.data.model.Lorebook>,
+    importing: Boolean,
+    search: String,
+    onSearchChange: (String) -> Unit,
+    onImportCard: (me.rerere.rikkahub.data.tavern.TavernCard) -> Unit,
+    onImportCardFile: () -> Unit,
+    onImportWorldBook: () -> Unit,
+    onDeleteLorebook: (kotlin.uuid.Uuid) -> Unit,
+) {
+    val filtered = remember(cards, search) {
+        if (search.isBlank()) cards else cards.filter { card ->
+            card.name.contains(search, ignoreCase = true) ||
+                card.description.contains(search, ignoreCase = true) ||
+                card.tags.any { it.contains(search, ignoreCase = true) }
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item(key = "import-actions") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onImportCardFile, enabled = !importing) {
+                        Text("导入角色卡 (PNG/JSON)")
+                    }
+                    OutlinedButton(onClick = onImportWorldBook, enabled = !importing) {
+                        Text("导入世界书")
+                    }
+                }
+                Text(
+                    "角色卡会注册为本地助手（可在助手页编辑），PNG 卡自动提取内嵌数据并用作聊天背景；" +
+                        "带世界书的卡片同步注册 Lorebook。世界书导入后在 助手详情 → 提示词注入 中关联启用。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        if (lorebooks.isNotEmpty()) {
+            item(key = "lorebooks-header") {
+                Text("已注册的世界书 (${lorebooks.size})", style = MaterialTheme.typography.titleMedium)
+            }
+            items(lorebooks, key = { "lb-${it.id}" }) { book ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(book.name.ifEmpty { "未命名世界书" }, style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "${book.entries.size} 条目",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        TextButton(onClick = { onDeleteLorebook(book.id) }) {
+                            Text("删除", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            }
+        }
+
+        item(key = "featured-header") {
+            Text("精选角色卡 (${filtered.size})", style = MaterialTheme.typography.titleMedium)
+        }
+
+        items(filtered, key = { "card-${it.name}" }) { card ->
+            val importKey = PluginMarketVM.importedKeyOf(card)
+            val imported = importKey in importedKeys
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        card.emoji,
+                        modifier = Modifier.size(44.dp),
+                        style = MaterialTheme.typography.headlineMedium,
+                    )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                card.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Button(
+                                onClick = { onImportCard(card) },
+                                enabled = !imported && !importing,
+                            ) {
+                                Text(if (imported) "已导入" else "添加为助手")
+                            }
+                        }
+                        if (card.tags.isNotEmpty()) {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                items(card.tags, key = { "$it-${card.name}" }) { tag ->
+                                    AssistChip(onClick = {}, label = { Text(tag) })
+                                }
+                            }
+                        }
+                        Text(
+                            card.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (card.characterBookEntries.isNotEmpty()) {
+                            Text(
+                                "含 ${card.characterBookEntries.size} 条世界书条目，导入时一并注册",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        item(key = "footer-hint") {
+            Text(
+                "想用社区的海量角色卡？从酒馆社区下载 PNG/JSON 后点上方「导入角色卡」即可，格式与 SillyTavern 兼容（V1/V2/V3）。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }

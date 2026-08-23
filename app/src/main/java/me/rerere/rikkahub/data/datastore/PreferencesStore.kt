@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import io.pebbletemplates.pebble.PebbleEngine
 import kotlinx.coroutines.Dispatchers
@@ -206,6 +207,7 @@ class SettingsStore(
         val ENABLED_PLUGINS = stringPreferencesKey("enabled_plugins")
         val PLUGIN_MARKET_REPO = stringPreferencesKey("plugin_market_repo")
         val GITHUB_TOKEN = stringPreferencesKey("github_token")
+        val TAVERN_IMPORTED_KEYS = stringSetPreferencesKey("tavern_imported_keys")
         val BUILTIN_MAKER_SKILL_CLEANUP = booleanPreferencesKey("builtin_maker_skill_cleanup")
     }
 
@@ -342,6 +344,7 @@ class SettingsStore(
                     ?.takeIf { it != Settings.LEGACY_BROKEN_MARKET_REPO }
                     ?: Settings.DEFAULT_PLUGIN_MARKET_REPO,
                 githubToken = preferences[GITHUB_TOKEN] ?: "",
+                tavernImportedKeys = preferences[TAVERN_IMPORTED_KEYS] ?: emptySet(),
                 builtinMakerSkillCleanupDone = preferences[BUILTIN_MAKER_SKILL_CLEANUP] ?: false,
             )
         }
@@ -557,6 +560,7 @@ class SettingsStore(
             preferences[ENABLED_PLUGINS] = JsonInstant.encodeToString(settings.enabledPlugins)
             preferences[PLUGIN_MARKET_REPO] = settings.pluginMarketRepo
             preferences[GITHUB_TOKEN] = settings.githubToken
+            preferences[TAVERN_IMPORTED_KEYS] = settings.tavernImportedKeys
             preferences[BUILTIN_MAKER_SKILL_CLEANUP] = settings.builtinMakerSkillCleanupDone
         }
     }
@@ -753,6 +757,8 @@ data class Settings(
     val builtinMakerSkillCleanupDone: Boolean = false,
     // GitHub 访问令牌（PAT），用于上传插件到自己的仓库
     val githubToken: String = "",
+    // 酒馆角色卡导入记录（已注册为本地助手的卡片标识 name@来源，避免重复导入）
+    val tavernImportedKeys: Set<String> = emptySet(),
     // 后台保活常驻通知：进应用即在消息栏常驻显示"正在运行中"
     val keepAliveEnabled: Boolean = true,
     // 悬浮球：系统级悬浮窗，可拖动、半隐藏，点击回到软件
