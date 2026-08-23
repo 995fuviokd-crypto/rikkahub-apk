@@ -24,6 +24,7 @@ import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.ProviderHttpClient
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.ImageGenerationItem
@@ -38,7 +39,6 @@ import me.rerere.common.http.await
 import me.rerere.common.http.getByKey
 import okhttp3.MultipartBody
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -49,7 +49,7 @@ import kotlin.io.encoding.ExperimentalEncodingApi
 private const val TAG = "OpenAIProvider"
 
 class OpenAIProvider(
-    private val client: OkHttpClient,
+    private val client: ProviderHttpClient,
     context: Context? = null
 ) : Provider<ProviderSetting.OpenAI> {
     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
@@ -67,7 +67,7 @@ class OpenAIProvider(
                 .get()
                 .build()
 
-            val response = client.newCall(request).await()
+            val response = client.clientFor(providerSetting.proxy).newCall(request).await()
             if (!response.isSuccessful) {
                 error("Failed to get models: ${response.code} ${response.body?.string()}")
             }
@@ -99,7 +99,7 @@ class OpenAIProvider(
             .addHeader("Authorization", "Bearer $key")
             .get()
             .build()
-        val response = client.newCall(request).await()
+        val response = client.clientFor(providerSetting.proxy).newCall(request).await()
         if (!response.isSuccessful) {
             error("Failed to get balance: ${response.code} ${response.body?.string()}")
         }
@@ -192,7 +192,7 @@ class OpenAIProvider(
             .post(requestBody.toRequestBody("application/json".toMediaType()))
             .build()
 
-        val response = client.newCall(request).await()
+        val response = client.clientFor(providerSetting.proxy).newCall(request).await()
         if (!response.isSuccessful) {
             error("Failed to generate embedding: ${response.code} ${response.body?.string()}")
         }
@@ -252,7 +252,7 @@ class OpenAIProvider(
             .build()
 
         val items = withContext(Dispatchers.IO) {
-            val response = client.newCall(request).await()
+            val response = client.clientFor(providerSetting.proxy).newCall(request).await()
             if (!response.isSuccessful) {
                 error("Failed to generate image: ${response.code} ${response.body?.string()}")
             }
@@ -316,7 +316,7 @@ class OpenAIProvider(
             .build()
 
         val items = withContext(Dispatchers.IO) {
-            val response = client.newCall(request).await()
+            val response = client.clientFor(providerSetting.proxy).newCall(request).await()
             if (!response.isSuccessful) {
                 error("Failed to edit image: ${response.code} ${response.body?.string()}")
             }
@@ -354,7 +354,7 @@ class OpenAIProvider(
             .get()
             .build()
 
-        val response = client.newCall(request).await()
+        val response = client.clientFor(null).newCall(request).await()
         if (!response.isSuccessful) {
             error("Failed to download generated image: ${response.code} ${response.body.string()}")
         }

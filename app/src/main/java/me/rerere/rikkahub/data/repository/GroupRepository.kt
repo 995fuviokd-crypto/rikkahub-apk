@@ -74,10 +74,6 @@ class GroupRepository(
             mode = group.mode.name,
             membersJson = JsonInstant.encodeToString(group.members),
             orchestratorId = group.orchestratorId,
-            debateRounds = group.debateRounds,
-            reasoningLevel = group.reasoningLevel.name,
-            enableTools = group.enableTools,
-            workspaceId = group.workspaceId,
             createdAt = if (group.createdAt > 0) group.createdAt else now,
             updatedAt = now,
         )
@@ -87,19 +83,15 @@ class GroupRepository(
 
     suspend fun create(
         name: String,
-        mode: GroupMode,
         members: List<GroupMember>,
         orchestratorId: String? = null,
-        debateRounds: Int = 3,
     ): Group {
         return save(
             Group(
                 id = Uuid.random().toString(),
                 name = name,
-                mode = mode,
                 members = members,
                 orchestratorId = orchestratorId,
-                debateRounds = debateRounds,
             )
         )
     }
@@ -172,14 +164,9 @@ private fun GroupEntity.toGroup(): Group {
     return Group(
         id = id,
         name = name,
-        mode = runCatching { GroupMode.valueOf(mode) }.getOrDefault(GroupMode.DEBATE),
+        mode = runCatching { GroupMode.valueOf(mode) }.getOrDefault(GroupMode.ORCHESTRATOR_WORKER),
         members = members,
         orchestratorId = orchestratorId,
-        debateRounds = debateRounds,
-        reasoningLevel = runCatching { me.rerere.ai.core.ReasoningLevel.valueOf(reasoningLevel) }
-            .getOrDefault(me.rerere.ai.core.ReasoningLevel.AUTO),
-        enableTools = enableTools,
-        workspaceId = workspaceId,
         createdAt = createdAt,
         updatedAt = updatedAt,
     )

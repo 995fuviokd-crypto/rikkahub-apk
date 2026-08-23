@@ -21,7 +21,6 @@ import me.rerere.rikkahub.data.db.entity.GroupRunEntity
 import me.rerere.rikkahub.data.model.Group
 import me.rerere.rikkahub.data.model.GroupMember
 import me.rerere.rikkahub.data.model.GroupMessage
-import me.rerere.rikkahub.data.model.GroupMode
 import me.rerere.rikkahub.data.model.MessageKind
 import me.rerere.rikkahub.data.model.RunStatus
 import me.rerere.rikkahub.data.repository.GroupRepository
@@ -114,8 +113,14 @@ private class FakeCaller : GroupMemberCaller {
         member: GroupMember,
         prompt: String,
         onProgress: suspend (String) -> Unit,
-    ): me.rerere.rikkahub.data.ai.group.MemberCallResult =
-        me.rerere.rikkahub.data.ai.group.MemberCallResult(text = "${member.role} 的回复")
+    ): me.rerere.rikkahub.data.ai.group.MemberCallResult {
+        val text = when {
+            prompt.contains("JSON 数组") -> """[{"id":"t1","goal":"调研","memberId":"${group.orchestrator?.let { "m1" } ?: "m1"}"}]"""
+            prompt.contains("汇总") -> "总结完成"
+            else -> "${member.role} 的回复"
+        }
+        return me.rerere.rikkahub.data.ai.group.MemberCallResult(text = text)
+    }
 
     override suspend fun modelName(member: GroupMember): String = "model-${member.role}"
 }
@@ -143,9 +148,11 @@ class GroupDetailVMTest {
                 Group(
                     id = "g1",
                     name = "测试群组",
-                    mode = GroupMode.DEBATE,
-                    members = listOf(GroupMember(id = "m1", modelId = Uuid.random(), role = "A")),
-                    debateRounds = 1,
+                    members = listOf(
+                        GroupMember(id = "o", modelId = Uuid.random(), role = "主编"),
+                        GroupMember(id = "m1", modelId = Uuid.random(), role = "A"),
+                    ),
+                    orchestratorId = "o",
                 )
             )
             val runner = GroupRunner(FakeCaller(), repository)
@@ -160,7 +167,7 @@ class GroupDetailVMTest {
 
             assertNotNull(vm.group.value)
 
-            vm.launchRun("帮我讨论一个方案")
+            vm.launchRun("帮我调研一个方案")
             advanceUntilIdle()
 
             val runs = vm.runs.value
@@ -173,7 +180,6 @@ class GroupDetailVMTest {
             val latest = collected.last()
             assertTrue(latest.isNotEmpty())
             assertTrue(latest.any { it.kind == MessageKind.SYSTEM })
-            assertTrue(latest.any { it.kind == MessageKind.REPLY })
             assertTrue(latest.all { it.runId == runs.first().id })
 
             groupJob.cancel()
@@ -189,7 +195,6 @@ class GroupDetailVMTest {
                 Group(
                     id = "g1",
                     name = "测试群组",
-                    mode = GroupMode.PIPELINE,
                     members = listOf(GroupMember(id = "m1", modelId = Uuid.random(), role = "A")),
                 )
             )
@@ -249,9 +254,7 @@ class GroupDetailVMTest {
                 Group(
                     id = "g1",
                     name = "测试群组",
-                    mode = GroupMode.DEBATE,
                     members = listOf(GroupMember(id = "m1", modelId = Uuid.random(), role = "A")),
-                    debateRounds = 1,
                 )
             )
             repository.upsertRun(
@@ -286,9 +289,7 @@ class GroupDetailVMTest {
                 Group(
                     id = "g1",
                     name = "测试群组",
-                    mode = GroupMode.DEBATE,
                     members = listOf(GroupMember(id = "m1", modelId = Uuid.random(), role = "A")),
-                    debateRounds = 1,
                 )
             )
 

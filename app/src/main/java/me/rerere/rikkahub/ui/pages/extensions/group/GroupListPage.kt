@@ -44,7 +44,6 @@ import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.UserGroup
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Group
-import me.rerere.rikkahub.data.model.GroupMode
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.context.LocalNavController
@@ -181,7 +180,7 @@ private fun GroupCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = "${group.members.size} 个成员 · ${group.mode.label()}",
+                    text = group.members.size.toString() + " 个成员",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -221,10 +220,4 @@ private fun GroupCard(
             }
         }
     }
-}
-
-fun GroupMode.label(): String = when (this) {
-    GroupMode.ORCHESTRATOR_WORKER -> "编排器-工作者"
-    GroupMode.PIPELINE -> "流水线"
-    GroupMode.DEBATE -> "自由讨论"
 }

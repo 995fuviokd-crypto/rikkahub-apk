@@ -16,6 +16,7 @@ import me.rerere.rikkahub.data.db.dao.MemoryDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
 import me.rerere.rikkahub.data.db.dao.WorkspaceDAO
 import me.rerere.rikkahub.data.db.dao.WorkflowDAO
+import me.rerere.rikkahub.data.db.dao.WorkflowExecutionRecordDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.FavoriteEntity
 import me.rerere.rikkahub.data.db.entity.FolderEntity
@@ -28,6 +29,7 @@ import me.rerere.rikkahub.data.db.entity.MemoryEntity
 import me.rerere.rikkahub.data.db.entity.MemoryJournalEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
 import me.rerere.rikkahub.data.db.entity.WorkflowEntity
+import me.rerere.rikkahub.data.db.entity.WorkflowExecutionRecordEntity
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.db.migrations.Migration_16_17
 import me.rerere.rikkahub.data.db.migrations.Migration_22_23
@@ -46,11 +48,12 @@ import me.rerere.rikkahub.utils.JsonInstant
         WorkspaceEntity::class,
         FolderEntity::class,
         WorkflowEntity::class,
+        WorkflowExecutionRecordEntity::class,
         GroupEntity::class,
         GroupRunEntity::class,
         GroupMessageEntity::class,
     ],
-    version = 33,
+    version = 35,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -91,6 +94,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun folderDao(): FolderDAO
 
     abstract fun workflowDao(): WorkflowDAO
+
+    abstract fun workflowExecutionRecordDao(): WorkflowExecutionRecordDAO
 
     abstract fun groupDao(): GroupDAO
 }

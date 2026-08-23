@@ -68,9 +68,9 @@ import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Menu01
 import me.rerere.hugeicons.stroke.Puzzle
 import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.rikkahub.data.api.OperitListItem
-import me.rerere.rikkahub.data.api.OperitMarketDataSource
-import me.rerere.rikkahub.data.api.operitPluginIdFor
+import me.rerere.rikkahub.data.api.CommunityListItem
+import me.rerere.rikkahub.data.api.CommunityMarketDataSource
+import me.rerere.rikkahub.data.api.communityPluginIdFor
 import me.rerere.rikkahub.data.plugin.InstalledPlugin
 import me.rerere.rikkahub.data.plugin.PluginCategories
 import me.rerere.rikkahub.data.plugin.PluginManager
@@ -84,10 +84,10 @@ import org.koin.compose.koinInject
 
 private const val MARKET_SOURCE_ALL = "全部"
 private const val MARKET_SOURCE_OFFICIAL = "官方市场"
-private const val MARKET_SOURCE_OPERIT = "Operit 社区"
+private const val MARKET_SOURCE_COMMUNITY = "社区市场"
 
-/** Operit 资源类型映射到市场分类（script/package 视为插件） */
-private fun operitCategoryFor(type: String): String = when (type) {
+/** 社区市场资源类型映射到市场分类（script/package 视为插件） */
+private fun communityCategoryFor(type: String): String = when (type) {
     "skill" -> PluginCategories.TYPE_SKILL
     "mcp" -> PluginCategories.TYPE_MCP
     "script", "package" -> PluginCategories.TYPE_PLUGIN
@@ -106,10 +106,10 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
     val notice by vm.notice.collectAsStateWithLifecycle()
     val githubToken by vm.githubToken.collectAsStateWithLifecycle()
     val marketRepo by vm.marketRepo.collectAsStateWithLifecycle()
-    val operitEntries by vm.operitEntries.collectAsStateWithLifecycle()
-    val operitLoading by vm.operitLoading.collectAsStateWithLifecycle()
-    val operitError by vm.operitError.collectAsStateWithLifecycle()
-    val operitInstallingId by vm.operitInstallingId.collectAsStateWithLifecycle()
+    val communityEntries by vm.communityEntries.collectAsStateWithLifecycle()
+    val communityLoading by vm.communityLoading.collectAsStateWithLifecycle()
+    val communityError by vm.communityError.collectAsStateWithLifecycle()
+    val communityInstallingId by vm.communityInstallingId.collectAsStateWithLifecycle()
 
     var tab by remember { mutableIntStateOf(0) }
     var search by remember { mutableStateOf("") }
@@ -177,7 +177,7 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
         when (tab) {
             1 -> {
                 vm.loadMarket()
-                vm.loadOperit()
+                vm.loadCommunity()
             }
         }
     }
@@ -265,26 +265,26 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
 
                 1 -> MarketTab(
                     entries = marketEntries,
-                    operitEntries = operitEntries,
+                    communityEntries = communityEntries,
                     installed = installed,
                     loading = marketLoading,
                     error = marketError,
-                    operitLoading = operitLoading,
-                    operitError = operitError,
+                    communityLoading = communityLoading,
+                    communityError = communityError,
                     downloadingId = downloadingId,
-                    operitInstallingId = operitInstallingId,
+                    communityInstallingId = communityInstallingId,
                     search = search,
                     onSearchChange = { search = it },
                     category = category,
                     onCategoryChange = { category = it },
                     onInstall = vm::install,
-                    onInstallOperit = vm::installOperit,
+                    onInstallCommunity = vm::installCommunity,
                     onSelect = { selectedEntry = it },
                     onRetryMarket = vm::loadMarket,
-                    onRetryOperit = vm::loadOperit,
+                    onRetryCommunity = vm::loadCommunity,
                     onRefresh = {
                         vm.loadMarket()
-                        vm.loadOperit()
+                        vm.loadCommunity()
                     },
                 )
             }
@@ -520,8 +520,8 @@ private fun InstalledPluginCard(
 }
 
 @Composable
-private fun OperitEntryCard(
-    entry: OperitListItem,
+private fun CommunityEntryCard(
+    entry: CommunityListItem,
     installing: Boolean,
     installed: Boolean,
     onInstall: () -> Unit,
@@ -536,11 +536,11 @@ private fun OperitEntryCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 AssistChip(
                     onClick = {},
-                    label = { Text(OperitMarketDataSource.typeLabel(entry.type)) },
+                    label = { Text(CommunityMarketDataSource.typeLabel(entry.type)) },
                 )
                 AssistChip(
                     onClick = {},
-                    label = { Text("Operit", style = MaterialTheme.typography.labelSmall) },
+                    label = { Text("社区", style = MaterialTheme.typography.labelSmall) },
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
@@ -593,28 +593,28 @@ private fun OperitEntryCard(
 @Composable
 private fun MarketTab(
     entries: List<PluginMarketEntry>,
-    operitEntries: List<OperitListItem>,
+    communityEntries: List<CommunityListItem>,
     installed: List<InstalledPlugin>,
     loading: Boolean,
     error: String?,
-    operitLoading: Boolean,
-    operitError: String?,
+    communityLoading: Boolean,
+    communityError: String?,
     downloadingId: String?,
-    operitInstallingId: String?,
+    communityInstallingId: String?,
     search: String,
     onSearchChange: (String) -> Unit,
     category: String,
     onCategoryChange: (String) -> Unit,
     onInstall: (PluginMarketEntry) -> Unit,
-    onInstallOperit: (OperitListItem) -> Unit,
+    onInstallCommunity: (CommunityListItem) -> Unit,
     onSelect: (PluginMarketEntry) -> Unit,
     onRetryMarket: () -> Unit,
-    onRetryOperit: () -> Unit,
+    onRetryCommunity: () -> Unit,
     onRefresh: () -> Unit,
 ) {
     val installedIds = remember(installed) { installed.map { it.id }.toSet() }
     var source by remember { mutableStateOf(MARKET_SOURCE_ALL) }
-    val sourceOptions = listOf(MARKET_SOURCE_ALL, MARKET_SOURCE_OFFICIAL, MARKET_SOURCE_OPERIT)
+    val sourceOptions = listOf(MARKET_SOURCE_ALL, MARKET_SOURCE_OFFICIAL, MARKET_SOURCE_COMMUNITY)
     val categories = PluginCategories.marketTypes
 
     val filteredOfficial = entries.filter { entry ->
@@ -625,17 +625,17 @@ private fun MarketTab(
         val matchCategory = category == PluginCategories.ALL || entry.type == category
         matchSearch && matchCategory
     }
-    val filteredOperit = operitEntries.filter { entry ->
+    val filteredCommunity = communityEntries.filter { entry ->
         val matchSearch = search.isBlank() ||
             entry.title.contains(search, ignoreCase = true) ||
             entry.description.contains(search, ignoreCase = true)
-        val matchCategory = category == PluginCategories.ALL || operitCategoryFor(entry.type) == category
+        val matchCategory = category == PluginCategories.ALL || communityCategoryFor(entry.type) == category
         matchSearch && matchCategory
     }
-    val showOfficial = source != MARKET_SOURCE_OPERIT
-    val showOperit = source != MARKET_SOURCE_OFFICIAL
+    val showOfficial = source != MARKET_SOURCE_COMMUNITY
+    val showCommunity = source != MARKET_SOURCE_OFFICIAL
     val listEmpty =
-        (showOfficial && filteredOfficial.isEmpty()) && (showOperit && filteredOperit.isEmpty())
+        (showOfficial && filteredOfficial.isEmpty()) && (showCommunity && filteredCommunity.isEmpty())
 
     Column(modifier = Modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -672,12 +672,12 @@ private fun MarketTab(
             }
         }
         PullToRefreshBox(
-            isRefreshing = loading || operitLoading,
+            isRefreshing = loading || communityLoading,
             onRefresh = onRefresh,
             modifier = Modifier.fillMaxSize(),
         ) {
             when {
-                loading && operitLoading && entries.isEmpty() && operitEntries.isEmpty() -> Box(
+                loading && communityLoading && entries.isEmpty() && communityEntries.isEmpty() -> Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(48.dp),
@@ -686,7 +686,7 @@ private fun MarketTab(
                     CircularProgressIndicator()
                 }
 
-                error != null && operitError != null && entries.isEmpty() && operitEntries.isEmpty() -> Column(
+                error != null && communityError != null && entries.isEmpty() && communityEntries.isEmpty() -> Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(48.dp),
@@ -731,23 +731,25 @@ private fun MarketTab(
                             TextButton(onClick = onRetryMarket) { Text("重试") }
                         }
                     }
-                    if (showOperit && filteredOperit.isNotEmpty()) {
-                        items(filteredOperit, key = { "operit-${it.id}" }) { entry ->
-                            OperitEntryCard(
+                    if (showCommunity && filteredCommunity.isNotEmpty()) {
+                        items(filteredCommunity, key = { "community-${it.id}" }) { entry ->
+                            CommunityEntryCard(
                                 entry = entry,
-                                installing = operitInstallingId == entry.id,
-                                installed = operitPluginIdFor(entry.id) in installedIds,
-                                onInstall = { onInstallOperit(entry) },
+                                installing = communityInstallingId == entry.id,
+                                installed = communityPluginIdFor(entry.id).let { pid ->
+                                    pid in installedIds || pid.replaceFirst("community-", "operit-") in installedIds
+                                },
+                                onInstall = { onInstallCommunity(entry) },
                             )
                         }
-                    } else if (showOperit && operitError != null) {
+                    } else if (showCommunity && communityError != null) {
                         item {
                             Text(
-                                "Operit 社区加载失败：$operitError",
+                                "社区市场加载失败：$communityError",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.error,
                             )
-                            TextButton(onClick = onRetryOperit) { Text("重试") }
+                            TextButton(onClick = onRetryCommunity) { Text("重试") }
                         }
                     }
                 }

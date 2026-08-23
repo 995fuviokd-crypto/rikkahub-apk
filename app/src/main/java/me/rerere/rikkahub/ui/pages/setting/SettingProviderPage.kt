@@ -8,10 +8,12 @@ import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Search01
-import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.ArrowUp01
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -33,6 +35,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
@@ -44,6 +47,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SheetValue
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -68,10 +72,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import io.github.g00fy2.quickie.QRResult
 import io.github.g00fy2.quickie.ScanQRCode
+import me.rerere.ai.provider.AgentMode
+import me.rerere.ai.provider.AgentPlatform
+import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.agentMode
+import me.rerere.ai.provider.withAgentMode
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.data.datastore.RECOMMENDED_PROVIDERS
+import me.rerere.rikkahub.ui.components.ai.AgentModePicker
+import me.rerere.rikkahub.ui.components.ai.ProviderBalanceText
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.Tag
@@ -79,8 +90,7 @@ import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.decodeProviderSetting
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
-import me.rerere.rikkahub.ui.hooks.useEditState
-import me.rerere.rikkahub.ui.pages.setting.components.ProviderConfigure
+import me.rerere.rikkahub.ui.pages.setting.components.ProviderLatencyTag
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.ImageUtils
 import me.rerere.rikkahub.utils.plus
@@ -95,6 +105,7 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
     val navController = LocalNavController.current
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var searchQuery by remember { mutableStateOf("") }
+    var selectedModelType by remember { mutableStateOf<ModelType?>(null) }
     val lazyListState = rememberLazyListState()
     val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
         val newProviders = settings.providers.toMutableList().apply {
@@ -103,13 +114,13 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
         vm.updateSettings(settings.copy(providers = newProviders))
     }
 
-    val filteredProviders = remember(settings.providers, searchQuery) {
-        if (searchQuery.isBlank()) {
-            settings.providers
-        } else {
-            settings.providers.filter { provider ->
-                provider.name.contains(searchQuery, ignoreCase = true)
-            }
+    val filteredProviders = remember(settings.providers, searchQuery, selectedModelType) {
+        settings.providers.filter { provider ->
+            val matchesQuery = searchQuery.isBlank() ||
+                provider.name.contains(searchQuery, ignoreCase = true) ||
+                provider.models.any { it.displayName.contains(searchQuery, ignoreCase = true) }
+            val matchesType = selectedModelType == null || provider.models.any { it.type == selectedModelType }
+            matchesQuery && matchesType
         }
     }
 
@@ -123,13 +134,6 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                     BackButton()
                 },
                 actions = {
-                    RecommendProviderButton { provider ->
-                        vm.updateSettings(
-                            settings.copy(
-                                providers = listOf(provider.copyProvider(Uuid.random())) + settings.providers
-                            )
-                        )
-                    }
                     ImportProviderButton {
                         vm.updateSettings(
                             settings.copy(
@@ -137,7 +141,7 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                             )
                         )
                     }
-                    AddButton {
+                    AddProviderButton {
                         vm.updateSettings(
                             settings.copy(
                                 providers = listOf(it) + settings.providers
@@ -157,7 +161,6 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                 .fillMaxSize()
                 .padding(top = innerPadding.calculateTopPadding())
         ) {
-            // Search bar
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
@@ -179,6 +182,30 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                 shape = CircleShape,
             )
 
+            FlowRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                val filterChips = listOf(
+                    null to "全部",
+                    ModelType.CHAT to "对话",
+                    ModelType.IMAGE to "图片",
+                    ModelType.VIDEO to "视频",
+                    ModelType.EMBEDDING to "嵌入",
+                )
+                filterChips.forEach { (type, label) ->
+                    FilterChip(
+                        selected = selectedModelType == type,
+                        onClick = {
+                            selectedModelType = type
+                        },
+                        label = { Text(label) },
+                    )
+                }
+            }
 
             LazyColumn(
                 modifier = Modifier
@@ -195,7 +222,7 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                         state = reorderableState,
                         key = provider.id
                     ) { isDragging ->
-                        ProviderItem(
+                        ProviderCard(
                             modifier = Modifier
                                 .scale(if (isDragging) 0.95f else 1f)
                                 .fillMaxWidth(),
@@ -222,105 +249,28 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                             },
                             onClick = {
                                 navController.navigate(Screen.SettingProviderDetail(providerId = provider.id.toString()))
-                            }
+                            },
+                            onToggleEnabled = {
+                                vm.updateSettings(
+                                    settings.copy(
+                                        providers = settings.providers.map {
+                                            if (it.id == provider.id) it.copyProvider(enabled = !it.enabled) else it
+                                        }
+                                    )
+                                )
+                            },
+                            onUpdateModel = { model ->
+                                vm.updateSettings(
+                                    settings.copy(
+                                        providers = settings.providers.map {
+                                            if (it.id == provider.id) it.editModel(model) else it
+                                        }
+                                    )
+                                )
+                            },
                         )
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RecommendProviderButton(
-    onAdd: (ProviderSetting) -> Unit
-) {
-    val toaster = LocalToaster.current
-    var showSheet by remember { mutableStateOf(false) }
-    val importSuccessMessage = stringResource(R.string.setting_provider_page_import_success)
-
-    IconButton(
-        onClick = { showSheet = true }
-    ) {
-        Icon(HugeIcons.Sparkles, contentDescription = stringResource(R.string.setting_provider_page_recommend))
-    }
-
-    if (showSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showSheet = false },
-            sheetState = rememberBottomSheetState(
-                initialValue = SheetValue.Hidden,
-                enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)
-            )
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .padding(bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = stringResource(R.string.setting_provider_page_recommend),
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.padding(bottom = 4.dp)
-                )
-                RECOMMENDED_PROVIDERS.forEach { provider ->
-                    RecommendProviderItem(
-                        provider = provider,
-                        onAdd = {
-                            onAdd(provider)
-                            toaster.show(
-                                importSuccessMessage,
-                                type = ToastType.Success
-                            )
-                        }
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RecommendProviderItem(
-    provider: ProviderSetting,
-    onAdd: () -> Unit
-) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = CustomColors.listItemColors.containerColor
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            AutoAIIcon(
-                name = provider.name,
-                modifier = Modifier.size(40.dp)
-            )
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    text = provider.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                ProvideTextStyle(MaterialTheme.typography.labelSmall) {
-                    CompositionLocalProvider(LocalContentColor provides LocalContentColor.current.copy(alpha = 0.7f)) {
-                        provider.description()
-                    }
-                }
-            }
-            IconButton(onClick = onAdd) {
-                Icon(HugeIcons.Add01, contentDescription = stringResource(R.string.setting_provider_page_add))
             }
         }
     }
@@ -377,7 +327,6 @@ private fun ImportProviderButton(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        // 主要操作：扫描二维码
                         Button(
                             onClick = {
                                 showImportDialog = false
@@ -406,7 +355,6 @@ private fun ImportProviderButton(
                             }
                         }
 
-                        // 次要操作：从相册选择
                         OutlinedButton(
                             onClick = {
                                 showImportDialog = false
@@ -532,71 +480,370 @@ private fun handleImageQRCode(
     }
 }
 
-
 @Composable
-private fun AddButton(onAdd: (ProviderSetting) -> Unit) {
-    val dialogState = useEditState<ProviderSetting> {
-        onAdd(it)
-    }
+private fun AddProviderButton(onAdd: (ProviderSetting) -> Unit) {
+    var showPicker by remember { mutableStateOf(false) }
 
     IconButton(
         onClick = {
-            dialogState.open(ProviderSetting.OpenAI())
+            showPicker = true
         }
     ) {
         Icon(HugeIcons.Add01, "Add")
     }
 
-    if (dialogState.isEditing) {
-        AlertDialog(
-            onDismissRequest = {
-                dialogState.dismiss()
-            },
-            title = {
-                Text(stringResource(R.string.setting_provider_page_add_provider))
-            },
-            text = {
-                dialogState.currentState?.let {
-                    ProviderConfigure(it) { newState ->
-                        dialogState.currentState = newState
+    if (showPicker) {
+        AddProviderSheet(
+            onDismiss = { showPicker = false },
+            onSelect = { setting ->
+                showPicker = false
+                onAdd(setting)
+            }
+        )
+    }
+}
+
+private val agentPlatformTemplates: List<AgentPlatformTemplate> = listOf(
+    AgentPlatformTemplate(
+        platform = me.rerere.ai.provider.AgentPlatform.GEMINI_CLI,
+        labelRes = R.string.setting_provider_page_platform_agent_gemini_cli,
+        descRes = R.string.setting_provider_page_platform_agent_gemini_cli_desc,
+        defaultModelId = "gemini-cli",
+    ),
+    AgentPlatformTemplate(
+        platform = me.rerere.ai.provider.AgentPlatform.CODEX,
+        labelRes = R.string.setting_provider_page_platform_agent_codex,
+        descRes = R.string.setting_provider_page_platform_agent_codex_desc,
+        defaultModelId = "codex",
+    ),
+    AgentPlatformTemplate(
+        platform = me.rerere.ai.provider.AgentPlatform.CLAUDE_CODE,
+        labelRes = R.string.setting_provider_page_platform_agent_claude_code,
+        descRes = R.string.setting_provider_page_platform_agent_claude_code_desc,
+        defaultModelId = "claude-code",
+    ),
+    AgentPlatformTemplate(
+        platform = me.rerere.ai.provider.AgentPlatform.ANTHROPIC_CLAUDE_CODE,
+        labelRes = R.string.setting_provider_page_platform_agent_anthropic_claude_code,
+        descRes = R.string.setting_provider_page_platform_agent_anthropic_claude_code_desc,
+        defaultModelId = "claude",
+    ),
+    AgentPlatformTemplate(
+        platform = me.rerere.ai.provider.AgentPlatform.OPENCODE,
+        labelRes = R.string.setting_provider_page_platform_agent_opencode,
+        descRes = R.string.setting_provider_page_platform_agent_opencode_desc,
+        defaultModelId = "opencode",
+    ),
+    AgentPlatformTemplate(
+        platform = me.rerere.ai.provider.AgentPlatform.DEEPSEEK_HARNESS,
+        labelRes = R.string.setting_provider_page_platform_agent_dsh,
+        descRes = R.string.setting_provider_page_platform_agent_dsh_desc,
+        defaultModelId = "dsh",
+    ),
+)
+
+private data class AgentPlatformTemplate(
+    val platform: me.rerere.ai.provider.AgentPlatform,
+    val labelRes: Int,
+    val descRes: Int,
+    val defaultModelId: String,
+)
+
+private data class ApiTemplate(
+    val label: String,
+    val desc: String,
+    val factory: () -> ProviderSetting,
+)
+
+private val apiTemplates: List<ApiTemplate> = listOf(
+    ApiTemplate(
+        label = "OpenAI 兼容",
+        desc = "OpenAI、DeepSeek、通义千问等 /v1 接口服务",
+        factory = {
+            ProviderSetting.OpenAI(
+                id = Uuid.random(),
+                name = "OpenAI 兼容",
+                baseUrl = "https://api.openai.com/v1",
+                enabled = true,
+            )
+        },
+    ),
+    ApiTemplate(
+        label = "Google Gemini",
+        desc = "Google Generative Language API",
+        factory = {
+            ProviderSetting.Google(
+                id = Uuid.random(),
+                name = "Google Gemini",
+                enabled = true,
+            )
+        },
+    ),
+    ApiTemplate(
+        label = "Anthropic Claude",
+        desc = "Anthropic Messages API",
+        factory = {
+            ProviderSetting.Claude(
+                id = Uuid.random(),
+                name = "Anthropic Claude",
+                enabled = true,
+            )
+        },
+    ),
+)
+
+@Composable
+private fun AddProviderSheet(
+    onDismiss: () -> Unit,
+    onSelect: (ProviderSetting) -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberBottomSheetState(
+            initialValue = SheetValue.Hidden,
+            enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            var searchQuery by remember { mutableStateOf("") }
+            var agentsExpanded by remember { mutableStateOf(true) }
+            var apiExpanded by remember { mutableStateOf(false) }
+            val isSearching = searchQuery.isNotBlank()
+
+            Text(
+                text = stringResource(R.string.setting_provider_page_add_provider),
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("搜索供应商或 Agent 模式") },
+                leadingIcon = {
+                    Icon(HugeIcons.Search01, contentDescription = null)
+                },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(HugeIcons.Cancel01, contentDescription = "Clear")
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = CircleShape,
+            )
+
+            // ---- Agent 模式分组 ----
+            val filteredAgents = if (isSearching) {
+                agentPlatformTemplates.filter { template ->
+                    val label = stringResource(template.labelRes)
+                    val desc = stringResource(template.descRes)
+                    label.contains(searchQuery, ignoreCase = true) ||
+                        desc.contains(searchQuery, ignoreCase = true)
+                }
+            } else {
+                agentPlatformTemplates
+            }
+            if (filteredAgents.isNotEmpty() && (isSearching || agentsExpanded)) {
+                GroupHeader(
+                    title = "Agent 模式",
+                    subtitle = "${agentPlatformTemplates.size} 种编码智能体，安装后即可绑定",
+                    expanded = agentsExpanded,
+                    onToggle = { agentsExpanded = !agentsExpanded },
+                )
+                if (agentsExpanded || isSearching) {
+                    filteredAgents.forEach { template ->
+                        val label = stringResource(template.labelRes)
+                        ProviderTemplateItem(
+                            name = label,
+                            desc = stringResource(template.descRes),
+                            tag = "Agent",
+                            onClick = {
+                                onSelect(
+                                    ProviderSetting.OpenAI(
+                                        id = Uuid.random(),
+                                        name = label,
+                                        baseUrl = "",
+                                        apiKey = "",
+                                        enabled = true,
+                                        models = listOf(
+                                            Model(
+                                                modelId = template.defaultModelId,
+                                                displayName = label,
+                                                abilities = listOf(
+                                                    me.rerere.ai.provider.ModelAbility.TOOL,
+                                                    me.rerere.ai.provider.ModelAbility.REASONING,
+                                                ),
+                                                platformAgent = template.platform,
+                                            )
+                                        ),
+                                    )
+                                )
+                            }
+                        )
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        dialogState.confirm()
-                    }
-                ) {
-                    Text(stringResource(R.string.setting_provider_page_add))
+            }
+
+            // ---- 标准 API 分组 ----
+            val filteredApis = if (isSearching) {
+                apiTemplates.filter { template ->
+                    template.label.contains(searchQuery, ignoreCase = true) ||
+                        template.desc.contains(searchQuery, ignoreCase = true)
                 }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        dialogState.dismiss()
+            } else {
+                apiTemplates
+            }
+            if (filteredApis.isNotEmpty() && (isSearching || apiExpanded)) {
+                GroupHeader(
+                    title = "标准 API",
+                    subtitle = "通过 REST 接口接入的通用供应商",
+                    expanded = apiExpanded,
+                    onToggle = { apiExpanded = !apiExpanded },
+                )
+                if (apiExpanded || isSearching) {
+                    filteredApis.forEach { template ->
+                        ProviderTemplateItem(
+                            name = template.label,
+                            desc = template.desc,
+                            tag = "API",
+                            onClick = {
+                                onSelect(template.factory())
+                            }
+                        )
                     }
-                ) {
-                    Text(stringResource(R.string.cancel))
                 }
-            },
+            }
+
+            if (filteredAgents.isEmpty() && filteredApis.isEmpty()) {
+                Text(
+                    text = "未找到匹配项",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 16.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GroupHeader(
+    title: String,
+    subtitle: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Icon(
+            imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
         )
     }
 }
 
 @Composable
-private fun ProviderItem(
+private fun ProviderTemplateItem(
+    name: String,
+    desc: String,
+    tag: String,
+    onClick: () -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = CustomColors.listItemColors.containerColor
+        ),
+        onClick = onClick
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AutoAIIcon(
+                name = name,
+                modifier = Modifier.size(40.dp)
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = name,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Tag(type = if (tag == "Agent") TagType.INFO else TagType.DEFAULT) {
+                        Text(tag)
+                    }
+                }
+                ProvideTextStyle(MaterialTheme.typography.labelSmall) {
+                    CompositionLocalProvider(LocalContentColor provides LocalContentColor.current.copy(alpha = 0.7f)) {
+                        Text(
+                            text = desc,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+            Icon(
+                imageVector = HugeIcons.Add01,
+                contentDescription = stringResource(R.string.setting_provider_page_add)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProviderCard(
     provider: ProviderSetting,
     modifier: Modifier = Modifier,
     dragHandle: @Composable () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onToggleEnabled: () -> Unit,
+    onUpdateModel: (Model) -> Unit,
 ) {
+    val agentModel = provider.models.firstOrNull { it.platformAgent != null }
+
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
-            containerColor = if (provider.enabled) {
-                CustomColors.listItemColors.containerColor
-            } else MaterialTheme.colorScheme.errorContainer,
+            containerColor = CustomColors.listItemColors.containerColor
         ),
         onClick = {
             onClick()
@@ -609,18 +856,33 @@ private fun ProviderItem(
         ) {
             AutoAIIcon(
                 name = provider.name,
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.size(48.dp)
             )
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Text(
-                    text = provider.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = provider.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                        color = if (provider.enabled) {
+                            LocalContentColor.current
+                        } else {
+                            LocalContentColor.current.copy(alpha = 0.5f)
+                        }
+                    )
+                    Switch(
+                        checked = provider.enabled,
+                        onCheckedChange = { onToggleEnabled() },
+                        modifier = Modifier.scale(0.8f),
+                    )
+                }
                 ProvideTextStyle(MaterialTheme.typography.labelSmall) {
                     CompositionLocalProvider(LocalContentColor provides LocalContentColor.current.copy(alpha = 0.7f)) {
                         provider.shortDescription()
@@ -641,10 +903,13 @@ private fun ProviderItem(
                             )
                         )
                     }
-                    if (provider.name == "AiHubMix") {
-                        Tag(type = TagType.INFO) {
-                            Text("10% 优惠")
-                        }
+                    ProviderLatencyTag(providerSetting = provider)
+                    ProviderBalanceText(providerSetting = provider)
+                    if (agentModel != null) {
+                        AgentBindingTag(
+                            model = agentModel,
+                            onUpdateModel = onUpdateModel,
+                        )
                     }
                 }
             }
@@ -652,3 +917,58 @@ private fun ProviderItem(
         }
     }
 }
+
+@Composable
+private fun AgentBindingTag(
+    model: Model,
+    onUpdateModel: (Model) -> Unit,
+) {
+    val platform = model.platformAgent ?: return
+    var showModePicker by remember { mutableStateOf(false) }
+
+    if (platform.supportedModes.isNotEmpty()) {
+        val modeLabel = model.agentMode()?.label() ?: "默认"
+        Tag(
+            type = TagType.INFO,
+            onClick = { showModePicker = true },
+        ) {
+            Text("${platform.label()} · $modeLabel")
+        }
+        if (showModePicker) {
+            AgentModePicker(
+                currentMode = model.agentMode(),
+                onDismissRequest = { showModePicker = false },
+                onSelect = { mode ->
+                    showModePicker = false
+                    onUpdateModel(model.withAgentMode(mode))
+                },
+            )
+        }
+    } else {
+        Tag(type = TagType.INFO) {
+            Text(platform.label())
+        }
+    }
+}
+
+@Composable
+private fun AgentPlatform.label(): String = stringResource(
+    when (this) {
+        AgentPlatform.CODEX -> R.string.setting_provider_page_platform_agent_codex
+        AgentPlatform.CLAUDE_CODE -> R.string.setting_provider_page_platform_agent_claude_code
+        AgentPlatform.GEMINI_CLI -> R.string.setting_provider_page_platform_agent_gemini_cli
+        AgentPlatform.ANTHROPIC_CLAUDE_CODE -> R.string.setting_provider_page_platform_agent_anthropic_claude_code
+        AgentPlatform.OPENCODE -> R.string.setting_provider_page_platform_agent_opencode
+        AgentPlatform.DEEPSEEK_HARNESS -> R.string.setting_provider_page_platform_agent_dsh
+    }
+)
+
+@Composable
+private fun AgentMode.label(): String = stringResource(
+    when (this) {
+        AgentMode.STANDARD -> R.string.agent_mode_standard
+        AgentMode.CODE -> R.string.agent_mode_code
+        AgentMode.MINIMAL -> R.string.agent_mode_minimal
+        AgentMode.CORDIS -> R.string.agent_mode_cordis
+    }
+)

@@ -28,7 +28,10 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.DEFAULT_IMAGE_GENERATION_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.DEFAULT_MEMORY_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SELF_HOSTED_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
@@ -95,6 +98,7 @@ class SettingsStore(
         val IMAGE_GENERATION_MODEL = stringPreferencesKey("image_generation_model")
         val VIDEO_GENERATION_MODEL = stringPreferencesKey("video_generation_model")
         val TITLE_PROMPT = stringPreferencesKey("title_prompt")
+        val GLOBAL_PROMPT = stringPreferencesKey("global_prompt")
         val TRANSLATION_PROMPT = stringPreferencesKey("translation_prompt")
         val TRANSLATE_THINKING_BUDGET = intPreferencesKey("translate_thinking_budget")
         val SUGGESTION_PROMPT = stringPreferencesKey("suggestion_prompt")
@@ -105,6 +109,9 @@ class SettingsStore(
         val COMPRESS_PROMPT = stringPreferencesKey("compress_prompt")
         val MEMORY_MODEL = stringPreferencesKey("memory_model")
         val SELF_HOSTED_MODEL = stringPreferencesKey("self_hosted_model")
+        val IMAGE_GENERATION_PROMPT = stringPreferencesKey("image_generation_prompt")
+        val MEMORY_PROMPT = stringPreferencesKey("memory_prompt")
+        val SELF_HOSTED_PROMPT = stringPreferencesKey("self_hosted_prompt")
         val AUTO_COMPRESS_ENABLED = booleanPreferencesKey("auto_compress_enabled")
         val AUTO_COMPRESS_THRESHOLD_TOKENS = intPreferencesKey("auto_compress_threshold_tokens")
         val AUTO_COMPRESS_KEEP_RECENT = intPreferencesKey("auto_compress_keep_recent")
@@ -167,6 +174,9 @@ class SettingsStore(
         val WEB_SERVER_ACCESS_PASSWORD = stringPreferencesKey("web_server_access_password")
         val WEB_SERVER_LOCALHOST_ONLY = booleanPreferencesKey("web_server_localhost_only")
 
+        // 网络代理
+        val GLOBAL_PROXY = stringPreferencesKey("global_proxy")
+
         // 提示词注入
         val MODE_INJECTIONS = stringPreferencesKey("mode_injections")
         val LOREBOOKS = stringPreferencesKey("lorebooks")
@@ -189,6 +199,8 @@ class SettingsStore(
         val KEEP_ALIVE_ENABLED = booleanPreferencesKey("keep_alive_enabled")
         // 托管工具自动审批：开启后工作区/系统等需审批的工具调用自动通过（ask_user 除外）
         val AUTO_APPROVE_TOOLS = booleanPreferencesKey("auto_approve_tools")
+        // 自主执行引导：开启后生成系统提示注入"连续调用工具直到任务完成"指令，避免中途停下汇报/询问
+        val AUTONOMOUS_EXECUTION_ENABLED = booleanPreferencesKey("autonomous_execution_enabled")
         // 插件市场：已启用插件 id 集合（JSON）、市场索引仓库、GitHub 访问令牌
         val ENABLED_PLUGINS = stringPreferencesKey("enabled_plugins")
         val PLUGIN_MARKET_REPO = stringPreferencesKey("plugin_market_repo")
@@ -222,6 +234,7 @@ class SettingsStore(
                 imageGenerationModelId = preferences[IMAGE_GENERATION_MODEL]?.let { Uuid.parse(it) } ?: Uuid.random(),
                 videoGenerationModelId = preferences[VIDEO_GENERATION_MODEL]?.let { Uuid.parse(it) } ?: Uuid.random(),
                 titlePrompt = preferences[TITLE_PROMPT] ?: DEFAULT_TITLE_PROMPT,
+                globalPrompt = preferences[GLOBAL_PROMPT] ?: "",
                 translatePrompt = preferences[TRANSLATION_PROMPT] ?: DEFAULT_TRANSLATION_PROMPT,
                 translateThinkingBudget = preferences[TRANSLATE_THINKING_BUDGET] ?: 0,
                 suggestionPrompt = preferences[SUGGESTION_PROMPT] ?: DEFAULT_SUGGESTION_PROMPT,
@@ -232,6 +245,9 @@ class SettingsStore(
                 compressPrompt = preferences[COMPRESS_PROMPT] ?: DEFAULT_COMPRESS_PROMPT,
                 memoryModelId = preferences[MEMORY_MODEL]?.let { Uuid.parse(it) },
                 selfHostedModelId = preferences[SELF_HOSTED_MODEL]?.let { Uuid.parse(it) },
+                imageGenerationPrompt = preferences[IMAGE_GENERATION_PROMPT] ?: DEFAULT_IMAGE_GENERATION_PROMPT,
+                memoryPrompt = preferences[MEMORY_PROMPT] ?: DEFAULT_MEMORY_PROMPT,
+                selfHostedPrompt = preferences[SELF_HOSTED_PROMPT] ?: DEFAULT_SELF_HOSTED_PROMPT,
                 autoCompressEnabled = preferences[AUTO_COMPRESS_ENABLED] ?: false,
                 autoCompressThresholdTokens = preferences[AUTO_COMPRESS_THRESHOLD_TOKENS] ?: 32000,
                 autoCompressKeepRecent = preferences[AUTO_COMPRESS_KEEP_RECENT] ?: 32,
@@ -256,6 +272,9 @@ class SettingsStore(
                 } ?: emptyList(),
                 providers = JsonInstant.decodeFromString(preferences[PROVIDERS] ?: "[]"),
                 assistants = JsonInstant.decodeFromString(preferences[ASSISTANTS] ?: "[]"),
+                globalProxy = preferences[GLOBAL_PROXY]?.let {
+                    JsonInstant.decodeFromString<me.rerere.ai.provider.ProxyConfig>(it)
+                },
                 dynamicColor = preferences[DYNAMIC_COLOR] != false,
                 themeId = preferences[THEME_ID] ?: PresetThemes[0].id,
                 customThemes = preferences[CUSTOM_THEMES]?.let {
@@ -310,7 +329,8 @@ class SettingsStore(
                 sponsorAlertDismissedAt = preferences[SPONSOR_ALERT_DISMISSED_AT] ?: 0,
                 displayScaleMode = preferences[DISPLAY_SCALE_MODE] ?: 0,
                 displayScaleDensityDpi = preferences[DISPLAY_SCALE_DENSITY_DPI] ?: 160,
-                autoApproveTools = preferences[AUTO_APPROVE_TOOLS] == true,
+                autoApproveTools = preferences[AUTO_APPROVE_TOOLS] != false,
+                autonomousExecutionEnabled = preferences[AUTONOMOUS_EXECUTION_ENABLED] != false,
                 // 后台保活常驻默认开启
                 keepAliveEnabled = preferences[KEEP_ALIVE_ENABLED] != false,
                 enabledPlugins = preferences[ENABLED_PLUGINS]?.let {
@@ -453,6 +473,7 @@ class SettingsStore(
             preferences[IMAGE_GENERATION_MODEL] = settings.imageGenerationModelId.toString()
             preferences[VIDEO_GENERATION_MODEL] = settings.videoGenerationModelId.toString()
             preferences[TITLE_PROMPT] = settings.titlePrompt
+            preferences[GLOBAL_PROMPT] = settings.globalPrompt
             preferences[TRANSLATION_PROMPT] = settings.translatePrompt
             preferences[TRANSLATE_THINKING_BUDGET] = settings.translateThinkingBudget
             preferences[SUGGESTION_PROMPT] = settings.suggestionPrompt
@@ -467,6 +488,9 @@ class SettingsStore(
             settings.selfHostedModelId?.let {
                 preferences[SELF_HOSTED_MODEL] = it.toString()
             } ?: preferences.remove(SELF_HOSTED_MODEL)
+            preferences[IMAGE_GENERATION_PROMPT] = settings.imageGenerationPrompt
+            preferences[MEMORY_PROMPT] = settings.memoryPrompt
+            preferences[SELF_HOSTED_PROMPT] = settings.selfHostedPrompt
             preferences[AUTO_COMPRESS_ENABLED] = settings.autoCompressEnabled
             preferences[AUTO_COMPRESS_THRESHOLD_TOKENS] = settings.autoCompressThresholdTokens
             preferences[AUTO_COMPRESS_KEEP_RECENT] = settings.autoCompressKeepRecent
@@ -486,6 +510,10 @@ class SettingsStore(
             preferences[FLOATING_BUBBLE_SHOW_LIVE_TAB] = settings.floatingBubbleShowLiveTab
 
             preferences[PROVIDERS] = JsonInstant.encodeToString(settings.providers)
+
+            settings.globalProxy?.let {
+                preferences[GLOBAL_PROXY] = JsonInstant.encodeToString(it)
+            } ?: preferences.remove(GLOBAL_PROXY)
 
             preferences[ASSISTANTS] = JsonInstant.encodeToString(settings.assistants)
             preferences[SELECT_ASSISTANT] = settings.assistantId.toString()
@@ -521,6 +549,7 @@ class SettingsStore(
             preferences[DISPLAY_SCALE_MODE] = settings.displayScaleMode
             preferences[DISPLAY_SCALE_DENSITY_DPI] = settings.displayScaleDensityDpi
             preferences[AUTO_APPROVE_TOOLS] = settings.autoApproveTools
+            preferences[AUTONOMOUS_EXECUTION_ENABLED] = settings.autonomousExecutionEnabled
             preferences[KEEP_ALIVE_ENABLED] = settings.keepAliveEnabled
             preferences[ENABLED_PLUGINS] = JsonInstant.encodeToString(settings.enabledPlugins)
             preferences[PLUGIN_MARKET_REPO] = settings.pluginMarketRepo
@@ -635,6 +664,7 @@ data class Settings(
     val imageGenerationModelId: Uuid = Uuid.random(),
     val videoGenerationModelId: Uuid = Uuid.random(),
     val titlePrompt: String = DEFAULT_TITLE_PROMPT,
+    val globalPrompt: String = "",
     val translateModeId: Uuid = Uuid.random(),
     val translatePrompt: String = DEFAULT_TRANSLATION_PROMPT,
     val translateThinkingBudget: Int = 0,
@@ -650,6 +680,8 @@ data class Settings(
     val providers: List<ProviderSetting> = DEFAULT_PROVIDERS,
     val assistants: List<Assistant> = DEFAULT_ASSISTANTS,
     val assistantTags: List<Tag> = emptyList(),
+    // 全局网络代理（Provider 级代理优先，未设置时回落全局）
+    val globalProxy: me.rerere.ai.provider.ProxyConfig? = null,
     val searchServices: List<SearchServiceOptions> = listOf(SearchServiceOptions.DEFAULT),
     val searchCommonOptions: SearchCommonOptions = SearchCommonOptions(),
     val searchServiceSelected: Int = 0,
@@ -681,6 +713,10 @@ data class Settings(
     val memoryModelId: Uuid? = null,
     // 自托管模型；null 表示未选择
     val selfHostedModelId: Uuid? = null,
+    // 各专用模型的提示词
+    val imageGenerationPrompt: String = DEFAULT_IMAGE_GENERATION_PROMPT,
+    val memoryPrompt: String = DEFAULT_MEMORY_PROMPT,
+    val selfHostedPrompt: String = DEFAULT_SELF_HOSTED_PROMPT,
     // 自动压缩：上下文 token 估算达到阈值时自动压缩并继续生成
     val autoCompressEnabled: Boolean = false,
     val autoCompressThresholdTokens: Int = 32000,
@@ -700,7 +736,11 @@ data class Settings(
     val displayScaleMode: Int = 0,
     val displayScaleDensityDpi: Int = 240,
     // 托管工具自动审批：开启后工作区/系统等需审批的工具调用自动通过（ask_user 仍需人工）
-    val autoApproveTools: Boolean = false,
+    // 默认开启：AI 执行任务时工具调用自动放行，不中途停下等待审批（对标全自主执行）
+    val autoApproveTools: Boolean = true,
+    // 自主执行引导：开启后生成系统提示注入"连续调用工具直到任务完成"指令，
+    // 默认开启：AI 收到任务后持续调用工具执行到底，不中途停下汇报或询问（对标全自主执行）
+    val autonomousExecutionEnabled: Boolean = true,
     // 插件市场：已启用插件 id 集合；插件启用后注入 systemPrompt 并显示快捷操作
     val enabledPlugins: Set<String> = emptySet(),
     // 插件市场索引仓库（owner/repo，根目录放 plugins.json）

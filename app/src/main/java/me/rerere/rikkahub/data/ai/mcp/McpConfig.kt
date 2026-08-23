@@ -93,9 +93,11 @@ sealed class McpServerConfig {
     }
 
     /**
-     * 本地命令型 MCP（Operit 等第三方配置）：command + args + env 启动本地进程。
-     * RikkaHub 客户端仅实现远程 SSE / Streamable HTTP 传输，该类型用于在 MCP
-     * 设置中**可见**并保留原始启动命令，连接状态会明确提示需要 Operit/Node 环境。
+     * 本地命令型 MCP（第三方配置）：command + args + env 启动本地进程。
+     *
+     * **已废弃**：RikkaHub 客户端仅实现远程 SSE / Streamable HTTP 传输，Android 端无法运行
+     * 本地进程型 MCP。该类型仅保留以兼容旧数据反序列化与插件解析，运行时会被
+     * [McpSessionRegistry] / [AcpMcpServersBuilder] / 设置页统一过滤，不再连接或展示。
      */
     @Serializable
     @SerialName("command")

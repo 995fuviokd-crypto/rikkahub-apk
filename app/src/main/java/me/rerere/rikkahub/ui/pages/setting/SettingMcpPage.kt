@@ -199,7 +199,10 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                     bottom = innerPadding.calculateBottomPadding() + 16.dp,
                 )
             ) {
-                items(mcpConfigs, key = { it.id }) { mcpConfig ->
+                items(
+                    mcpConfigs.filter { it !is McpServerConfig.CommandServerConfig },
+                    key = { it.id }
+                ) { mcpConfig ->
                     McpServerItem(
                         item = mcpConfig,
                         onEdit = {
@@ -217,7 +220,7 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                 }
             }
 
-            if (mcpConfigs.isEmpty()) {
+            if (mcpConfigs.none { it !is McpServerConfig.CommandServerConfig }) {
                 Column(
                     modifier = Modifier.align(Alignment.Center),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -634,13 +637,12 @@ private fun McpCommonOptionsConfigure(
         ) {
             val transportTypes = listOf(
                 "Streamable HTTP",
-                "SSE",
-                "本地命令"
+                "SSE"
             )
             val currentTypeIndex = when (config) {
                 is McpServerConfig.StreamableHTTPServer -> 0
                 is McpServerConfig.SseTransportServer -> 1
-                is McpServerConfig.CommandServerConfig -> 2
+                is McpServerConfig.CommandServerConfig -> 0
             }
 
             SingleChoiceSegmentedButtonRow(
@@ -672,23 +674,6 @@ private fun McpCommonOptionsConfigure(
                                         }
                                     )
 
-                                    2 -> McpServerConfig.CommandServerConfig(
-                                        id = config.id,
-                                        commonOptions = config.commonOptions,
-                                        command = when (config) {
-                                            is McpServerConfig.CommandServerConfig -> config.command
-                                            else -> ""
-                                        },
-                                        args = when (config) {
-                                            is McpServerConfig.CommandServerConfig -> config.args
-                                            else -> emptyList()
-                                        },
-                                        env = when (config) {
-                                            is McpServerConfig.CommandServerConfig -> config.env
-                                            else -> emptyMap()
-                                        }
-                                    )
-
                                     else -> config
                                 }
                                 update(newConfig)
@@ -711,7 +696,7 @@ private fun McpCommonOptionsConfigure(
                     when (config) {
                         is McpServerConfig.SseTransportServer -> stringResource(R.string.setting_mcp_page_server_url)
                         is McpServerConfig.StreamableHTTPServer -> stringResource(R.string.setting_mcp_page_server_url)
-                        is McpServerConfig.CommandServerConfig -> stringResource(R.string.setting_mcp_page_command)
+                        is McpServerConfig.CommandServerConfig -> stringResource(R.string.setting_mcp_page_server_url)
                     }
                 )
             },
@@ -720,7 +705,7 @@ private fun McpCommonOptionsConfigure(
                     when (config) {
                         is McpServerConfig.SseTransportServer -> stringResource(R.string.setting_mcp_page_sse_url_desc)
                         is McpServerConfig.StreamableHTTPServer -> stringResource(R.string.setting_mcp_page_streamable_http_url_desc)
-                        is McpServerConfig.CommandServerConfig -> stringResource(R.string.setting_mcp_page_command_desc)
+                        is McpServerConfig.CommandServerConfig -> stringResource(R.string.setting_mcp_page_streamable_http_url_desc)
                     }
                 )
             }
@@ -738,34 +723,11 @@ private fun McpCommonOptionsConfigure(
                     onUrlChange = { url -> update(config.copy(url = url)) }
                 )
 
-                is McpServerConfig.CommandServerConfig -> {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = config.command,
-                            onValueChange = { command ->
-                                update(config.copy(command = command))
-                            },
-                            label = { Text(stringResource(R.string.setting_mcp_page_command)) },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("npx / node / python ...") }
-                        )
-                        OutlinedTextField(
-                            value = config.args.joinToString(" "),
-                            onValueChange = { argsText ->
-                                update(
-                                    config.copy(
-                                        args = argsText.split(" ")
-                                            .map { it.trim() }
-                                            .filter { it.isNotEmpty() }
-                                    )
-                                )
-                            },
-                            label = { Text(stringResource(R.string.setting_mcp_page_command_args)) },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("-y @modelcontextprotocol/server-xxx") }
-                        )
-                    }
-                }
+                is McpServerConfig.CommandServerConfig -> McpUrlField(
+                    url = "",
+                    placeholder = stringResource(R.string.setting_mcp_page_streamable_http_url_placeholder),
+                    onUrlChange = { _ -> }
+                )
             }
         }
 

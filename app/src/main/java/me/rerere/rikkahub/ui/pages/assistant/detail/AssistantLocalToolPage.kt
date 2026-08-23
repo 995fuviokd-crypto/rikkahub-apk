@@ -262,15 +262,15 @@ private fun AssistantLocalToolContent(
             )
             item(
                 headlineContent = {
-                    Text(stringResource(R.string.assistant_page_local_tools_operit_scripts_title))
+                    Text(stringResource(R.string.assistant_page_local_tools_scripts_title))
                 },
                 supportingContent = {
-                    Text(stringResource(R.string.assistant_page_local_tools_operit_scripts_desc))
+                    Text(stringResource(R.string.assistant_page_local_tools_scripts_desc))
                 },
                 trailingContent = {
                     Switch(
-                        checked = assistant.localTools.contains(LocalToolOption.OperitScripts),
-                        onCheckedChange = { toggleLocalTool(LocalToolOption.OperitScripts, it) }
+                        checked = assistant.localTools.contains(LocalToolOption.Scripts),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.Scripts, it) }
                     )
                 }
             )
@@ -299,6 +299,26 @@ private fun AssistantLocalToolContent(
                     Switch(
                         checked = assistant.localTools.contains(LocalToolOption.PowerManagement),
                         onCheckedChange = { toggleLocalTool(LocalToolOption.PowerManagement, it) }
+                    )
+                }
+            )
+        }
+
+        CardGroup(
+            modifier = Modifier.padding(top = 4.dp),
+            title = { Text(stringResource(R.string.assistant_page_local_tools_system_control_title)) },
+        ) {
+            item(
+                headlineContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_system_control_title))
+                },
+                supportingContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_system_control_desc))
+                },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.localTools.contains(LocalToolOption.SystemControl),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.SystemControl, it) }
                     )
                 }
             )

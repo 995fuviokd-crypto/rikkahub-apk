@@ -1,5 +1,6 @@
 package me.rerere.ai.provider.providers.openai
 
+import me.rerere.ai.provider.ProviderHttpClient
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -19,7 +20,7 @@ class ChatCompletionsUsageParsingTest {
 
     @Before
     fun setUp() {
-        api = ChatCompletionsAPI(OkHttpClient(), KeyRoulette.default())
+        api = ChatCompletionsAPI(ProviderHttpClient(OkHttpClient()), KeyRoulette.default())
     }
 
     // Helper to invoke private parseTokenUsage via reflection

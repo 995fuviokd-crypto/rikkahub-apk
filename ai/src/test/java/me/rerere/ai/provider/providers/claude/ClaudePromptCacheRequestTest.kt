@@ -1,5 +1,6 @@
 package me.rerere.ai.provider.providers.claude
 
+import me.rerere.ai.provider.ProviderHttpClient
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -25,7 +26,7 @@ class ClaudePromptCacheRequestTest {
 
     @Before
     fun setUp() {
-        provider = ClaudeProvider(OkHttpClient())
+        provider = ClaudeProvider(ProviderHttpClient(OkHttpClient()))
     }
 
     private fun buildRequest(

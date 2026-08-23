@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.ui.pages.extensions.group
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -14,6 +16,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
@@ -39,8 +43,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Play
 import me.rerere.hugeicons.stroke.Stop
-import me.rerere.rikkahub.data.model.GroupMessage
+import me.rerere.rikkahub.data.model.Group
 import me.rerere.rikkahub.data.model.MessageKind
+import me.rerere.rikkahub.data.model.RunStatus
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.theme.CustomColors
 import org.koin.androidx.compose.koinViewModel
@@ -119,16 +124,25 @@ fun GroupDetailPage(
                 }
 
                 item {
-                    Text(
-                        text = if (selectedRunId == null) "消息时间线" else "消息时间线 · ${runs.find { it.id == selectedRunId }?.mission ?: ""}",
-                        style = MaterialTheme.typography.titleSmall,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text("协作过程", style = MaterialTheme.typography.titleSmall)
+                        if (runs.isNotEmpty()) {
+                            RunSelector(
+                                runs = runs,
+                                selectedRunId = selectedRunId,
+                                onSelect = { vm.selectRun(it) },
+                            )
+                        }
+                    }
                 }
                 when {
                     selectedRunId == null -> {
                         item {
                             Text(
-                                text = "发布一条指令，群组协作的过程与讨论会显示在这里",
+                                text = "发布一条指令，群组协作的过程会显示在这里",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -170,7 +184,50 @@ fun GroupDetailPage(
 }
 
 @Composable
-private fun GroupInfoCard(group: me.rerere.rikkahub.data.model.Group) {
+private fun RunSelector(
+    runs: List<me.rerere.rikkahub.data.model.GroupRun>,
+    selectedRunId: String?,
+    onSelect: (String) -> Unit,
+) {
+    val selected = runs.find { it.id == selectedRunId }
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Text(
+            text = selected?.status?.label() ?: "选择运行",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .clickable { expanded = true }
+                .padding(4.dp),
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            runs.forEach { run ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(run.mission.take(24), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                text = run.status.label(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = run.status.color(),
+                            )
+                        }
+                    },
+                    onClick = {
+                        expanded = false
+                        onSelect(run.id)
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GroupInfoCard(group: Group) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CustomColors.cardColorsOnSurfaceContainer,
@@ -188,16 +245,11 @@ private fun GroupInfoCard(group: me.rerere.rikkahub.data.model.Group) {
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    text = group.mode.label(),
+                    text = "${group.members.size} 个成员",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            Text(
-                text = "${group.members.size} 个成员",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             group.members.forEach { member ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -276,4 +328,18 @@ private fun MissionInputCard(
             }
         }
     }
+}
+
+private fun RunStatus.label(): String = when (this) {
+    RunStatus.RUNNING -> "进行中"
+    RunStatus.SUCCESS -> "成功"
+    RunStatus.FAILED -> "失败"
+    RunStatus.STOPPED -> "已停止"
+}
+
+private fun RunStatus.color(): androidx.compose.ui.graphics.Color = when (this) {
+    RunStatus.RUNNING -> androidx.compose.ui.graphics.Color(0xFF2962FF)
+    RunStatus.SUCCESS -> androidx.compose.ui.graphics.Color(0xFF00C853)
+    RunStatus.FAILED -> androidx.compose.ui.graphics.Color(0xFFFF1744)
+    RunStatus.STOPPED -> androidx.compose.ui.graphics.Color(0xFF9E9E9E)
 }

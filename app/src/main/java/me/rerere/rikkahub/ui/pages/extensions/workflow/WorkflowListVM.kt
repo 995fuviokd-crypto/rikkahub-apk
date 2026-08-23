@@ -10,14 +10,14 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.ai.workflow.WorkflowRunner
 import me.rerere.rikkahub.data.ai.workflow.WorkflowRunResult
-import me.rerere.rikkahub.data.db.entity.WorkflowEntity
+import me.rerere.rikkahub.data.model.Workflow
 import me.rerere.rikkahub.data.repository.WorkflowRepository
 
 class WorkflowListVM(
     private val repository: WorkflowRepository,
     private val runner: WorkflowRunner,
 ) : ViewModel() {
-    val workflows: StateFlow<List<WorkflowEntity>> = repository.listFlow()
+    val workflows: StateFlow<List<Workflow>> = repository.listFlows()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     private val _runningId = MutableStateFlow<String?>(null)
@@ -44,7 +44,11 @@ class WorkflowListVM(
             _runResult.value = null
             val workflow = repository.loadWorkflow(workflowId)
             if (workflow != null) {
-                _runResult.value = runner.run(workflow = workflow)
+                val result = runner.run(workflow = workflow)
+                _runResult.value = result
+                result.executionRecord?.let { record ->
+                    repository.saveExecutionRecord(record)
+                }
             }
             _runningId.value = null
         }

@@ -34,6 +34,7 @@ import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.ProviderHttpClient
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.stream.SseEvent
@@ -62,7 +63,6 @@ import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.common.http.jsonPrimitiveOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
@@ -75,7 +75,7 @@ import kotlin.time.Clock
 private const val TAG = "ChatCompletionsAPI"
 
 class ChatCompletionsAPI(
-    private val client: OkHttpClient,
+    private val client: ProviderHttpClient,
     private val keyRoulette: KeyRoulette
 ) : OpenAIImpl {
     override suspend fun generateText(
@@ -105,7 +105,7 @@ class ChatCompletionsAPI(
                 Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
             }
 
-            val response = client.newCall(request).await()
+            val response = client.clientFor(providerSetting.proxy).newCall(request).await()
             if (response.isSuccessful) {
                 val bodyStr = response.body?.string() ?: ""
                 val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
@@ -254,7 +254,7 @@ class ChatCompletionsAPI(
                 }
             }
 
-            eventSource = EventSources.createFactory(client).newEventSource(request, listener)
+            eventSource = EventSources.createFactory(client.clientFor(providerSetting.proxy)).newEventSource(request, listener)
         }
 
         startEventSource()

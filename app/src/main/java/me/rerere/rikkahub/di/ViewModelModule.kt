@@ -23,9 +23,9 @@ import me.rerere.rikkahub.ui.pages.extensions.workflow.WorkflowListVM
 import me.rerere.rikkahub.ui.pages.extensions.group.GroupDetailVM
 import me.rerere.rikkahub.ui.pages.extensions.group.GroupEditorVM
 import me.rerere.rikkahub.ui.pages.extensions.group.GroupListVM
-import me.rerere.rikkahub.ui.pages.extensions.group.GroupRunVM
 import me.rerere.rikkahub.ui.pages.extensions.permission.PermissionVM
 import me.rerere.rikkahub.ui.pages.setting.SettingVM
+import me.rerere.rikkahub.ui.pages.setting.SettingAgentVM
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerVM
 import me.rerere.rikkahub.ui.pages.translator.TranslatorVM
 import org.koin.core.module.dsl.viewModel
@@ -48,6 +48,7 @@ val viewModelModule = module {
     }
     viewModelOf(::ChatDrawerVM)
     viewModelOf(::SettingVM)
+    viewModelOf(::SettingAgentVM)
     viewModelOf(::DebugVM)
     viewModelOf(::HistoryVM)
     viewModelOf(::AssistantVM)
@@ -90,7 +91,6 @@ val viewModelModule = module {
             id = it.get(),
             repository = get(),
             settingsStore = get(),
-            workspaceRepository = get(),
         )
     }
     viewModel<GroupDetailVM> {
@@ -100,19 +100,13 @@ val viewModelModule = module {
             runner = get(),
         )
     }
-    viewModel<GroupRunVM> {
-        GroupRunVM(
-            runId = it.get(),
-            repository = get(),
-        )
-    }
     viewModel<PluginMarketVM> {
         PluginMarketVM(
             settingsStore = get(),
             pluginManager = get(),
             marketDataSource = get(),
             openAIPluginAdapter = get(),
-            operitDataSource = get(),
+            communityDataSource = get(),
         )
     }
     viewModel<WorkflowEditorVM> {

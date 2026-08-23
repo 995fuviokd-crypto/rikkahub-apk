@@ -38,6 +38,8 @@ import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.FloatingBubbleService
 import me.rerere.rikkahub.service.KeepAliveService
 import me.rerere.rikkahub.service.WebServerService
+import me.rerere.rikkahub.data.ai.agent.AcpRuntime
+import me.rerere.rikkahub.data.ai.agent.ScriptMcpBridge
 import me.rerere.rikkahub.utils.CrashHandler
 import me.rerere.rikkahub.utils.DatabaseUtil
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
@@ -46,6 +48,7 @@ import org.koin.android.ext.android.get
 import org.koin.android.ext.koin.androidContext
 import org.koin.android.ext.koin.androidLogger
 import org.koin.androidx.workmanager.koin.workManagerFactory
+import org.koin.core.context.GlobalContext
 import org.koin.core.context.startKoin
 
 private const val TAG = "RikkaHubApp"
@@ -59,11 +62,13 @@ const val FLOATING_BUBBLE_NOTIFICATION_CHANNEL_ID = "floating_bubble"
 class RikkaHubApp : Application() {
     override fun onCreate() {
         super.onCreate()
-        startKoin {
-            androidLogger()
-            androidContext(this@RikkaHubApp)
-            workManagerFactory()
-            modules(appModule, viewModelModule, dataSourceModule, repositoryModule)
+        if (GlobalContext.getOrNull() == null) {
+            startKoin {
+                androidLogger()
+                androidContext(this@RikkaHubApp)
+                workManagerFactory()
+                modules(appModule, viewModelModule, dataSourceModule, repositoryModule)
+            }
         }
         this.createNotificationChannel()
 
@@ -334,7 +339,9 @@ class RikkaHubApp : Application() {
 
     override fun onTerminate() {
         super.onTerminate()
-        get<AppScope>().cancel()
+        runCatching { get<AppScope>().cancel() }
+        runCatching { get<AcpRuntime>().closeAll() }
+        runCatching { get<ScriptMcpBridge>().stop() }
         stopService(Intent(this, WebServerService::class.java))
         stopService(Intent(this, KeepAliveService::class.java))
     }

@@ -90,3 +90,26 @@ private fun isMonthFirstLocale(locale: Locale): Boolean {
     )
     return monthFirstCountries.contains(locale.country)
 }
+
+/**
+ * 相对时间：刚刚 / N 分钟前 / N 小时前 / N 天前 / 具体日期。
+ */
+fun Long.formatRelativeTime(): String {
+    val diff = System.currentTimeMillis() - this
+    return when {
+        this <= 0 -> ""
+        diff < 60_000 -> "刚刚"
+        diff < 3_600_000 -> "${diff / 60_000} 分钟前"
+        diff < 86_400_000 -> "${diff / 3_600_000} 小时前"
+        diff < 7 * 86_400_000 -> "${diff / 86_400_000} 天前"
+        else -> Instant.ofEpochMilli(this).toLocalDate()
+    }
+}
+
+/**
+ * 时间戳格式化：小于等于 0 表示从未执行。
+ */
+fun Long.formatDateTime(): String {
+    if (this <= 0) return "从未执行"
+    return Instant.ofEpochMilli(this).toLocalDateTime()
+}

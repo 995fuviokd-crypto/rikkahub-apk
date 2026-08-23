@@ -123,6 +123,7 @@ class McpManager(
         val settings = settingsStore.settingsFlow.value
         val assistant = settings.getCurrentAssistant()
         return settings.mcpServers
+            .filter { it !is McpServerConfig.CommandServerConfig }
             .filter { it.commonOptions.enable && it.id in assistant.mcpServers }
             .flatMap { server ->
                 server.commonOptions.tools

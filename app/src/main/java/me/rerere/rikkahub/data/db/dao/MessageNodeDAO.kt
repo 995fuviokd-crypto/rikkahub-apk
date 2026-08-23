@@ -87,7 +87,7 @@ suspend fun MessageNodeDAO.getMessageCountPerDay(startDate: String): List<Messag
 
 data class ConversationMessageCount(val conversationId: String, val count: Int)
 
-// 一次性统计所有会话的消息总数（json_each 展开 messages JSON 数组），供 Operit Chat.listChats 使用
+// 一次性统计所有会话的消息总数（json_each 展开 messages JSON 数组），供 Chat.listChats 使用
 suspend fun MessageNodeDAO.getMessageCounts(): List<ConversationMessageCount> =
     getMessageCountsRaw(
         SimpleSQLiteQuery(

@@ -8,8 +8,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.rikkahub.data.api.OperitListItem
-import me.rerere.rikkahub.data.api.OperitMarketDataSource
+import me.rerere.rikkahub.data.api.CommunityListItem
+import me.rerere.rikkahub.data.api.CommunityMarketDataSource
 import me.rerere.rikkahub.data.api.PluginMarketDataSource
 import me.rerere.rikkahub.data.ai.mcp.serverUrl
 import me.rerere.rikkahub.data.datastore.Settings
@@ -27,7 +27,7 @@ class PluginMarketVM(
     private val pluginManager: PluginManager,
     private val marketDataSource: PluginMarketDataSource,
     private val openAIPluginAdapter: OpenAIPluginAdapter,
-    private val operitDataSource: OperitMarketDataSource,
+    private val communityDataSource: CommunityMarketDataSource,
 ) : ViewModel() {
     private val _installed = MutableStateFlow<List<InstalledPlugin>>(emptyList())
     val installed = _installed.asStateFlow()
@@ -112,63 +112,63 @@ class PluginMarketVM(
         }
     }
 
-    // ---- Operit 社区市场 ----
-    private val _operitEntries = MutableStateFlow<List<OperitListItem>>(emptyList())
-    val operitEntries = _operitEntries.asStateFlow()
+    // ---- 社区市场市场 ----
+    private val _communityEntries = MutableStateFlow<List<CommunityListItem>>(emptyList())
+    val communityEntries = _communityEntries.asStateFlow()
 
-    private val _operitLoading = MutableStateFlow(false)
-    val operitLoading = _operitLoading.asStateFlow()
+    private val _communityLoading = MutableStateFlow(false)
+    val communityLoading = _communityLoading.asStateFlow()
 
-    private val _operitError = MutableStateFlow<String?>(null)
-    val operitError = _operitError.asStateFlow()
+    private val _communityError = MutableStateFlow<String?>(null)
+    val communityError = _communityError.asStateFlow()
 
-    private val _operitSort = MutableStateFlow("likes")
-    val operitSort = _operitSort.asStateFlow()
+    private val _communitySort = MutableStateFlow("likes")
+    val communitySort = _communitySort.asStateFlow()
 
-    private val _operitType = MutableStateFlow("all")
-    val operitType = _operitType.asStateFlow()
+    private val _communityType = MutableStateFlow("all")
+    val communityType = _communityType.asStateFlow()
 
-    private val _operitInstallingId = MutableStateFlow<String?>(null)
-    val operitInstallingId = _operitInstallingId.asStateFlow()
+    private val _communityInstallingId = MutableStateFlow<String?>(null)
+    val communityInstallingId = _communityInstallingId.asStateFlow()
 
-    fun loadOperit() {
+    fun loadCommunity() {
         viewModelScope.launch {
-            _operitLoading.value = true
-            _operitError.value = null
-            operitDataSource.fetchList(_operitType.value, _operitSort.value, 1)
-                .onSuccess { _operitEntries.value = it.items }
-                .onFailure { _operitError.value = "Operit 市场加载失败: ${it.message}" }
-            _operitLoading.value = false
+            _communityLoading.value = true
+            _communityError.value = null
+            communityDataSource.fetchList(_communityType.value, _communitySort.value, 1)
+                .onSuccess { _communityEntries.value = it.items }
+                .onFailure { _communityError.value = "社区市场加载失败: ${it.message}" }
+            _communityLoading.value = false
         }
     }
 
-    fun setOperitType(type: String) {
-        _operitType.value = type
-        loadOperit()
+    fun setCommunityType(type: String) {
+        _communityType.value = type
+        loadCommunity()
     }
 
-    fun setOperitSort(sort: String) {
-        _operitSort.value = sort
-        loadOperit()
+    fun setCommunitySort(sort: String) {
+        _communitySort.value = sort
+        loadCommunity()
     }
 
-    /** 安装 Operit 条目：GitHub 目录打包为插件 zip，经 autoAdapt 自动适配后本地生效 */
-    fun installOperit(entry: OperitListItem) {
-        if (_operitInstallingId.value != null) return
+    /** 安装社区市场条目：GitHub 目录打包为插件 zip，经 autoAdapt 自动适配后本地生效 */
+    fun installCommunity(entry: CommunityListItem) {
+        if (_communityInstallingId.value != null) return
         viewModelScope.launch {
-            _operitInstallingId.value = entry.id
+            _communityInstallingId.value = entry.id
             _notice.value = null
-            operitDataSource.downloadAsPlugin(entry)
+            communityDataSource.downloadAsPlugin(entry)
                 .onSuccess { bytes ->
                     pluginManager.installZip(bytes)
                         .onSuccess { info ->
                             autoEnablePlugin(info.id)
-                            _notice.value = "已安装并启用 ${info.name}（Operit 社区）"
+                            _notice.value = "已安装并启用 ${info.name}（社区市场）"
                         }
                         .onFailure { _notice.value = "安装失败: ${it.message}" }
                 }
                 .onFailure { _notice.value = "下载失败: ${it.message}" }
-            _operitInstallingId.value = null
+            _communityInstallingId.value = null
             refreshInstalled()
         }
     }

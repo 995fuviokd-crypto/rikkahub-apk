@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
@@ -32,7 +33,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.rememberBottomSheetState
+import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -79,17 +82,22 @@ import me.rerere.hugeicons.stroke.GitBranch
 import me.rerere.hugeicons.stroke.GitMerge
 import me.rerere.hugeicons.stroke.Globe
 import me.rerere.hugeicons.stroke.FitToScreen
+import me.rerere.hugeicons.stroke.Layers01
 import me.rerere.hugeicons.stroke.MinusSign
 import me.rerere.hugeicons.stroke.Play
+import me.rerere.hugeicons.stroke.Redo
 import me.rerere.hugeicons.stroke.Repeat
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.hugeicons.stroke.SquareLock02
 import me.rerere.hugeicons.stroke.StartUp01
+import me.rerere.hugeicons.stroke.Undo
 import me.rerere.rikkahub.data.ai.workflow.RunProgress
 import me.rerere.rikkahub.data.ai.workflow.StepStatus
 import me.rerere.rikkahub.data.model.AiStepConfig
 import me.rerere.rikkahub.data.model.DelayStepConfig
 import me.rerere.rikkahub.data.model.EndStepConfig
+import me.rerere.rikkahub.data.model.ExtractMode
+import me.rerere.rikkahub.data.model.ExtractStepConfig
 import me.rerere.rikkahub.data.model.ForStepConfig
 import me.rerere.rikkahub.data.model.HttpStepConfig
 import me.rerere.rikkahub.data.model.IfStepConfig
@@ -100,13 +108,17 @@ import me.rerere.rikkahub.data.model.ShellStepConfig
 import me.rerere.rikkahub.data.model.StartStepConfig
 import me.rerere.rikkahub.data.model.StepConfig
 import me.rerere.rikkahub.data.model.TextStepConfig
+import me.rerere.rikkahub.data.model.WorkflowEdge
 import me.rerere.rikkahub.data.model.WorkflowGraph
 import me.rerere.rikkahub.data.model.WorkflowNode
+import me.rerere.rikkahub.data.model.WorkflowRunLogEntry
+import me.rerere.rikkahub.data.model.WorkflowLogLevel
 import me.rerere.rikkahub.data.model.validate
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.theme.CustomColors
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 private const val GRID_SPACING = 40f
@@ -122,11 +134,16 @@ fun WorkflowEditorPage(
     val running by vm.running.collectAsStateWithLifecycle()
     val runProgress by vm.runProgress.collectAsStateWithLifecycle()
     val runSucceeded by vm.runSucceeded.collectAsStateWithLifecycle()
-    val selectedNodeId by vm.selectedNodeId.collectAsStateWithLifecycle()
+    val runLogs by vm.runLogs.collectAsStateWithLifecycle()
+    val runError by vm.runError.collectAsStateWithLifecycle()
+    val selectedNodeIds by vm.selectedNodeIds.collectAsStateWithLifecycle()
+    val canUndo by vm.canUndo.collectAsStateWithLifecycle()
+    val canRedo by vm.canRedo.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var showAddNodeSheet by remember { mutableStateOf(false) }
     val graph = workflow?.effectiveGraph
     val context = LocalContext.current
+    val selectedNodeId = selectedNodeIds.singleOrNull()
 
     Scaffold(
         topBar = {
@@ -134,6 +151,32 @@ fun WorkflowEditorPage(
                 title = { Text(workflow?.name ?: "工作流") },
                 navigationIcon = { BackButton() },
                 actions = {
+                    if (selectedNodeIds.size > 1) {
+                        IconButton(
+                            onClick = vm::removeSelectedNodes,
+                            enabled = !running,
+                        ) {
+                            Icon(HugeIcons.Delete01, contentDescription = "删除选中节点（${selectedNodeIds.size}）", tint = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    IconButton(
+                        onClick = vm::undo,
+                        enabled = canUndo && !running,
+                    ) {
+                        Icon(HugeIcons.Undo, contentDescription = "撤销")
+                    }
+                    IconButton(
+                        onClick = vm::redo,
+                        enabled = canRedo && !running,
+                    ) {
+                        Icon(HugeIcons.Redo, contentDescription = "重做")
+                    }
+                    IconButton(
+                        onClick = vm::autoLayout,
+                        enabled = workflow != null && !running,
+                    ) {
+                        Icon(HugeIcons.Layers01, contentDescription = "自动布局")
+                    }
                     IconButton(
                         onClick = { vm.run() },
                         enabled = !running && graph?.validate()?.isEmpty() == true,
@@ -163,9 +206,13 @@ fun WorkflowEditorPage(
                 WorkflowGraphCanvas(
                     graph = graph,
                     runProgress = runProgress,
-                    selectedNodeId = selectedNodeId,
-                    onSelectNode = vm::selectNode,
+                    selectedNodeIds = selectedNodeIds,
+                    onTapNode = vm::tapNode,
+                    onDoubleTapNode = vm::doubleTapNode,
                     onMoveNode = vm::moveNode,
+                    onMoveSelected = { dx, dy -> vm.moveSelectedNodes(dx, dy) },
+                    onSelectBox = { ids -> vm.selectNodes(ids) },
+                    onClearSelection = vm::clearSelection,
                     onAddEdge = { fromId, fromPort, toId ->
                         val ok = vm.addEdge(fromId, fromPort, toId)
                         if (!ok) {
@@ -173,13 +220,15 @@ fun WorkflowEditorPage(
                         }
                         ok
                     },
-                    onDeselectNode = { vm.selectNode(null) },
+                    onOpenEdit = { vm.doubleTapNode(it) },
                 )
                 if (runSucceeded != null) {
                     RunSummaryBar(
                         succeeded = runSucceeded == true,
                         progress = runProgress,
                         running = running,
+                        logs = runLogs,
+                        error = runError,
                         onDismiss = vm::clearRunResult,
                     )
                 }
@@ -204,13 +253,14 @@ fun WorkflowEditorPage(
             NodeEditSheet(
                 node = node,
                 graph = graph,
-                onDismiss = { vm.selectNode(null) },
+                onDismiss = { vm.clearSelection() },
                 onUpdate = { name, config -> vm.updateNode(node.id, name, config) },
                 onRemove = { vm.removeNode(node.id) },
                 onRemoveEdge = vm::removeEdge,
+                onUpdateEdgeCondition = vm::updateEdgeCondition,
             )
         } else {
-            vm.selectNode(null)
+            vm.clearSelection()
         }
     }
 }
@@ -219,11 +269,15 @@ fun WorkflowEditorPage(
 private fun WorkflowGraphCanvas(
     graph: WorkflowGraph,
     runProgress: List<RunProgress>,
-    selectedNodeId: String?,
-    onSelectNode: (String?) -> Unit,
+    selectedNodeIds: Set<String>,
+    onTapNode: (String) -> Unit,
+    onDoubleTapNode: (String) -> Unit,
     onMoveNode: (String, Float, Float) -> Unit,
+    onMoveSelected: (Float, Float) -> Unit,
+    onSelectBox: (Set<String>) -> Unit,
+    onClearSelection: () -> Unit,
     onAddEdge: (String, String, String) -> Boolean,
-    onDeselectNode: () -> Unit,
+    onOpenEdit: (String) -> Unit,
 ) {
     val density = LocalDensity.current
     val nodeW = with(density) { 180.dp.toPx() }
@@ -233,23 +287,32 @@ private fun WorkflowGraphCanvas(
 
     val scaleState = remember { mutableFloatStateOf(1f) }
     val offsetState = remember { mutableStateOf(Offset(40f, 40f)) }
-    var dragOverride by remember { mutableStateOf<Pair<String, Offset>?>(null) }
+    var dragOverride by remember { mutableStateOf<Map<String, Offset>?>(null) }
     var linkPreview by remember { mutableStateOf<Pair<Offset, Offset>?>(null) }
+    var linkHoverPort by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var selectionBox by remember { mutableStateOf<Pair<Offset, Offset>?>(null) }
+    var gestureStartWorld by remember { mutableStateOf<Map<String, Offset>?>(null) }
     val canvasSize = remember { mutableStateOf(IntSize.Zero) }
+    var lastTapNode by remember { mutableStateOf<String?>(null) }
+    var lastTapTime by remember { mutableStateOf(0L) }
 
     val progressById = runProgress.associateBy { it.nodeId }
     val colorScheme = MaterialTheme.colorScheme
     val titleStyle = MaterialTheme.typography.bodyMedium.copy(color = colorScheme.onSurface)
     val subStyle = MaterialTheme.typography.labelSmall.copy(color = colorScheme.onSurfaceVariant)
 
-    fun nodeScreen(node: WorkflowNode): Offset {
+    fun nodeWorld(node: WorkflowNode): Offset {
         val o = dragOverride
-        val world = if (o?.first == node.id) o.second else Offset(node.x, node.y)
+        return o?.get(node.id) ?: Offset(node.x, node.y)
+    }
+
+    fun nodeScreen(node: WorkflowNode): Offset {
+        val world = nodeWorld(node)
         return Offset(world.x * scaleState.floatValue + offsetState.value.x, world.y * scaleState.floatValue + offsetState.value.y)
     }
 
     fun portWorld(node: WorkflowNode, port: String): Offset {
-        val base = if (dragOverride?.first == node.id) dragOverride!!.second else Offset(node.x, node.y)
+        val base = nodeWorld(node)
         return when (port) {
             "in" -> base + Offset(0f, nodeH / 2)
             "true" -> base + Offset(nodeW, nodeH / 4)
@@ -279,6 +342,21 @@ private fun WorkflowGraphCanvas(
             val p = nodeScreen(node)
             val rect = Rect(p.x, p.y, p.x + nodeW, p.y + nodeH)
             if (rect.contains(screen)) return node to null
+        }
+        return null to null
+    }
+
+    fun hitPort(screen: Offset): Pair<WorkflowNode?, String?> {
+        val s = scaleState.floatValue
+        val o = offsetState.value
+        for (node in graph.nodes) {
+            for (port in outputPorts(node)) {
+                val p = portWorld(node, port)
+                val screenP = Offset(p.x * s + o.x, p.y * s + o.y)
+                if ((screen - screenP).getDistance() < portRadius * 3f) {
+                    return node to port
+                }
+            }
         }
         return null to null
     }
@@ -324,18 +402,32 @@ private fun WorkflowGraphCanvas(
                         val downScreen = down.position
                         val (hitNode, hitPort) = hitTest(downScreen)
                         var mode: GestureMode = GestureMode.NONE
-                        var dragNodeId: String? = null
                         var dragAccum = Offset.Zero
+                        var boxStart = downScreen
+                        var tapCandidate = true
                         if (hitPort != null) {
                             mode = GestureMode.LINK
                             linkPreview = portScreen(hitNode!!, hitPort) to downScreen
+                            linkHoverPort = null
+                            tapCandidate = false
                         } else if (hitNode != null) {
-                            mode = GestureMode.DRAG_NODE
-                            dragNodeId = hitNode.id
-                            onSelectNode(hitNode.id)
+                            val inSelection = hitNode.id in selectedNodeIds
+                            if (inSelection && selectedNodeIds.size > 1) {
+                                mode = GestureMode.DRAG_SELECTED
+                                gestureStartWorld = selectedNodeIds.associateWith { id ->
+                                    graph.nodes.find { it.id == id }?.let { Offset(it.x, it.y) } ?: Offset.Zero
+                                }
+                                dragAccum = Offset.Zero
+                            } else {
+                                mode = GestureMode.DRAG_NODE
+                                dragOverride = mapOf(hitNode.id to Offset(hitNode.x, hitNode.y))
+                                gestureStartWorld = mapOf(hitNode.id to Offset(hitNode.x, hitNode.y))
+                                onTapNode(hitNode.id)
+                            }
                         } else {
                             mode = GestureMode.PAN
-                            onDeselectNode()
+                            boxStart = downScreen
+                            onClearSelection()
                         }
                         var wasMultiTouch = false
                         var lastEvent: androidx.compose.ui.input.pointer.PointerInputChange? = null
@@ -348,6 +440,8 @@ private fun WorkflowGraphCanvas(
                                 mode = GestureMode.NONE
                                 dragOverride = null
                                 linkPreview = null
+                                linkHoverPort = null
+                                selectionBox = null
                                 val p1 = event.changes[0].position
                                 val p2 = event.changes[1].position
                                 val prevP1 = event.changes[0].previousPosition
@@ -368,18 +462,48 @@ private fun WorkflowGraphCanvas(
                                     wasMultiTouch = false
                                 }
                                 when (mode) {
-                                    GestureMode.PAN -> offsetState.value += changed.positionChange()
+                                    GestureMode.PAN -> {
+                                        val delta = changed.positionChange()
+                                        if (delta.getDistance() > 2.dp.toPx()) {
+                                            mode = GestureMode.SELECT_BOX
+                                            selectionBox = boxStart to downScreen
+                                            tapCandidate = false
+                                        }
+                                    }
+                                    GestureMode.SELECT_BOX -> {
+                                        selectionBox = boxStart to changed.position
+                                        tapCandidate = false
+                                    }
                                     GestureMode.DRAG_NODE -> {
                                         val node = hitNode ?: break
                                         val delta = changed.positionChange() / scaleState.floatValue
                                         dragAccum += delta
-                                        dragOverride = node.id to Offset(
-                                            snap(node.x + dragAccum.x),
-                                            snap(node.y + dragAccum.y),
+                                        tapCandidate = tapCandidate && delta.getDistance() < 1f
+                                        dragOverride = mapOf(
+                                            node.id to Offset(
+                                                snap(gestureStartWorld!![node.id]!!.x + dragAccum.x),
+                                                snap(gestureStartWorld!![node.id]!!.y + dragAccum.y),
+                                            )
                                         )
+                                    }
+                                    GestureMode.DRAG_SELECTED -> {
+                                        val delta = changed.positionChange() / scaleState.floatValue
+                                        dragAccum += delta
+                                        tapCandidate = false
+                                        val base = gestureStartWorld ?: emptyMap()
+                                        dragOverride = base.mapValues { (id, origin) ->
+                                            Offset(
+                                                snap(origin.x + dragAccum.x),
+                                                snap(origin.y + dragAccum.y),
+                                            )
+                                        }
                                     }
                                     GestureMode.LINK -> {
                                         linkPreview = linkPreview?.copy(second = changed.position)
+                                        val (targetNode, targetPort) = hitPort(changed.position)
+                                        linkHoverPort = if (targetNode != null && targetNode.id != hitNode?.id && targetPort != null) {
+                                            targetNode.id to targetPort
+                                        } else null
                                     }
                                     GestureMode.NONE -> Unit
                                 }
@@ -387,17 +511,58 @@ private fun WorkflowGraphCanvas(
                             changed.consume()
                             if (event.changes.all { it.changedToUp() }) break
                         }
+                        val up = lastEvent
                         when (mode) {
                             GestureMode.DRAG_NODE -> {
                                 val node = hitNode
                                 if (node != null) {
-                                    onMoveNode(node.id, snap(node.x + dragAccum.x), snap(node.y + dragAccum.y))
+                                    if (tapCandidate && up != null) {
+                                        val now = System.currentTimeMillis()
+                                        val isDouble = node.id == lastTapNode && now - lastTapTime < 350L
+                                        lastTapNode = node.id
+                                        lastTapTime = now
+                                        if (isDouble) {
+                                            onOpenEdit(node.id)
+                                        }
+                                    } else {
+                                        onMoveNode(
+                                            node.id,
+                                            snap(gestureStartWorld!![node.id]!!.x + dragAccum.x),
+                                            snap(gestureStartWorld!![node.id]!!.y + dragAccum.y),
+                                        )
+                                    }
                                 }
                                 dragOverride = null
                             }
+                            GestureMode.DRAG_SELECTED -> {
+                                if (dragAccum.getDistance() > 0.01f) {
+                                    onMoveSelected(snap(dragAccum.x), snap(dragAccum.y))
+                                }
+                                dragOverride = null
+                            }
+                            GestureMode.SELECT_BOX -> {
+                                val box = selectionBox ?: (boxStart to downScreen)
+                                val minX = minOf(box.first.x, box.second.x)
+                                val maxX = maxOf(box.first.x, box.second.x)
+                                val minY = minOf(box.first.y, box.second.y)
+                                val maxY = maxOf(box.first.y, box.second.y)
+                                if (maxX - minX > 4f && maxY - minY > 4f) {
+                                    val s = scaleState.floatValue
+                                    val o = offsetState.value
+                                    val hit = graph.nodes.filter { node ->
+                                        val p = Offset(node.x, node.y)
+                                        val screenP = Offset(p.x * s + o.x, p.y * s + o.y)
+                                        Rect(screenP.x, screenP.y, screenP.x + nodeW, screenP.y + nodeH).let { r ->
+                                            r.left < maxX && r.right > minX && r.top < maxY && r.bottom > minY
+                                        }
+                                    }.map { it.id }
+                                    if (hit.isNotEmpty()) onSelectBox(hit.toSet())
+                                }
+                                selectionBox = null
+                            }
                             GestureMode.LINK -> {
                                 linkPreview = null
-                                val up = lastEvent
+                                linkHoverPort = null
                                 if (up != null) {
                                     val (targetNode, _) = hitTest(up.position)
                                     if (targetNode != null && targetNode.id != hitNode?.id) {
@@ -428,18 +593,38 @@ private fun WorkflowGraphCanvas(
                 val end = portWorld(to, edge.toPort)
                 val startScreen = Offset(start.x * scaleState.floatValue + offsetState.value.x, start.y * scaleState.floatValue + offsetState.value.y)
                 val endScreen = Offset(end.x * scaleState.floatValue + offsetState.value.x, end.y * scaleState.floatValue + offsetState.value.y)
-                drawEdge(startScreen, endScreen, edgeColor(progressById[to.id]?.status))
+                drawSmoothStepEdge(startScreen, endScreen, edgeColor(progressById[to.id]?.status))
             }
 
             val preview = linkPreview
             if (preview != null) {
-                drawEdge(preview.first, preview.second, colorScheme.primary)
+                val color = if (linkHoverPort != null) colorScheme.tertiary else colorScheme.primary
+                drawSmoothStepEdge(preview.first, preview.second, color)
+            }
+
+            val box = selectionBox
+            if (box != null) {
+                val minX = minOf(box.first.x, box.second.x)
+                val maxX = maxOf(box.first.x, box.second.x)
+                val minY = minOf(box.first.y, box.second.y)
+                val maxY = maxOf(box.first.y, box.second.y)
+                drawRect(
+                    color = colorScheme.primary.copy(alpha = 0.12f),
+                    topLeft = Offset(minX, minY),
+                    size = Size(maxX - minX, maxY - minY),
+                )
+                drawRect(
+                    color = colorScheme.primary,
+                    topLeft = Offset(minX, minY),
+                    size = Size(maxX - minX, maxY - minY),
+                    style = Stroke(width = 1.dp.toPx()),
+                )
             }
 
             for (node in graph.nodes) {
                 val p = nodeScreen(node)
                 val status = progressById[node.id]?.status
-                val isSelected = node.id == selectedNodeId
+                val isSelected = node.id in selectedNodeIds
                 val borderColor = when {
                     isSelected -> colorScheme.primary
                     status == StepStatus.SUCCESS -> Color(0xFF2E7D32)
@@ -467,7 +652,8 @@ private fun WorkflowGraphCanvas(
                     isSelected = isSelected,
                     textMeasurer = textMeasurer,
                 )
-                drawPorts(node, p, nodeW, nodeH, portRadius, edgeColor(status))
+                val hovered = linkHoverPort?.first == node.id
+                drawPorts(node, p, nodeW, nodeH, portRadius, edgeColor(status), hovered)
             }
 
             drawMinimap(
@@ -514,7 +700,7 @@ private fun ZoomControlButton(
     }
 }
 
-private enum class GestureMode { NONE, PAN, DRAG_NODE, LINK }
+private enum class GestureMode { NONE, PAN, SELECT_BOX, DRAG_NODE, DRAG_SELECTED, LINK }
 
 private fun outputPorts(node: WorkflowNode): List<String> =
     if (node.type == NodeType.IF) listOf("true", "false") else listOf("out")
@@ -537,14 +723,27 @@ private fun DrawScope.drawGrid(scale: Float, offset: Offset) {
     }
 }
 
-private fun DrawScope.drawEdge(start: Offset, end: Offset, color: Color) {
-    val midX = (start.x + end.x) / 2f
+private fun DrawScope.drawSmoothStepEdge(start: Offset, end: Offset, color: Color) {
+    val strokeWidth = 2.dp.toPx()
+    if (abs(end.y - start.y) < 1f) {
+        drawLine(color = color, start = start, end = end, strokeWidth = strokeWidth)
+        return
+    }
+    val radius = minOf(10.dp.toPx(), abs(end.y - start.y) / 2f)
+    val gap = end.x - start.x
+    val offset = if (gap > 0) minOf(28.dp.toPx(), gap / 2f) else 28.dp.toPx()
+    val dir = if (gap >= 0f) 1f else -1f
+    val sign = if (end.y >= start.y) 1f else -1f
+    val cornerX = start.x + dir * offset
     val path = Path().apply {
         moveTo(start.x, start.y)
-        cubicTo(midX, start.y, midX, end.y, end.x, end.y)
+        lineTo(cornerX - dir * radius, start.y)
+        quadraticTo(cornerX, start.y, cornerX, start.y + sign * radius)
+        lineTo(cornerX, end.y - sign * radius)
+        quadraticTo(cornerX, end.y, cornerX + dir * radius, end.y)
+        lineTo(end.x, end.y)
     }
-    drawPath(path, color, style = Stroke(width = 2.dp.toPx()))
-    drawCircle(color, radius = 3.dp.toPx(), center = end)
+    drawPath(path, color, style = Stroke(width = strokeWidth))
 }
 
 private fun DrawScope.drawNode(
@@ -595,21 +794,23 @@ private fun DrawScope.drawPorts(
     nodeH: Float,
     portRadius: Float,
     portColor: Color,
+    hovered: Boolean = false,
 ) {
+    val highlightColor = if (hovered) Color(0xFFFFB300) else portColor
     drawCircle(
-        color = portColor,
-        radius = portRadius,
+        color = highlightColor,
+        radius = if (hovered) portRadius * 1.6f else portRadius,
         center = Offset(topLeft.x, topLeft.y + nodeH / 2f),
-        style = Stroke(width = 2.dp.toPx()),
+        style = Stroke(width = if (hovered) 3.dp.toPx() else 2.dp.toPx()),
     )
     val outs = outputPorts(node)
     outs.forEachIndexed { index, _ ->
         val y = if (outs.size == 1) nodeH / 2f else nodeH / 4f + index * nodeH / 2f
         drawCircle(
-            color = portColor,
-            radius = portRadius,
+            color = highlightColor,
+            radius = if (hovered) portRadius * 1.6f else portRadius,
             center = Offset(topLeft.x + nodeW, topLeft.y + y),
-            style = Stroke(width = 2.dp.toPx()),
+            style = Stroke(width = if (hovered) 3.dp.toPx() else 2.dp.toPx()),
         )
     }
 }
@@ -675,7 +876,7 @@ private fun AddNodeSheet(
     onDismiss: () -> Unit,
     onSelect: (NodeType) -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState()) {
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden)) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
             Text("添加节点", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
@@ -688,6 +889,7 @@ private fun AddNodeSheet(
                 item { NodeTypeRow(NodeType.IF, "条件分支", "按条件走 true/false 分支", { onSelect(NodeType.IF) }) }
                 item { NodeTypeRow(NodeType.FOR, "循环", "逐项批量处理", { onSelect(NodeType.FOR) }) }
                 item { NodeTypeRow(NodeType.MERGE, "汇聚", "合并多分支输出", { onSelect(NodeType.MERGE) }) }
+                item { NodeTypeRow(NodeType.EXTRACT, "提取", "正则/JSON 提取上游输出", { onSelect(NodeType.EXTRACT) }) }
                 item { NodeTypeRow(NodeType.DELAY, "延迟", "等待指定时间", { onSelect(NodeType.DELAY) }) }
                 item { NodeTypeRow(NodeType.OUTPUT, "输出", "渲染最终结果", { onSelect(NodeType.OUTPUT) }) }
                 item { NodeTypeRow(NodeType.END, "结束", "流程出口", { onSelect(NodeType.END) }) }
@@ -734,8 +936,10 @@ private fun NodeEditSheet(
     onUpdate: (String, StepConfig) -> Unit,
     onRemove: () -> Unit,
     onRemoveEdge: (String) -> Unit,
+    onUpdateEdgeCondition: (String, String?) -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState()) {
+    var editingEdge by remember { mutableStateOf<WorkflowEdge?>(null) }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden)) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -750,14 +954,28 @@ private fun NodeEditSheet(
                 Text("连线", style = MaterialTheme.typography.labelMedium)
                 relatedEdges.forEach { edge ->
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { editingEdge = edge }
+                            .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            text = "${graph.nodes.find { it.id == edge.fromNodeId }?.name.orEmpty()} → ${graph.nodes.find { it.id == edge.toNodeId }?.name.orEmpty()}",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f),
-                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "${graph.nodes.find { it.id == edge.fromNodeId }?.name.orEmpty()} → ${graph.nodes.find { it.id == edge.toNodeId }?.name.orEmpty()}",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Text(
+                                text = edgeConditionLabel(edge.condition),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (edge.condition.isNullOrBlank()) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                } else {
+                                    MaterialTheme.colorScheme.primary
+                                },
+                            )
+                        }
                         IconButton(onClick = { onRemoveEdge(edge.id) }, modifier = Modifier.size(28.dp)) {
                             Icon(
                                 HugeIcons.Delete01,
@@ -769,6 +987,189 @@ private fun NodeEditSheet(
                     }
                 }
             }
+        }
+    }
+
+    val edgeToEdit = editingEdge
+    if (edgeToEdit != null) {
+        EdgeConditionDialog(
+            fromName = graph.nodes.find { it.id == edgeToEdit.fromNodeId }?.name.orEmpty(),
+            toName = graph.nodes.find { it.id == edgeToEdit.toNodeId }?.name.orEmpty(),
+            initialCondition = edgeToEdit.condition,
+            onConfirm = { condition ->
+                onUpdateEdgeCondition(edgeToEdit.id, condition)
+                editingEdge = null
+            },
+            onDismiss = { editingEdge = null },
+        )
+    }
+}
+
+@Composable
+private fun edgeConditionLabel(condition: String?): String {
+    val c = condition?.trim().orEmpty()
+    if (c.isBlank()) return "无条件（成功时传递）"
+    return when (c.lowercase()) {
+        "success", "ok", "on_success" -> "成功时执行"
+        "error", "failed", "on_error" -> "失败时执行（错误处理）"
+        "true" -> "结果为 true 时执行"
+        "false" -> "结果为 false 时执行"
+        else -> "匹配正则：$c"
+    }
+}
+
+@Composable
+private fun EdgeConditionDialog(
+    fromName: String,
+    toName: String,
+    initialCondition: String?,
+    onConfirm: (String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val initial = initialCondition?.trim().orEmpty()
+    val initialMode = when {
+        initial.isBlank() -> EdgeConditionMode.DEFAULT
+        initial.equals("success", true) || initial.equals("ok", true) || initial.equals("on_success", true) ->
+            EdgeConditionMode.SUCCESS
+        initial.equals("error", true) || initial.equals("failed", true) || initial.equals("on_error", true) ->
+            EdgeConditionMode.ERROR
+        initial.equals("true", true) -> EdgeConditionMode.TRUE
+        initial.equals("false", true) -> EdgeConditionMode.FALSE
+        else -> EdgeConditionMode.CUSTOM
+    }
+    var mode by remember { mutableStateOf(initialMode) }
+    var custom by remember { mutableStateOf(if (initialMode == EdgeConditionMode.CUSTOM) initial else "") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text("连线条件")
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "$fromName → $toName",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                EdgeConditionOption(
+                    selected = mode == EdgeConditionMode.DEFAULT,
+                    title = "默认",
+                    subtitle = "源节点成功后传递",
+                    onClick = { mode = EdgeConditionMode.DEFAULT },
+                )
+                EdgeConditionOption(
+                    selected = mode == EdgeConditionMode.SUCCESS,
+                    title = "成功",
+                    subtitle = "源节点成功才执行",
+                    onClick = { mode = EdgeConditionMode.SUCCESS },
+                )
+                EdgeConditionOption(
+                    selected = mode == EdgeConditionMode.ERROR,
+                    title = "失败（错误处理）",
+                    subtitle = "源节点失败时执行，用于补救错误",
+                    onClick = { mode = EdgeConditionMode.ERROR },
+                )
+                EdgeConditionOption(
+                    selected = mode == EdgeConditionMode.TRUE,
+                    title = "true",
+                    subtitle = "源输出为 true 时执行",
+                    onClick = { mode = EdgeConditionMode.TRUE },
+                )
+                EdgeConditionOption(
+                    selected = mode == EdgeConditionMode.FALSE,
+                    title = "false",
+                    subtitle = "源输出为 false 时执行",
+                    onClick = { mode = EdgeConditionMode.FALSE },
+                )
+                EdgeConditionOption(
+                    selected = mode == EdgeConditionMode.CUSTOM,
+                    title = "自定义正则",
+                    subtitle = "匹配源输出的正则表达式",
+                    onClick = { mode = EdgeConditionMode.CUSTOM },
+                )
+                if (mode == EdgeConditionMode.CUSTOM) {
+                    OutlinedTextField(
+                        value = custom,
+                        onValueChange = { custom = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("正则表达式") },
+                        singleLine = true,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onConfirm(
+                        when (mode) {
+                            EdgeConditionMode.DEFAULT -> null
+                            EdgeConditionMode.SUCCESS -> "success"
+                            EdgeConditionMode.ERROR -> "error"
+                            EdgeConditionMode.TRUE -> "true"
+                            EdgeConditionMode.FALSE -> "false"
+                            EdgeConditionMode.CUSTOM -> custom.trim().ifBlank { null }
+                        }
+                    )
+                }
+            ) {
+                Text("确定")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
+}
+
+private enum class EdgeConditionMode { DEFAULT, SUCCESS, ERROR, TRUE, FALSE, CUSTOM }
+
+@Composable
+private fun EdgeConditionOption(
+    selected: Boolean,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(
+                if (selected) {
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                }
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (selected) {
+            Icon(
+                HugeIcons.Flowchart02,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
         }
     }
 }
@@ -800,6 +1201,7 @@ private fun NodeConfigEditor(
             is DelayStepConfig -> DelayConfigEditor(config, node.id) { onUpdate(name, it) }
             is IfStepConfig -> IfConfigEditor(config, node.id) { onUpdate(name, it) }
             is ForStepConfig -> ForConfigEditor(config, node.id) { onUpdate(name, it) }
+            is ExtractStepConfig -> ExtractConfigEditor(config, node.id) { onUpdate(name, it) }
             is OutputStepConfig -> OutputConfigEditor(config, node.id) { onUpdate(name, it) }
             is StartStepConfig -> NoConfigHint("开始节点无需配置")
             is EndStepConfig -> NoConfigHint("结束节点无需配置")
@@ -1026,6 +1428,148 @@ private fun ForConfigEditor(
 }
 
 @Composable
+private fun ExtractConfigEditor(
+    config: ExtractStepConfig,
+    name: String,
+    onChange: (StepConfig) -> Unit,
+) {
+    var modeText by rememberSaveable(name, config.mode.name) { mutableStateOf(config.mode.name) }
+    var source by rememberSaveable(name, config.source) { mutableStateOf(config.source) }
+    var expression by rememberSaveable(name, config.expression) { mutableStateOf(config.expression) }
+    var group by rememberSaveable(name, config.group) { mutableStateOf(config.group.toString()) }
+    var defaultValue by rememberSaveable(name, config.defaultValue) { mutableStateOf(config.defaultValue) }
+    var startIndex by rememberSaveable(name, config.startIndex) { mutableStateOf(config.startIndex.toString()) }
+    var length by rememberSaveable(name, config.length) { mutableStateOf(config.length.toString()) }
+    var others by rememberSaveable(name, config.others.joinToString("\n")) {
+        mutableStateOf(config.others.joinToString("\n"))
+    }
+    var separator by rememberSaveable(name, config.separator) { mutableStateOf(config.separator) }
+
+    OutlinedTextField(
+        value = source,
+        onValueChange = {
+            source = it
+            onChange(config.copy(source = it))
+        },
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text("数据来源") },
+        supportingText = { Text("可用 {{node.<id>.output}} 引用上游输出") },
+        singleLine = true,
+    )
+
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf("REGEX", "JSON", "SUB", "CONCAT").forEach { m ->
+            FilterChip(
+                selected = modeText == m,
+                onClick = {
+                    modeText = m
+                    val mode = runCatching { ExtractMode.valueOf(m) }.getOrDefault(ExtractMode.REGEX)
+                    onChange(config.copy(mode = mode))
+                },
+                label = { Text(m) },
+            )
+        }
+    }
+
+    when (runCatching { ExtractMode.valueOf(modeText) }.getOrDefault(ExtractMode.REGEX)) {
+        ExtractMode.REGEX -> {
+            OutlinedTextField(
+                value = expression,
+                onValueChange = {
+                    expression = it
+                    onChange(config.copy(expression = it))
+                },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("正则表达式") },
+                supportingText = { Text("如 (\\d+)；匹配失败时使用默认值") },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = group,
+                onValueChange = {
+                    group = it
+                    onChange(config.copy(group = it.toIntOrNull() ?: 0))
+                },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("捕获组序号（默认 0 表示整体）") },
+                singleLine = true,
+            )
+        }
+        ExtractMode.JSON -> {
+            OutlinedTextField(
+                value = expression,
+                onValueChange = {
+                    expression = it
+                    onChange(config.copy(expression = it))
+                },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("JSON 路径") },
+                supportingText = { Text("如 $.items[0].name 或 $['key']") },
+                singleLine = true,
+            )
+        }
+        ExtractMode.SUB -> {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = startIndex,
+                    onValueChange = {
+                        startIndex = it
+                        onChange(config.copy(startIndex = it.toIntOrNull() ?: 0))
+                    },
+                    modifier = Modifier.weight(1f),
+                    label = { Text("起始位置") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = length,
+                    onValueChange = {
+                        length = it
+                        onChange(config.copy(length = it.toIntOrNull() ?: 0))
+                    },
+                    modifier = Modifier.weight(1f),
+                    label = { Text("长度（0 到末尾）") },
+                    singleLine = true,
+                )
+            }
+        }
+        ExtractMode.CONCAT -> {
+            OutlinedTextField(
+                value = others,
+                onValueChange = {
+                    others = it
+                    onChange(config.copy(others = it.lines().filter { line -> line.isNotBlank() }))
+                },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("拼接内容") },
+                supportingText = { Text("每行一项，与 source 一起用分隔符拼接") },
+                minLines = 2,
+            )
+            OutlinedTextField(
+                value = separator,
+                onValueChange = {
+                    separator = it
+                    onChange(config.copy(separator = it))
+                },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("分隔符") },
+                singleLine = true,
+            )
+        }
+    }
+
+    OutlinedTextField(
+        value = defaultValue,
+        onValueChange = {
+            defaultValue = it
+            onChange(config.copy(defaultValue = it))
+        },
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text("默认值（提取失败时使用）") },
+        singleLine = true,
+    )
+}
+
+@Composable
 private fun OutputConfigEditor(
     config: OutputStepConfig,
     name: String,
@@ -1050,14 +1594,17 @@ private fun RunSummaryBar(
     succeeded: Boolean,
     progress: List<RunProgress>,
     running: Boolean,
+    logs: List<WorkflowRunLogEntry>,
+    error: String,
     onDismiss: () -> Unit,
 ) {
+    var showLogs by remember { mutableStateOf(false) }
     val statusText = when {
         running -> "运行中..."
         succeeded -> "运行完成"
-        else -> "运行失败，已终止"
+        else -> "运行失败"
     }
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(
@@ -1066,22 +1613,89 @@ private fun RunSummaryBar(
                 else MaterialTheme.colorScheme.errorContainer
             )
             .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (running) {
-            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-            Spacer(Modifier.width(8.dp))
-        }
-        Text(
-            text = "$statusText（成功 ${progress.count { it.status == StepStatus.SUCCESS }}/${progress.size}）",
-            style = MaterialTheme.typography.bodySmall,
-        )
-        Spacer(Modifier.weight(1f))
-        if (!running) {
-            TextButton(onClick = onDismiss) {
-                Text("清除")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (running) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(
+                text = "$statusText（成功 ${progress.count { it.status == StepStatus.SUCCESS }}/${progress.size}）",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { showLogs = true }) {
+                Text("日志")
+            }
+            if (!running) {
+                TextButton(onClick = onDismiss) {
+                    Text("清除")
+                }
             }
         }
+        if (!running && error.isNotBlank()) {
+            Text(
+                text = error,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+
+    if (showLogs) {
+        AlertDialog(
+            onDismissRequest = { showLogs = false },
+            title = { Text("执行日志") },
+            text = {
+                if (logs.isEmpty()) {
+                    Text("暂无日志", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.height(360.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        items(logs.size) { index ->
+                            val entry = logs[index]
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    text = "${entry.level.name.lowercase()}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = when (entry.level) {
+                                        WorkflowLogLevel.ERROR -> MaterialTheme.colorScheme.error
+                                        WorkflowLogLevel.WARN -> MaterialTheme.colorScheme.tertiary
+                                        WorkflowLogLevel.DEBUG -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    modifier = Modifier.width(40.dp),
+                                )
+                                Column {
+                                    if (entry.nodeName != null) {
+                                        Text(
+                                            text = entry.nodeName,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                    Text(
+                                        text = entry.message,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLogs = false }) {
+                    Text("关闭")
+                }
+            },
+        )
     }
 }
 
@@ -1096,6 +1710,7 @@ private fun nodeTypeIcon(type: NodeType): ImageVector = when (type) {
     NodeType.IF -> HugeIcons.GitBranch
     NodeType.FOR -> HugeIcons.Repeat
     NodeType.MERGE -> HugeIcons.GitMerge
+    NodeType.EXTRACT -> HugeIcons.Flowchart02
     NodeType.OUTPUT -> HugeIcons.Flowchart02
 }
 
@@ -1110,6 +1725,7 @@ private fun nodeTypeLabel(type: NodeType): String = when (type) {
     NodeType.IF -> "条件分支"
     NodeType.FOR -> "循环"
     NodeType.MERGE -> "汇聚"
+    NodeType.EXTRACT -> "提取"
     NodeType.OUTPUT -> "输出"
 }
 

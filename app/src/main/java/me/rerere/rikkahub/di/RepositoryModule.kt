@@ -5,6 +5,10 @@ import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.files.WorkspaceMounts
+import me.rerere.rikkahub.data.ai.agent.AcpEnvironmentManager
+import me.rerere.rikkahub.data.ai.agent.AcpMcpServersBuilder
+import me.rerere.rikkahub.data.ai.agent.AcpRuntime
+import me.rerere.rikkahub.data.ai.agent.ScriptMcpBridge
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FavoriteRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
@@ -17,6 +21,7 @@ import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.ProotShellRunner
 import me.rerere.workspace.RootfsInstaller
 import me.rerere.workspace.WorkspaceManager
+import me.rerere.workspace.WorkspaceProcessRunner
 import org.koin.dsl.module
 import java.io.File
 
@@ -61,6 +66,47 @@ val repositoryModule = module {
         RootfsInstaller(get())
     }
 
+    // 长驻进程 runner：供 ACP 平台 Agent 在 PRoot 容器内以交互式 stdio 子进程运行
+    single {
+        val context: Context = get()
+        WorkspaceProcessRunner(
+            baseDir = File(context.filesDir, "workspaces"),
+            bindMounts = WorkspaceMounts.androidLocalMounts(context),
+            nativeLibraryDir = File(context.applicationInfo.nativeLibraryDir),
+        )
+    }
+
+    single {
+        AcpEnvironmentManager(get())
+    }
+
+    single {
+        AcpRuntime(
+            environmentManager = get(),
+            processRunner = get(),
+            json = get(),
+            scope = get(),
+            mcpServersBuilder = get(),
+        )
+    }
+
+    single {
+        AcpMcpServersBuilder(
+            pluginManager = get(),
+            scriptRuntime = get(),
+            settingsStore = get(),
+            scriptBridge = get(),
+        )
+    }
+
+    single {
+        ScriptMcpBridge(
+            pluginManager = get(),
+            scriptRuntime = get(),
+            settingsStore = get(),
+        )
+    }
+
     single {
         WorkspaceRepository(get(), get(), get(), get(), get())
     }
@@ -74,7 +120,7 @@ val repositoryModule = module {
     }
 
     single {
-        WorkflowRepository(get())
+        WorkflowRepository(get(), get())
     }
 
     single {
@@ -89,12 +135,12 @@ val repositoryModule = module {
         me.rerere.rikkahub.data.plugin.PluginManager(get())
     }
 
-    single<me.rerere.rikkahub.data.operit.OperitChatBridge> {
-        me.rerere.rikkahub.data.chat.RikkaOperitChatBridge(get(), get(), get())
+    single<me.rerere.rikkahub.data.script.ScriptChatBridge> {
+        me.rerere.rikkahub.data.chat.RikkaScriptChatBridge(get(), get(), get())
     }
 
     single {
-        me.rerere.rikkahub.data.operit.OperitScriptRuntime(get(), get())
+        me.rerere.rikkahub.data.script.ScriptRuntime(get(), get(), get(), get())
     }
 
     single {
@@ -106,6 +152,6 @@ val repositoryModule = module {
     }
 
     single {
-        me.rerere.rikkahub.data.api.OperitMarketDataSource.create(get(), get())
+        me.rerere.rikkahub.data.api.CommunityMarketDataSource.create(get(), get())
     }
 }

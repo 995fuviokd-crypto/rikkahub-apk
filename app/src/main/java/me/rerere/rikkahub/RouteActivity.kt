@@ -104,7 +104,6 @@ import me.rerere.rikkahub.ui.pages.extensions.workflow.WorkflowEditorPage
 import me.rerere.rikkahub.ui.pages.extensions.group.GroupDetailPage
 import me.rerere.rikkahub.ui.pages.extensions.group.GroupEditorPage
 import me.rerere.rikkahub.ui.pages.extensions.group.GroupListPage
-import me.rerere.rikkahub.ui.pages.extensions.group.GroupRunPage
 import me.rerere.rikkahub.ui.pages.extensions.permission.PermissionPage
 import me.rerere.rikkahub.ui.pages.extensions.plugin.PluginMarketPage
 import me.rerere.workspace.WorkspaceStorageArea
@@ -113,14 +112,14 @@ import me.rerere.rikkahub.ui.pages.history.HistoryPage
 import me.rerere.rikkahub.ui.pages.imggen.ImageGenPage
 import me.rerere.rikkahub.ui.pages.log.LogPage
 import me.rerere.rikkahub.ui.pages.search.SearchPage
-import me.rerere.rikkahub.ui.pages.setting.SettingAboutPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesThemePage
-import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesNotificationPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesGeneralPage
+import me.rerere.rikkahub.ui.pages.setting.SettingGlobalPromptPage
+import me.rerere.rikkahub.ui.pages.setting.SettingAgentPage
+import me.rerere.rikkahub.ui.pages.setting.SettingNetworkProxyPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesUIPage
 import me.rerere.rikkahub.ui.pages.setting.SettingThemePage
-import me.rerere.rikkahub.ui.pages.setting.SettingDonatePage
 import me.rerere.rikkahub.ui.pages.setting.SettingFilesPage
 import me.rerere.rikkahub.ui.pages.setting.SettingMcpPage
 import me.rerere.rikkahub.ui.pages.setting.SettingModelPage
@@ -430,12 +429,20 @@ class RouteActivity : ComponentActivity() {
                                 SettingPreferencesThemePage()
                             }
 
-                            entry<Screen.SettingPreferencesNotification> {
-                                SettingPreferencesNotificationPage()
-                            }
-
                             entry<Screen.SettingPreferencesGeneral> {
                                 SettingPreferencesGeneralPage()
+                            }
+
+                            entry<Screen.SettingGlobalPrompt> {
+                                SettingGlobalPromptPage()
+                            }
+
+                            entry<Screen.SettingAgent> {
+                                SettingAgentPage()
+                            }
+
+                            entry<Screen.SettingNetworkProxy> {
+                                SettingNetworkProxyPage()
                             }
 
                             entry<Screen.SettingPreferencesUI> {
@@ -455,10 +462,6 @@ class RouteActivity : ComponentActivity() {
                                 SettingModelPage()
                             }
 
-                            entry<Screen.SettingAbout> {
-                                SettingAboutPage()
-                            }
-
                             entry<Screen.SettingSearch> {
                                 SettingSearchPage()
                             }
@@ -474,10 +477,6 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.SettingMcp> {
                                 SettingMcpPage()
-                            }
-
-                            entry<Screen.SettingDonate> {
-                                SettingDonatePage()
                             }
 
                             entry<Screen.SettingFiles> {
@@ -566,10 +565,6 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.GroupDetail> { key ->
                                 GroupDetailPage(id = key.id)
-                            }
-
-                            entry<Screen.GroupRun> { key ->
-                                GroupRunPage(runId = key.runId)
                             }
 
                             entry<Screen.Permissions> {
@@ -688,10 +683,16 @@ sealed interface Screen : NavKey {
     data object SettingPreferencesTheme : Screen
 
     @Serializable
-    data object SettingPreferencesNotification : Screen
+    data object SettingPreferencesGeneral : Screen
 
     @Serializable
-    data object SettingPreferencesGeneral : Screen
+    data object SettingGlobalPrompt : Screen
+
+    @Serializable
+    data object SettingAgent : Screen
+
+    @Serializable
+    data object SettingNetworkProxy : Screen
 
     @Serializable
     data object SettingPreferencesUI : Screen
@@ -706,9 +707,6 @@ sealed interface Screen : NavKey {
     data object SettingModels : Screen
 
     @Serializable
-    data object SettingAbout : Screen
-
-    @Serializable
     data object SettingSearch : Screen
 
     @Serializable
@@ -719,9 +717,6 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingMcp : Screen
-
-    @Serializable
-    data object SettingDonate : Screen
 
     @Serializable
     data object SettingFiles : Screen
@@ -785,9 +780,6 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data class GroupDetail(val id: String) : Screen
-
-    @Serializable
-    data class GroupRun(val runId: String) : Screen
 
     @Serializable
     data object Permissions : Screen

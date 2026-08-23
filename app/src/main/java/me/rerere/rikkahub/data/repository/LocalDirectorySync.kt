@@ -6,6 +6,8 @@ import android.provider.DocumentsContract
 import android.util.Log
 import java.io.File
 import java.io.FileNotFoundException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * SAF（Storage Access Framework）本地目录同步器。
@@ -41,7 +43,7 @@ object LocalDirectorySync {
         treeUri: Uri,
         mirrorDir: File,
         maxBytesPerFile: Long = 64L * 1024 * 1024,
-    ) {
+    ) = withContext(Dispatchers.IO) {
         if (!mirrorDir.exists()) mirrorDir.mkdirs()
         val resolver = context.contentResolver
         try {
@@ -60,8 +62,8 @@ object LocalDirectorySync {
         context: Context,
         treeUri: Uri,
         mirrorDir: File,
-    ) {
-        if (!mirrorDir.exists()) return
+    ) = withContext(Dispatchers.IO) {
+        if (!mirrorDir.exists()) return@withContext
         val resolver = context.contentResolver
         try {
             val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
@@ -79,49 +81,55 @@ object LocalDirectorySync {
         targetDir: File,
         maxBytesPerFile: Long,
     ) {
-        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
-        val cursor = resolver.query(
-            childrenUri,
-            arrayOf(
-                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                DocumentsContract.Document.COLUMN_MIME_TYPE,
-                DocumentsContract.Document.COLUMN_SIZE,
-                DocumentsContract.Document.COLUMN_LAST_MODIFIED,
-            ),
-            null, null, null,
-        ) ?: return
+        // 迭代式深度优先遍历，避免目录层级过深导致递归栈溢出
+        val stack = ArrayDeque<Pair<String, File>>()
+        stack.addLast(docId to targetDir)
+        while (stack.isNotEmpty()) {
+            val (currentId, dir) = stack.removeLast()
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, currentId)
+            val cursor = resolver.query(
+                childrenUri,
+                arrayOf(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE,
+                    DocumentsContract.Document.COLUMN_SIZE,
+                    DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+                ),
+                null, null, null,
+            ) ?: continue
 
-        cursor.use {
-            while (it.moveToNext()) {
-                val childId = it.getString(0) ?: continue
-                val name = it.getString(1) ?: continue
-                if (name.startsWith(".l2s.")) continue
-                val mime = it.getString(2) ?: return@use
-                val size = if (it.isNull(3)) -1L else it.getLong(3)
-                val lastModified = if (it.isNull(4)) 0L else it.getLong(4)
-                val target = File(targetDir, name)
+            cursor.use {
+                while (it.moveToNext()) {
+                    val childId = it.getString(0) ?: continue
+                    val name = it.getString(1) ?: continue
+                    if (name.startsWith(".l2s.")) continue
+                    val mime = it.getString(2) ?: break
+                    val size = if (it.isNull(3)) -1L else it.getLong(3)
+                    val lastModified = if (it.isNull(4)) 0L else it.getLong(4)
+                    val target = File(dir, name)
 
-                if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
-                    target.mkdirs()
-                    syncTreeToDir(resolver, treeUri, childId, target, maxBytesPerFile)
-                } else {
-                    val upToDate = target.isFile &&
-                        (size < 0 || target.length() == size) &&
-                        (lastModified <= 0 || target.lastModified() >= lastModified - 1_000L)
-                    if (!upToDate) {
-                        if (size > maxBytesPerFile) {
-                            Log.w(TAG, "skip oversized file: $name (${size}b > ${maxBytesPerFile}b)")
-                            continue
-                        }
-                        val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
-                        try {
-                            resolver.openInputStream(docUri)?.use { input ->
-                                target.parentFile?.mkdirs()
-                                target.outputStream().use { output -> input.copyTo(output) }
-                            } ?: Log.w(TAG, "openInputStream null: $name")
-                        } catch (e: FileNotFoundException) {
-                            Log.w(TAG, "skip unreadable file: $name", e)
+                    if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                        target.mkdirs()
+                        stack.addLast(childId to target)
+                    } else {
+                        val upToDate = target.isFile &&
+                            (size < 0 || target.length() == size) &&
+                            (lastModified <= 0 || target.lastModified() >= lastModified - 1_000L)
+                        if (!upToDate) {
+                            if (size > maxBytesPerFile) {
+                                Log.w(TAG, "skip oversized file: $name (${size}b > ${maxBytesPerFile}b)")
+                                continue
+                            }
+                            val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
+                            try {
+                                resolver.openInputStream(docUri)?.use { input ->
+                                    target.parentFile?.mkdirs()
+                                    target.outputStream().use { output -> input.copyTo(output) }
+                                } ?: Log.w(TAG, "openInputStream null: $name")
+                            } catch (e: FileNotFoundException) {
+                                Log.w(TAG, "skip unreadable file: $name", e)
+                            }
                         }
                     }
                 }
@@ -135,48 +143,54 @@ object LocalDirectorySync {
         docId: String,
         sourceDir: File,
     ) {
-        val children = sourceDir.listFiles()?.toList().orEmpty()
-        for (file in children) {
-            if (file.name.startsWith(".l2s.")) continue
-            val existing = findDocument(resolver, treeUri, docId, file.name)
-            if (file.isDirectory) {
-                val dirId = existing ?: createDocument(
-                    resolver, treeUri, docId,
-                    DocumentsContract.Document.MIME_TYPE_DIR, file.name,
-                ) ?: continue
-                syncDirToTree(resolver, treeUri, dirId, file)
-            } else {
-                val mime = file.extension.toMimeType() ?: "application/octet-stream"
-                val docUri = if (existing != null) {
-                    DocumentsContract.buildDocumentUriUsingTree(treeUri, existing)
+        // 迭代式深度优先遍历，避免目录层级过深导致递归栈溢出
+        val stack = ArrayDeque<Triple<String, File, String>>()
+        stack.addLast(Triple(docId, sourceDir, docId))
+        while (stack.isNotEmpty()) {
+            val (parentId, dir, _) = stack.removeLast()
+            val children = dir.listFiles()?.toList().orEmpty()
+            for (file in children) {
+                if (file.name.startsWith(".l2s.")) continue
+                val existing = findDocument(resolver, treeUri, parentId, file.name)
+                if (file.isDirectory) {
+                    val dirId = existing ?: createDocument(
+                        resolver, treeUri, parentId,
+                        DocumentsContract.Document.MIME_TYPE_DIR, file.name,
+                    ) ?: continue
+                    stack.addLast(Triple(dirId, file, parentId))
                 } else {
-                    createDocument(resolver, treeUri, docId, mime, file.name)?.let {
-                        DocumentsContract.buildDocumentUriUsingTree(treeUri, it)
-                    } ?: continue
-                }
-                val upToDate = try {
-                    val cur = resolver.query(
-                        docUri,
-                        arrayOf(DocumentsContract.Document.COLUMN_SIZE),
-                        null, null, null,
-                    )
-                    var same = false
-                    cur?.use {
-                        if (it.moveToFirst() && !it.isNull(0)) {
-                            same = it.getLong(0) == file.length()
-                        }
+                    val mime = file.extension.toMimeType() ?: "application/octet-stream"
+                    val docUri = if (existing != null) {
+                        DocumentsContract.buildDocumentUriUsingTree(treeUri, existing)
+                    } else {
+                        createDocument(resolver, treeUri, parentId, mime, file.name)?.let {
+                            DocumentsContract.buildDocumentUriUsingTree(treeUri, it)
+                        } ?: continue
                     }
-                    same
-                } catch (e: Throwable) {
-                    false
-                }
-                if (!upToDate) {
-                    try {
-                        resolver.openOutputStream(docUri, "wt")?.use { output ->
-                            file.inputStream().use { input -> input.copyTo(output) }
+                    val upToDate = try {
+                        val cur = resolver.query(
+                            docUri,
+                            arrayOf(DocumentsContract.Document.COLUMN_SIZE),
+                            null, null, null,
+                        )
+                        var same = false
+                        cur?.use {
+                            if (it.moveToFirst() && !it.isNull(0)) {
+                                same = it.getLong(0) == file.length()
+                            }
                         }
+                        same
                     } catch (e: Throwable) {
-                        Log.w(TAG, "write back failed: ${file.name}", e)
+                        false
+                    }
+                    if (!upToDate) {
+                        try {
+                            resolver.openOutputStream(docUri, "wt")?.use { output ->
+                                file.inputStream().use { input -> input.copyTo(output) }
+                            }
+                        } catch (e: Throwable) {
+                            Log.w(TAG, "write back failed: ${file.name}", e)
+                        }
                     }
                 }
             }

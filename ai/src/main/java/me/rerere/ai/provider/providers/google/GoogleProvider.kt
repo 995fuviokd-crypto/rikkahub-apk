@@ -40,6 +40,7 @@ import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.ProviderHttpClient
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.providers.PartGroup
@@ -68,7 +69,6 @@ import me.rerere.common.http.jsonPrimitiveOrNull
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -82,10 +82,10 @@ import kotlin.uuid.Uuid
 
 private const val TAG = "GoogleProvider"
 
-class GoogleProvider(private val client: OkHttpClient, context: Context? = null) : Provider<ProviderSetting.Google> {
+class GoogleProvider(private val client: ProviderHttpClient, context: Context? = null) : Provider<ProviderSetting.Google> {
     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
     private val serviceAccountTokenProvider by lazy {
-        ServiceAccountTokenProvider(client)
+        ServiceAccountTokenProvider(client.clientFor(null))
     }
 
     private fun buildUrl(providerSetting: ProviderSetting.Google, path: String): HttpUrl {
@@ -148,7 +148,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         val uploadUrl = buildUploadUrl(providerSetting)
 
         // 大文件上传耗时可能超过默认 writeTimeout(120s)，派生专用 client 放宽写超时
-        val uploadClient = client.newBuilder()
+        val uploadClient = client.clientFor(providerSetting.proxy).newBuilder()
             .writeTimeout(30, TimeUnit.MINUTES)
             .readTimeout(10, TimeUnit.MINUTES)
             .build()
@@ -248,7 +248,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     .get()
                     .build()
             )
-            val response = client.newCall(request).await()
+            val response = client.clientFor(providerSetting.proxy).newCall(request).await()
             if (response.isSuccessful) {
                 val body = response.body?.string() ?: error("empty body")
                 Log.d(TAG, "listModels: $body")
@@ -306,7 +306,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 .build()
         )
 
-        val response = client.newCall(request).await()
+        val response = client.clientFor(providerSetting.proxy).newCall(request).await()
         if (!response.isSuccessful) {
             throw Exception("Failed to get response: ${response.code} ${response.body?.string()}")
         }
@@ -429,7 +429,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             }
         }
 
-        val eventSource = EventSources.createFactory(client)
+        val eventSource = EventSources.createFactory(client.clientFor(providerSetting.proxy))
                 .newEventSource(request, listener)
 
         awaitClose {

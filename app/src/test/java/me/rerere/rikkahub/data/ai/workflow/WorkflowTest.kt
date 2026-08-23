@@ -3,6 +3,9 @@ package me.rerere.rikkahub.data.ai.workflow
 import me.rerere.rikkahub.data.model.AiStepConfig
 import me.rerere.rikkahub.data.model.DelayStepConfig
 import me.rerere.rikkahub.data.model.EndStepConfig
+import me.rerere.rikkahub.data.model.ExecutionStatus
+import me.rerere.rikkahub.data.model.ExtractMode
+import me.rerere.rikkahub.data.model.ExtractStepConfig
 import me.rerere.rikkahub.data.model.ForStepConfig
 import me.rerere.rikkahub.data.model.HttpStepConfig
 import me.rerere.rikkahub.data.model.IfStepConfig
@@ -17,8 +20,10 @@ import me.rerere.rikkahub.data.model.Workflow
 import me.rerere.rikkahub.data.model.WorkflowEdge
 import me.rerere.rikkahub.data.model.WorkflowGraph
 import me.rerere.rikkahub.data.model.WorkflowNode
+import me.rerere.rikkahub.data.model.WorkflowStats
 import me.rerere.rikkahub.data.model.WorkflowStep
 import me.rerere.rikkahub.data.model.legacyStepsToGraph
+import me.rerere.rikkahub.data.model.nodeReferenceIds
 import me.rerere.rikkahub.data.model.topologicalOrder
 import me.rerere.rikkahub.data.model.validate
 import me.rerere.rikkahub.utils.JsonInstant
@@ -311,5 +316,135 @@ class NodeTemplateTest {
             nodeOutputs = emptyMap(),
         )
         assertEquals("ab", rendered)
+    }
+}
+
+class EdgeConditionEvaluatorTest {
+    private fun edge(condition: String?, fromPort: String = "out") =
+        WorkflowEdge(id = "e", fromNodeId = "a", fromPort = fromPort, toNodeId = "b", condition = condition)
+
+    private val sourceNode = WorkflowNode(id = "a", type = NodeType.TEXT, name = "A")
+
+    @Test
+    fun `null condition follows success and blocks failure`() {
+        assertTrue(EdgeConditionEvaluator.shouldFollow(edge(null), sourceNode, NodeExecutionState.Success("x")))
+        assertFalse(EdgeConditionEvaluator.shouldFollow(edge(null), sourceNode, NodeExecutionState.Failed("err")))
+    }
+
+    @Test
+    fun `success condition follows only success`() {
+        assertTrue(EdgeConditionEvaluator.shouldFollow(edge("success"), sourceNode, NodeExecutionState.Success("x")))
+        assertTrue(EdgeConditionEvaluator.shouldFollow(edge("on_success"), sourceNode, NodeExecutionState.Success("x")))
+        assertFalse(EdgeConditionEvaluator.shouldFollow(edge("success"), sourceNode, NodeExecutionState.Failed("err")))
+    }
+
+    @Test
+    fun `error condition follows only failure`() {
+        assertTrue(EdgeConditionEvaluator.shouldFollow(edge("error"), sourceNode, NodeExecutionState.Failed("boom")))
+        assertTrue(EdgeConditionEvaluator.shouldFollow(edge("on_error"), sourceNode, NodeExecutionState.Failed("boom")))
+        assertFalse(EdgeConditionEvaluator.shouldFollow(edge("error"), sourceNode, NodeExecutionState.Success("ok")))
+    }
+
+    @Test
+    fun `true false conditions match boolean output`() {
+        assertTrue(EdgeConditionEvaluator.shouldFollow(edge("true"), sourceNode, NodeExecutionState.Success("true")))
+        assertTrue(EdgeConditionEvaluator.shouldFollow(edge("false"), sourceNode, NodeExecutionState.Success("0")))
+        assertFalse(EdgeConditionEvaluator.shouldFollow(edge("true"), sourceNode, NodeExecutionState.Success("0")))
+    }
+
+    @Test
+    fun `regex condition matches source output`() {
+        assertTrue(EdgeConditionEvaluator.shouldFollow(edge("\\d+"), sourceNode, NodeExecutionState.Success("abc123")))
+        assertFalse(EdgeConditionEvaluator.shouldFollow(edge("\\d+"), sourceNode, NodeExecutionState.Success("abc")))
+    }
+
+    @Test
+    fun `fromPort true false fallback for if node`() {
+        val ifNode = WorkflowNode(id = "a", type = NodeType.IF, name = "IF")
+        assertTrue(EdgeConditionEvaluator.shouldFollow(edge(null, "true"), ifNode, NodeExecutionState.Success("true")))
+        assertFalse(EdgeConditionEvaluator.shouldFollow(edge(null, "true"), ifNode, NodeExecutionState.Success("false")))
+        assertTrue(EdgeConditionEvaluator.shouldFollow(edge(null, "false"), ifNode, NodeExecutionState.Success("false")))
+    }
+
+    @Test
+    fun `hasErrorHandler detects error edge`() {
+        assertTrue(EdgeConditionEvaluator.hasErrorHandler(sourceNode, listOf(edge("error"))))
+        assertFalse(EdgeConditionEvaluator.hasErrorHandler(sourceNode, listOf(edge(null), edge("success"))))
+    }
+}
+
+class WorkflowGraphV3Test {
+    @Test
+    fun `extract node round-trips through json`() {
+        val graph = WorkflowGraph(
+            nodes = listOf(
+                WorkflowNode(id = "ex", type = NodeType.EXTRACT, name = "提取")
+                    .copy(config = ExtractStepConfig(mode = ExtractMode.REGEX, source = "{{node.a.output}}", expression = "(\\d+)")),
+            ),
+        )
+        val json = JsonInstant.encodeToString(graph)
+        val decoded = JsonInstant.decodeFromString<WorkflowGraph>(json)
+        assertEquals(graph, decoded)
+        assertEquals(3, graph.version)
+    }
+
+    @Test
+    fun `legacy edge json without condition decodes`() {
+        val legacy = """{"version":2,"nodes":[],"edges":[{"id":"e1","fromNodeId":"a","fromPort":"out","toNodeId":"b","toPort":"in"}]}"""
+        val graph = JsonInstant.decodeFromString<WorkflowGraph>(legacy)
+        assertEquals(1, graph.edges.size)
+        assertNull(graph.edges[0].condition)
+    }
+
+    @Test
+    fun `edge with condition round-trips`() {
+        val graph = WorkflowGraph(
+            nodes = emptyList(),
+            edges = listOf(WorkflowEdge(id = "e1", fromNodeId = "a", toNodeId = "b", condition = "error")),
+        )
+        val json = JsonInstant.encodeToString(graph)
+        val decoded = JsonInstant.decodeFromString<WorkflowGraph>(json)
+        assertEquals("error", decoded.edges[0].condition)
+    }
+
+    @Test
+    fun `node reference ids extracted from configs`() {
+        assertEquals(setOf("n1"), TextStepConfig("a {{node.n1.output}} b").nodeReferenceIds())
+        assertEquals(setOf("n2"), AiStepConfig("", "p {{node.n2.output|len}}").nodeReferenceIds())
+        assertEquals(setOf("n3"), ShellStepConfig("echo {{node.n3.output}}").nodeReferenceIds())
+        assertEquals(setOf("n4"), IfStepConfig("{{node.n4.output}} == 1").nodeReferenceIds())
+        assertEquals(setOf("n5"), ForStepConfig("{{node.n5.output}}", "x", "").nodeReferenceIds())
+        assertEquals(
+            setOf("n6", "n7"),
+            ExtractStepConfig(source = "{{node.n6.output}}", expression = "{{node.n7.output}}").nodeReferenceIds(),
+        )
+        assertEquals(setOf("n8"), OutputStepConfig("{{node.n8.output}}").nodeReferenceIds())
+    }
+
+    @Test
+    fun `withStats increments counters`() {
+        val wf = Workflow(id = "w", name = "wf")
+        val ok = wf.withStats(status = ExecutionStatus.SUCCESS, timestamp = 1000, success = true)
+        assertEquals(1L, ok.totalExecutions)
+        assertEquals(1L, ok.successfulExecutions)
+        assertEquals(0L, ok.failedExecutions)
+        assertEquals(ExecutionStatus.SUCCESS, ok.lastExecutionStatus)
+        assertEquals(1000L, ok.lastExecutionTime)
+
+        val fail = ok.withStats(status = ExecutionStatus.FAILED, timestamp = 2000, success = false)
+        assertEquals(2L, fail.totalExecutions)
+        assertEquals(1L, fail.successfulExecutions)
+        assertEquals(1L, fail.failedExecutions)
+        assertEquals(ExecutionStatus.FAILED, fail.lastExecutionStatus)
+    }
+
+    @Test
+    fun `stats snapshot round-trips`() {
+        val wf = Workflow(id = "w", name = "wf")
+            .withStats(status = ExecutionStatus.SUCCESS, timestamp = 1000, success = true)
+        val json = JsonInstant.encodeToString(wf.stats())
+        val decoded = JsonInstant.decodeFromString<WorkflowStats>(json)
+        assertEquals(1L, decoded.totalExecutions)
+        assertEquals(ExecutionStatus.SUCCESS, decoded.lastExecutionStatus)
     }
 }

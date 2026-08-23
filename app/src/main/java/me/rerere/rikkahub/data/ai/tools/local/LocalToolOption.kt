@@ -54,6 +54,10 @@ sealed class LocalToolOption {
     data object Root : LocalToolOption()
 
     @Serializable
-    @SerialName("operit_scripts")
-    data object OperitScripts : LocalToolOption()
+    @SerialName("scripts")
+    data object Scripts : LocalToolOption()
+
+    @Serializable
+    @SerialName("system_control")
+    data object SystemControl : LocalToolOption()
 }

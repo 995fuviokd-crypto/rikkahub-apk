@@ -107,7 +107,9 @@ internal class McpSessionRegistry(
     fun getStatus(configId: Uuid): Flow<McpStatus> = statusStore.get(configId)
 
     fun reconcile(configs: List<McpServerConfig>) {
+        // 本地命令型 MCP 需要外部进程运行环境，Android 端不支持，直接忽略（不连接、不显示状态）
         val activeConfigs = configs
+            .filter { it !is McpServerConfig.CommandServerConfig }
             .filter { it.commonOptions.enable && it.commonOptions.name.isNotBlank() }
             .associateBy { it.id }
 
@@ -167,6 +169,11 @@ internal class McpSessionRegistry(
     }
 
     suspend fun addClient(configInput: McpServerConfig) {
+        // 本地命令型 MCP 不受支持：不建立连接，直接清理可能残留的 session
+        if (configInput is McpServerConfig.CommandServerConfig) {
+            removeClient(configInput)
+            return
+        }
         // SettingsStore 是配置真源。旧任务排队后可能晚于新配置执行，不能再写回旧快照。
         val desiredConfig = settingsStore.settingsFlow.value.mcpServers.find { it.id == configInput.id }
         if (desiredConfig == null) {
@@ -444,7 +451,7 @@ internal class McpSessionRegistry(
 
         is McpServerConfig.CommandServerConfig ->
             throw UnsupportedOperationException(
-                "本地命令 MCP「${config.commonOptions.name}」需 Operit/Node 运行环境，" +
+                "本地命令 MCP「${config.commonOptions.name}」需 外部 Node 运行环境，" +
                     "RikkaHub 仅支持远程 SSE / Streamable HTTP 传输"
             )
     }

@@ -363,11 +363,17 @@ class WorkspaceRepository(
         stdin: ByteArray? = null,
     ): WorkspaceCommandResult {
         val workspace = dao.getById(id) ?: error("Workspace not found: $id")
-        // SAF 本地目录: 命令前拉取到镜像并挂载 /local, 命令后把变更写回本地目录
-        val localUri = try {
-            prepareLocalMirror(workspace)
-        } catch (e: Throwable) {
-            Log.w(TAG, "prepareLocalMirror failed", e)
+        // 仅当命令确实涉及 /local 时才同步本地目录到镜像并挂载 /local，
+        // 避免每次执行命令（如开发工具检测）都全量同步 SAF 目录导致卡死
+        val touchesLocal = command.contains("$LOCAL_MOUNT_POINT") || command.contains("${LOCAL_MOUNT_POINT}/")
+        val localUri = if (touchesLocal) {
+            try {
+                prepareLocalMirror(workspace)
+            } catch (e: Throwable) {
+                Log.w(TAG, "prepareLocalMirror failed", e)
+                null
+            }
+        } else {
             null
         }
         val extraBindMounts = if (localUri != null) {
@@ -388,7 +394,9 @@ class WorkspaceRepository(
                 extraBindMounts = extraBindMounts,
             )
         }
-        syncLocalMirrorAfter(workspace, localUri)
+        if (localUri != null) {
+            syncLocalMirrorAfter(workspace, localUri)
+        }
         return result
     }
 

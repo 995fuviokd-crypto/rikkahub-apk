@@ -7,15 +7,15 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import me.rerere.rikkahub.data.operit.OperitScriptRuntime
+import me.rerere.rikkahub.data.script.ScriptRuntime
 import java.io.File
 
 /**
  * 注入到插件 webview 页面（对象名 AndroidPlugin）的 JS bridge。
  *
  * 提供给插件面板 HTML 的能力：
- * - runTool(toolName, argsJson)：调用插件 Operit 脚本导出的工具，与聊天内 __operitToolsCall 同路径
- * - readData / writeData / deleteData：读写插件数据沙箱目录 filesDir/operit-data/<pluginId>/
+ * - runTool(toolName, argsJson)：调用插件 脚本导出的工具，与聊天内 __scriptToolsCall 同路径
+ * - readData / writeData / deleteData：读写插件数据沙箱目录 filesDir/script-data/<pluginId>/（兼容旧版 operit-data/）
  *   （与脚本内 Tools.Files 的根目录一致，面板与工具读写同一份数据）
  *
  * 所有方法同步返回 JSON 字符串，JS 侧直接 JSON.parse。
@@ -23,7 +23,7 @@ import java.io.File
 class PluginJsBridge(
     private val pluginId: String,
     private val pluginManager: PluginManager,
-    private val operitRuntime: OperitScriptRuntime,
+    private val scriptRuntime: ScriptRuntime,
 ) {
     companion object {
         private const val TAG = "PluginJsBridge"
@@ -34,7 +34,7 @@ class PluginJsBridge(
     fun runTool(toolName: String, argsJson: String): String {
         return runCatching {
             val pluginDir = pluginManager.getPluginDir(pluginId)
-            val result = operitRuntime.runTool(pluginDir, pluginId, toolName, argsJson)
+            val result = scriptRuntime.runTool(pluginDir, pluginId, toolName, argsJson)
             encode(result.ok, result.message, result.data)
         }.getOrElse { e ->
             Log.w(TAG, "runTool failed: $pluginId/$toolName", e)
@@ -74,7 +74,7 @@ class PluginJsBridge(
         }.getOrElse { e -> encode(false, e.message ?: "删除失败", null) }
     }
 
-    private fun dataDir(): File = operitRuntime.dataDir(pluginId)
+    private fun dataDir(): File = scriptRuntime.dataDir(pluginId)
 
     private fun resolveData(path: String): File? {
         if (path.isBlank()) return null

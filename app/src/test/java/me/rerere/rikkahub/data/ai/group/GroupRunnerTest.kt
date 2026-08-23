@@ -9,7 +9,6 @@ import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.model.Group
 import me.rerere.rikkahub.data.model.GroupMember
 import me.rerere.rikkahub.data.model.GroupMessage
-import me.rerere.rikkahub.data.model.GroupMode
 import me.rerere.rikkahub.data.model.GroupRun
 import me.rerere.rikkahub.data.model.MessageKind
 import me.rerere.rikkahub.data.model.RunStatus
@@ -78,6 +77,16 @@ private class FakeCaller(
 private fun member(id: String, role: String): GroupMember =
     GroupMember(id = id, modelId = Uuid.random(), role = role)
 
+private fun group(
+    orchestratorId: String,
+    vararg members: GroupMember,
+): Group = Group(
+    id = "g1",
+    name = "g",
+    members = members.toList(),
+    orchestratorId = orchestratorId,
+)
+
 class GroupRunnerTest {
 
     @Test
@@ -85,13 +94,6 @@ class GroupRunnerTest {
         val orchestrator = member("o", "主编")
         val worker1 = member("w1", "调研员")
         val worker2 = member("w2", "撰稿员")
-        val group = Group(
-            id = "g1",
-            name = "g",
-            mode = GroupMode.ORCHESTRATOR_WORKER,
-            members = listOf(orchestrator, worker1, worker2),
-            orchestratorId = "o",
-        )
 
         val caller = FakeCaller { m, prompt ->
             when {
@@ -104,7 +106,7 @@ class GroupRunnerTest {
         val store = FakeStore()
         val runner = GroupRunner(caller, store)
 
-        val result = runner.run(group, "完成报告")
+        val result = runner.run(group("o", orchestrator, worker1, worker2), "完成报告")
 
         assertEquals(RunStatus.SUCCESS, result.status)
         assertEquals("总结完成", result.summary)
@@ -123,13 +125,6 @@ class GroupRunnerTest {
     fun `orchestrator plan with code fence is parsed`() = runBlocking {
         val orchestrator = member("o", "主编")
         val worker1 = member("w1", "工作者")
-        val group = Group(
-            id = "g1",
-            name = "g",
-            mode = GroupMode.ORCHESTRATOR_WORKER,
-            members = listOf(orchestrator, worker1),
-            orchestratorId = "o",
-        )
         val caller = FakeCaller { m, prompt ->
             when {
                 prompt.contains("JSON 数组") -> "```json\n[{\"id\":\"t1\",\"goal\":\"调研\",\"memberId\":\"w1\"}]\n```"
@@ -140,85 +135,16 @@ class GroupRunnerTest {
         val store = FakeStore()
         val runner = GroupRunner(caller, store)
 
-        val result = runner.run(group, "任务")
+        val result = runner.run(group("o", orchestrator, worker1), "任务")
 
         assertEquals(RunStatus.SUCCESS, result.status)
         assertEquals(listOf("主编", "工作者", "主编"), caller.calls.map { it.first })
     }
 
     @Test
-    fun `pipeline mode passes output between members`() = runBlocking {
-        val a = member("a", "A")
-        val b = member("b", "B")
-        val group = Group(
-            id = "g1",
-            name = "g",
-            mode = GroupMode.PIPELINE,
-            members = listOf(a, b),
-        )
-        val caller = FakeCaller { m, prompt ->
-            when (m.role) {
-                "A" -> "A的产出"
-                else -> prompt
-            }
-        }
-        val store = FakeStore()
-        val runner = GroupRunner(caller, store)
-
-        val result = runner.run(group, "指令")
-
-        assertEquals(RunStatus.SUCCESS, result.status)
-        assertEquals(listOf("A", "B"), caller.calls.map { it.first })
-        assertTrue(caller.calls[1].second.contains("A的产出"))
-        assertTrue(result.summary.contains("A的产出"))
-        assertEquals(
-            listOf(MessageKind.SYSTEM, MessageKind.RESULT, MessageKind.RESULT),
-            store.messages.map { it.kind },
-        )
-    }
-
-    @Test
-    fun `debate mode runs all members each round then conclusion`() = runBlocking {
-        val a = member("a", "A")
-        val b = member("b", "B")
-        val group = Group(
-            id = "g1",
-            name = "g",
-            mode = GroupMode.DEBATE,
-            members = listOf(a, b),
-            debateRounds = 2,
-        )
-        val caller = FakeCaller { m, prompt ->
-            when {
-                prompt.contains("最终结论") -> "结论"
-                else -> "${m.role}发言"
-            }
-        }
-        val store = FakeStore()
-        val runner = GroupRunner(caller, store)
-
-        val result = runner.run(group, "主题")
-
-        assertEquals(RunStatus.SUCCESS, result.status)
-        assertEquals("结论", result.summary)
-        assertEquals(listOf("A", "B", "A", "B", "A"), caller.calls.map { it.first })
-        assertEquals(
-            listOf(MessageKind.SYSTEM, MessageKind.REPLY, MessageKind.REPLY, MessageKind.REPLY, MessageKind.REPLY, MessageKind.SYSTEM),
-            store.messages.map { it.kind },
-        )
-    }
-
-    @Test
     fun `member failure marks run failed and keeps partial results`() = runBlocking {
         val orchestrator = member("o", "主编")
         val worker1 = member("w1", "工作者")
-        val group = Group(
-            id = "g1",
-            name = "g",
-            mode = GroupMode.ORCHESTRATOR_WORKER,
-            members = listOf(orchestrator, worker1),
-            orchestratorId = "o",
-        )
         val caller = FakeCaller { m, prompt ->
             when {
                 prompt.contains("JSON 数组") -> """[{"id":"t1","goal":"调研","memberId":"w1"}]"""
@@ -229,7 +155,7 @@ class GroupRunnerTest {
         val store = FakeStore()
         val runner = GroupRunner(caller, store)
 
-        val result = runner.run(group, "任务")
+        val result = runner.run(group("o", orchestrator, worker1), "任务")
 
         assertEquals(RunStatus.FAILED, result.status)
         assertTrue(result.summary.contains("汇总失败"))
@@ -239,19 +165,19 @@ class GroupRunnerTest {
 
     @Test
     fun `external runId is reused in store`() = runBlocking {
-        val a = member("a", "A")
-        val group = Group(
-            id = "g1",
-            name = "g",
-            mode = GroupMode.DEBATE,
-            members = listOf(a),
-            debateRounds = 1,
-        )
-        val caller = FakeCaller { m, prompt -> "发言" }
+        val orchestrator = member("o", "主编")
+        val worker = member("w1", "工作者")
+        val caller = FakeCaller { m, prompt ->
+            when {
+                prompt.contains("JSON 数组") -> """[{"id":"t1","goal":"调研","memberId":"w1"}]"""
+                prompt.contains("汇总") -> "总结完成"
+                else -> "结果"
+            }
+        }
         val store = FakeStore()
         val runner = GroupRunner(caller, store)
 
-        val result = runner.run(group, "任务", runId = "custom-run")
+        val result = runner.run(group("o", orchestrator, worker), "任务", runId = "custom-run")
 
         assertEquals("custom-run", result.id)
         assertNotNull(store.getRunById("custom-run"))
@@ -260,18 +186,12 @@ class GroupRunnerTest {
 
     @Test
     fun `appended instruction during run is injected into subsequent member prompts`() = runBlocking {
-        val a = member("a", "A")
-        val b = member("b", "B")
-        val group = Group(
-            id = "g1",
-            name = "g",
-            mode = GroupMode.PIPELINE,
-            members = listOf(a, b),
-        )
+        val orchestrator = member("o", "主编")
+        val worker = member("w1", "工作者")
         val store = FakeStore()
         val caller = FakeCaller { m, prompt ->
-            when (m.role) {
-                "A" -> {
+            when {
+                prompt.contains("JSON 数组") -> {
                     store.addMessage(
                         runId = "run-append",
                         memberId = GroupRunner.USER_MEMBER_ID,
@@ -279,66 +199,25 @@ class GroupRunnerTest {
                         kind = MessageKind.USER,
                         memberRole = "用户",
                     )
-                    "A 的产出"
+                    """[{"id":"t1","goal":"调研","memberId":"w1"}]"""
                 }
+                prompt.contains("汇总") -> "总结完成"
                 else -> prompt
             }
         }
         val runner = GroupRunner(caller, store)
 
-        val result = runner.run(group, "任务", runId = "run-append")
+        val result = runner.run(group("o", orchestrator, worker), "任务", runId = "run-append")
 
         assertEquals(RunStatus.SUCCESS, result.status)
         val prompts = caller.calls.map { it.second }
-        assertTrue("B 的 prompt 应包含追加指令，实际：${prompts[1]}", prompts[1].contains("请改用中文输出"))
-    }
-
-    @Test
-    fun `appended instruction injected into every debate round`() = runBlocking {
-        val a = member("a", "A")
-        val b = member("b", "B")
-        val group = Group(
-            id = "g1",
-            name = "g",
-            mode = GroupMode.DEBATE,
-            members = listOf(a, b),
-            debateRounds = 2,
-        )
-        val store = FakeStore()
-        store.addMessage(
-            runId = "run-debate",
-            memberId = GroupRunner.USER_MEMBER_ID,
-            content = "补充：需要列出风险",
-            kind = MessageKind.USER,
-            memberRole = "用户",
-            reasoning = "",
-            tools = "",
-        )
-        val caller = FakeCaller { m, prompt ->
-            when {
-                prompt.contains("最终结论") -> "结论"
-                else -> "${m.role}发言"
-            }
-        }
-        val runner = GroupRunner(caller, store)
-
-        val result = runner.run(group, "主题", runId = "run-debate")
-
-        assertEquals(RunStatus.SUCCESS, result.status)
-        val prompts = caller.calls.map { it.second }
-        assertTrue("所有成员调用都应注入补充指令", prompts.all { it.contains("补充：需要列出风险") })
+        assertTrue("工作者 prompt 应包含追加指令，实际：${prompts[1]}", prompts[1].contains("请改用中文输出"))
     }
 
     @Test
     fun `cancelling run marks it stopped not success`() = runBlocking {
-        val a = member("a", "A")
-        val group = Group(
-            id = "g1",
-            name = "g",
-            mode = GroupMode.DEBATE,
-            members = listOf(a),
-            debateRounds = 10,
-        )
+        val orchestrator = member("o", "主编")
+        val worker = member("w1", "工作者")
         val store = FakeStore()
         val caller = FakeCaller { m, prompt ->
             delay(10)
@@ -347,7 +226,7 @@ class GroupRunnerTest {
         val runner = GroupRunner(caller, store)
 
         val job = launch {
-            runner.run(group, "任务", runId = "run-stop")
+            runner.run(group("o", orchestrator, worker), "任务", runId = "run-stop")
         }
         delay(5)
         job.cancel()
@@ -359,14 +238,8 @@ class GroupRunnerTest {
 
     @Test
     fun `cancellation propagates for caller to mark stopped`() = runBlocking {
-        val a = member("a", "A")
-        val group = Group(
-            id = "g1",
-            name = "g",
-            mode = GroupMode.DEBATE,
-            members = listOf(a),
-            debateRounds = 10,
-        )
+        val orchestrator = member("o", "主编")
+        val worker = member("w1", "工作者")
         val store = FakeStore()
         val caller = FakeCaller { m, prompt ->
             delay(10)
@@ -376,7 +249,7 @@ class GroupRunnerTest {
         val runId = "run-stop-prop"
         val job = launch {
             try {
-                runner.run(group, "任务", runId = runId)
+                runner.run(group("o", orchestrator, worker), "任务", runId = runId)
             } catch (e: CancellationException) {
                 withContext(NonCancellable) {
                     val run = store.getRunById(runId)

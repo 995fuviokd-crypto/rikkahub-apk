@@ -1,5 +1,6 @@
 package me.rerere.ai.provider.providers.google
 
+import me.rerere.ai.provider.ProviderHttpClient
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -29,17 +30,18 @@ class GoogleRequestMessageTest {
 
     @Before
     fun setUp() {
-        provider = GoogleProvider(OkHttpClient())
+        provider = GoogleProvider(ProviderHttpClient(OkHttpClient()))
     }
 
     // Helper to invoke private buildContents method via reflection
     private fun invokeBuildContents(messages: List<UIMessage>): JsonArray {
         val method = GoogleProvider::class.java.getDeclaredMethod(
             "buildContents",
-            List::class.java
+            List::class.java,
+            Map::class.java
         )
         method.isAccessible = true
-        return method.invoke(provider, messages) as JsonArray
+        return method.invoke(provider, messages, emptyMap<String, String>()) as JsonArray
     }
 
     @Test

@@ -1,7 +1,33 @@
 package me.rerere.rikkahub.data.recall
 
 import kotlin.uuid.Uuid
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.MessageNode
+
+/**
+ * 按最近一个边界标点把单文本消息节点截断为"保留段 + 撤回段"。
+ * 满足以下条件才分段：非空标点串、节点最后一条消息为单 Text part、存在边界标点、
+ * 保留段与撤回段均非空白。否则返回 null（调用方退化为整条撤回）。
+ */
+internal fun computeSegmentedRecall(
+    lastNode: MessageNode,
+    boundaryPunctuation: String,
+): Pair<MessageNode, String>? {
+    if (boundaryPunctuation.isEmpty()) return null
+    val message = lastNode.messages.lastOrNull() ?: return null
+    if (message.parts.size != 1) return null
+    val onlyPart = message.parts.single()
+    if (onlyPart !is UIMessagePart.Text) return null
+    val text = onlyPart.text
+    val lastPunctIndex = text.indexOfLast { it in boundaryPunctuation }
+    if (lastPunctIndex < 0) return null
+    val kept = text.substring(0, lastPunctIndex + 1)
+    if (kept.isBlank()) return null
+    val trimmed = text.substring(lastPunctIndex + 1)
+    if (trimmed.isBlank()) return null
+    val trimmedMessage = message.copy(parts = listOf(onlyPart.copy(text = kept)))
+    return lastNode.copy(messages = listOf(trimmedMessage)) to trimmed
+}
 
 /**
  * 撤回范围：整条消息或按标点分段截断。

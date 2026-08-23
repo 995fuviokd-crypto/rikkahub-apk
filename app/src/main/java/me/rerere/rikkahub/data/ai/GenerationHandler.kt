@@ -49,10 +49,13 @@ import java.io.File
 import me.rerere.rikkahub.data.ai.transformers.onGenerationFinish
 import me.rerere.rikkahub.data.ai.transformers.transforms
 import me.rerere.rikkahub.data.ai.transformers.visualTransforms
+import me.rerere.rikkahub.data.ai.agent.AcpRuntime
 import me.rerere.rikkahub.data.ai.tools.buildMemoryTools
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.workspace.WorkspaceShellStatus
+import kotlinx.coroutines.flow.first
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.recall.SideEffectRecorder
@@ -70,6 +73,17 @@ private const val TOOL_OUTPUT_PREVIEW_CHARS = 4 * 1024
 // 只把最新状态发射给 UI，减少每 token 一次的全量 transform 与重组
 private const val STREAM_EMIT_INTERVAL_MS = 32L
 
+// 自主执行引导：开启后注入系统提示，要求 AI 收到任务后连续调用工具直到完成，
+// 不中途输出进度汇报后停止、不主动用 ask_user 打断任务流程（对标全自主执行 agent）
+private const val AUTONOMOUS_EXECUTION_PROMPT = """
+【自主执行模式】
+当收到包含具体任务（如查询、整理、分析、修改、执行等）的请求，且当前有可用工具时，进入自主执行模式：
+1. 持续调用工具推进任务，每完成一步立即评估下一步，直到任务目标全部达成。
+2. 不要在任务中途输出进度汇报式文字后停止；中途不需要向用户请示或等待确认。
+3. 不要用 ask_user 打断任务流程，除非用户明确要求交互，或关键信息完全缺失且无法通过其他工具自行获取。
+4. 全部完成后，再输出最终结果；若任务确实无法完成，说明已尝试的步骤与失败原因，而不是停留在中间状态。
+"""
+
 @Serializable
 sealed interface GenerationChunk {
     data class Messages(
@@ -82,6 +96,8 @@ class GenerationHandler(
     private val providerManager: ProviderManager,
     private val json: Json,
     private val memoryRepo: MemoryRepository,
+    private val acpRuntime: AcpRuntime? = null,
+    private val workspaceRepository: me.rerere.rikkahub.data.repository.WorkspaceRepository? = null,
 ) {
     fun generateText(
         settings: Settings,
@@ -98,6 +114,7 @@ class GenerationHandler(
         conversationModeInjectionIds: Set<Uuid> = emptySet(),
         conversationLorebookIds: Set<Uuid> = emptySet(),
         workspaceCwd: String? = null,
+        workspaceRoot: String? = null,
         conversationId: Uuid? = null,
         sideEffectRecorder: SideEffectRecorder? = null,
         extraSystemPrompts: List<String> = emptyList(),
@@ -248,6 +265,8 @@ class GenerationHandler(
                     conversationModeInjectionIds = conversationModeInjectionIds,
                     conversationLorebookIds = conversationLorebookIds,
                     workspaceCwd = workspaceCwd,
+                    workspaceRoot = workspaceRoot,
+                    conversationId = conversationId,
                     extraSystemPrompts = extraSystemPrompts,
                     // 多线路并发仅用于无工具首轮：工具调用会让不同线路产生分叉的工具参数，
                     // 状态无法合并；已有工具调用历史（hasToolCalls）或首轮就带工具时只用主线路
@@ -481,11 +500,18 @@ class GenerationHandler(
         conversationModeInjectionIds: Set<Uuid> = emptySet(),
         conversationLorebookIds: Set<Uuid> = emptySet(),
         workspaceCwd: String? = null,
+        workspaceRoot: String? = null,
+        conversationId: Uuid? = null,
         backupRoutes: List<Pair<Provider<ProviderSetting>, ProviderSetting>> = emptyList(),
         extraSystemPrompts: List<String> = emptyList(),
     ) {
         val internalMessages = buildList {
             val system = buildString {
+                // 全局提示词（最高优先级，置于所有系统提示最前）
+                if (settings.globalPrompt.isNotBlank()) {
+                    append(settings.globalPrompt)
+                    appendLine()
+                }
                 val effectiveSystemPrompt =
                     if (assistant.allowConversationSystemPrompt && !conversationSystemPrompt.isNullOrBlank()) {
                         conversationSystemPrompt
@@ -513,6 +539,11 @@ class GenerationHandler(
                     appendLine()
                     append(tool.systemPrompt(model, messages))
                 }
+                // 自主执行引导：有工具可用且开关开启时，要求连续执行到底、不中途停下
+                if (settings.autonomousExecutionEnabled && tools.isNotEmpty()) {
+                    appendLine()
+                    append(AUTONOMOUS_EXECUTION_PROMPT.trimIndent())
+                }
             }
             if (system.isNotBlank()) add(UIMessage.system(prompt = system))
             addAll(messages.limitContext(assistant.contextMessageLimit))
@@ -527,6 +558,32 @@ class GenerationHandler(
             processingStatus = processingStatus,
             workspaceCwd = workspaceCwd,
         )
+
+        // 平台 Agent 模型：绕过 providerImpl，走 ACP 通道（agent 侧自行处理工具/上下文）
+        if (model.platformAgent != null) {
+            val runtime = acpRuntime ?: error("Platform agent model requires AcpRuntime")
+            val root = workspaceRoot ?: resolveDefaultWorkspaceRoot()
+                ?: error("Platform agent model requires a bound workspace")
+            val streamChunkHandler = StreamChunkHandler(model)
+            var latestMessages: List<UIMessage> = messages
+            var lastEmitTime = 0L
+            runtime.streamText(
+                model = model,
+                messages = internalMessages,
+                workspaceRoot = root,
+                workspaceCwd = workspaceCwd,
+                conversationId = conversationId,
+            ).collect { chunk ->
+                latestMessages = streamChunkHandler.handle(latestMessages, chunk)
+                val now = System.currentTimeMillis()
+                if (now - lastEmitTime >= STREAM_EMIT_INTERVAL_MS) {
+                    lastEmitTime = now
+                    onUpdateMessages(latestMessages)
+                }
+            }
+            onUpdateMessages(latestMessages)
+            return
+        }
 
         var messages: List<UIMessage> = messages
         val params = TextGenerationParams(
@@ -605,6 +662,13 @@ class GenerationHandler(
         }
     }
 
+    private suspend fun resolveDefaultWorkspaceRoot(): String? {
+        val repo = workspaceRepository ?: return null
+        return repo.listFlow().first()
+            .firstOrNull { it.shellStatus == WorkspaceShellStatus.READY.name }
+            ?.root
+    }
+
     private fun maybeTruncateToolOutput(
         toolCallId: String,
         output: List<UIMessagePart>,
@@ -651,6 +715,34 @@ class GenerationHandler(
             ?: error("Translation provider not found")
 
         val providerHandler = providerManager.getProviderByType(provider)
+
+        if (model.platformAgent != null) {
+            // 平台 Agent 翻译：走 ACP 通道（agent 侧自行处理），无工作区时取默认 READY 工作区
+            val runtime = acpRuntime ?: error("Platform agent model requires AcpRuntime")
+            val root = resolveDefaultWorkspaceRoot()
+                ?: error("Platform agent translation requires a bound workspace")
+            val prompt = settings.translatePrompt.applyPlaceholders(
+                "source_text" to sourceText,
+                "target_lang" to targetLanguage.toString(),
+            )
+            var messages = listOf(UIMessage.user(prompt))
+            val streamChunkHandler = StreamChunkHandler(model)
+            runtime.streamText(
+                model = model,
+                messages = messages,
+                workspaceRoot = root,
+                workspaceCwd = null,
+                conversationId = null,
+            ).collect { chunk ->
+                messages = streamChunkHandler.handle(messages, chunk)
+                val translatedText = messages.lastOrNull()?.toText() ?: ""
+                if (translatedText.isNotBlank()) {
+                    onStreamUpdate?.invoke(translatedText)
+                    emit(translatedText)
+                }
+            }
+            return@flow
+        }
 
         if (!ModelRegistry.QWEN_MT.match(model.modelId)) {
             // Use regular translation with prompt

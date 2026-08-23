@@ -837,7 +837,7 @@
   <string name="setting_mcp_page_url_label">URL</string>
 
   <string name="setting_mcp_page_command">Command</string>
-  <string name="setting_mcp_page_command_desc">Local process start command (command + args + env). RikkaHub only supports remote SSE / Streamable HTTP transport, this type requires an external Node/Operit runtime</string>
+  <string name="setting_mcp_page_command_desc">Local process start command (command + args + env). RikkaHub only supports remote SSE / Streamable HTTP transport, this type requires an external Node runtime</string>
   <string name="setting_mcp_page_command_args">Args</string>
   <string name="setting_model_page_chat_model">Chat Model</string>
   <string name="setting_model_page_chat_model_desc">Global default chat model</string>
@@ -1231,6 +1231,12 @@
   <string name="setting_model_page_prompt_suggestion">Chat Reply Suggestions</string>
   <string name="setting_model_page_prompt_ocr">OCR Recognition</string>
   <string name="setting_model_page_prompt_compress">Context Compression</string>
+  <string name="setting_model_page_prompt_image_generation">Image Generation</string>
+  <string name="setting_model_page_image_generation_prompt_vars">Variables: User request: {prompt}</string>
+  <string name="setting_model_page_prompt_memory">Memory</string>
+  <string name="setting_model_page_memory_prompt_vars">Variables: Content: {content}</string>
+  <string name="setting_model_page_prompt_self_hosted">Self-hosted</string>
+  <string name="setting_model_page_self_hosted_prompt_vars">Variables: Content: {content}</string>
   <string name="setting_display_page_bubble_opacity_title">Bubble Opacity</string>
   <string name="setting_provider_page_include_history_reasoning">Include History Reasoning</string>
   <string name="assistant_page_gradient_background">Gradient Background</string>
@@ -1368,8 +1374,10 @@
   <string name="assistant_page_local_tools_calendar_desc">Let the AI query and create calendar events</string>
   <string name="assistant_page_local_tools_device_info_title">Device Info</string>
   <string name="assistant_page_local_tools_device_info_desc">Let the AI query device information including the current effective screen resolution</string>
-  <string name="assistant_page_local_tools_operit_scripts_title">Operit Scripts</string>
-  <string name="assistant_page_local_tools_operit_scripts_desc">Let the AI run tools exported by Operit market scripts and ToolPkg plugins locally via the QuickJS engine</string>
+  <string name="assistant_page_local_tools_scripts_title">Scripts</string>
+  <string name="assistant_page_local_tools_scripts_desc">Let the AI run tools exported by script market scripts and ToolPkg plugins locally via the QuickJS engine</string>
+  <string name="assistant_page_local_tools_system_control_title">AI System Control</string>
+  <string name="assistant_page_local_tools_system_control_desc">Grant the AI full control: read/write app settings, switches, models, assistants, plugin toggles and prompts</string>
   <string name="assistant_page_local_tools_accessibility_title">Accessibility Control</string>  <string name="assistant_page_local_tools_accessibility_desc">Let the AI control your phone via the accessibility service: open apps, tap on-screen elements, adjust volume, and navigate</string>
   <string name="assistant_page_local_tools_accessibility_permission_required">Please enable the RikkaHub accessibility service in system settings to use Accessibility Control</string>
   <string name="assistant_page_local_tools_power_management_title">Power Management</string>
@@ -1439,4 +1447,46 @@
   <string name="steward_mode_unlimited_loops">Unlimited auto rounds</string>
   <string name="steward_mode_unlimited_loops_desc">Loop until the AI judges the task is finished, ignoring the round limit</string>
   <string name="steward_mode_unlimited_loops_hint">Unlimited: the AI keeps working until it reports the task as completed. Make sure the model can reliably judge completion to avoid endless loops.</string>
+  <string name="setting_provider_page_platform_agent">Platform Agent</string>
+  <string name="setting_provider_page_platform_agent_desc">Bind a platform agent CLI (Codex / Claude Code / Gemini CLI / Anthropic Claude Code / OpenCode / DeepSeek Harness). Messages are sent and received on that platform via the ACP protocol instead of the standard API.</string>
+  <string name="setting_provider_page_platform_agent_none">None (standard API)</string>
+  <string name="setting_provider_page_platform_agent_codex">Codex CLI</string>
+  <string name="setting_provider_page_platform_agent_claude_code">Claude Code CLI</string>
+  <string name="setting_provider_page_platform_agent_gemini_cli">Gemini CLI</string>
+  <string name="setting_provider_page_platform_agent_anthropic_claude_code">Anthropic Claude Code CLI</string>
+  <string name="setting_provider_page_platform_agent_opencode">OpenCode CLI</string>
+  <string name="setting_provider_page_platform_agent_dsh">DeepSeek Harness</string>
+  <string name="setting_provider_page_platform_agent_args_label">Agent arguments (space separated)</string>
+  <string name="setting_provider_page_platform_agent_env_label">Agent environment (KEY=VALUE per line)</string>
+  <string name="setting_provider_page_platform_agent_hint">The CLI runs inside the workspace. Node.js and the CLI package are installed on first use when missing.</string>
+  <string name="setting_provider_page_platform_agent_gemini_cli_desc">Google official coding agent. CLI package: @google/gemini-cli</string>
+  <string name="setting_provider_page_platform_agent_codex_desc">OpenAI coding agent. CLI package: @zed-industries/codex-acp</string>
+  <string name="setting_provider_page_platform_agent_claude_code_desc">Claude Code ACP adapter. CLI package: @agentclientprotocol/claude-agent-acp</string>
+  <string name="setting_provider_page_platform_agent_anthropic_claude_code_desc">Official Anthropic Claude Code CLI. Package: @anthropic-ai/claude-code</string>
+  <string name="setting_provider_page_platform_agent_opencode_desc">Open source coding agent. CLI package: opencode-ai</string>
+  <string name="setting_provider_page_platform_agent_dsh_desc">DeepSeek Harness with 4 official presets (Standard / PTC / Minimal / Creator). Package: @deepseek-ai/dsh</string>
+  <string name="agent_mode_picker_title">Agent Mode</string>
+  <string name="agent_mode_picker_hint">Choose the preset passed to the platform agent via --agent-preset.</string>
+  <string name="agent_mode_standard">Standard</string>
+  <string name="agent_mode_code">PTC</string>
+  <string name="agent_mode_minimal">Minimal</string>
+  <string name="agent_mode_cordis">Creator</string>
+  <string name="setting_proxy_enable">Enable Proxy</string>
+  <string name="setting_proxy_type">Proxy Type</string>
+  <string name="setting_proxy_type_http">HTTP</string>
+  <string name="setting_proxy_type_https">HTTPS</string>
+  <string name="setting_proxy_type_socks4">SOCKS4</string>
+  <string name="setting_proxy_type_socks5">SOCKS5</string>
+  <string name="setting_proxy_type_direct">Direct</string>
+  <string name="setting_proxy_direct_hint">Connections bypass any proxy and go straight to the target.</string>
+  <string name="setting_proxy_host">Host</string>
+  <string name="setting_proxy_port">Port</string>
+  <string name="setting_proxy_username">Username (optional)</string>
+  <string name="setting_proxy_password">Password (optional)</string>
+  <string name="setting_network_proxy">Network Proxy</string>
+  <string name="setting_network_proxy_desc">Set a global proxy for all AI provider requests</string>
+  <string name="setting_network_proxy_title">Global Proxy</string>
+  <string name="setting_network_proxy_subtitle">Used when a provider has no proxy of its own</string>
+  <string name="setting_provider_page_proxy">Provider Proxy</string>
+  <string name="setting_provider_page_proxy_subtitle">Leave disabled to fall back to the global proxy</string>
 </resources>

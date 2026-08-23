@@ -18,6 +18,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.workflow.WorkflowRunner
 import me.rerere.rikkahub.data.model.AiStepConfig
 import me.rerere.rikkahub.data.model.DelayStepConfig
+import me.rerere.rikkahub.data.model.ExecutionStatus
 import me.rerere.rikkahub.data.model.HttpStepConfig
 import me.rerere.rikkahub.data.model.ShellStepConfig
 import me.rerere.rikkahub.data.model.StepConfig
@@ -40,8 +41,9 @@ fun createWorkflowTools(
     Tool(
         name = "workflow_list",
         description = """
-            List all saved workflows. Returns each workflow's id, name, description and a summary
-            of its steps (types only). Use this to discover which workflows exist before running one.
+            List all saved workflows. Returns each workflow's id, name, description, execution
+            statistics (total/success/failed executions, last status and time) and a summary of its
+            nodes (types only). Use this to discover which workflows exist before running one.
         """.trimIndent().replace("\n", " "),
         parameters = { InputSchema.Obj(properties = buildJsonObject { }) },
         needsApproval = { false },
@@ -54,6 +56,15 @@ fun createWorkflowTools(
                         put("name", workflow.name)
                         put("description", workflow.description)
                         put("step_count", workflow.stepCount)
+                        put("total_executions", workflow.totalExecutions)
+                        put("successful_executions", workflow.successfulExecutions)
+                        put("failed_executions", workflow.failedExecutions)
+                        workflow.lastExecutionStatus?.let {
+                            put("last_execution_status", it.name.lowercase())
+                        }
+                        if (workflow.lastExecutionTime > 0) {
+                            put("last_execution_time", workflow.lastExecutionTime)
+                        }
                         put("step_types", buildJsonArray {
                             workflow.effectiveGraph.nodes.forEach { node -> add(JsonPrimitive(node.type.name.lowercase())) }
                         })
@@ -95,6 +106,18 @@ fun createWorkflowTools(
             val workflow = workflowRepository.loadWorkflow(workflowId)
                 ?: error("Workflow not found: $workflowId")
             val result = workflowRunner.run(workflow = workflow, input = input)
+            // 更新执行统计
+            val timestamp = result.finishedAt.takeIf { it > 0 } ?: System.currentTimeMillis()
+            workflowRepository.updateStats(
+                workflow.withStats(
+                    status = if (result.succeeded) ExecutionStatus.SUCCESS else ExecutionStatus.FAILED,
+                    timestamp = timestamp,
+                    success = result.succeeded,
+                )
+            )
+            result.executionRecord?.let { record ->
+                workflowRepository.saveExecutionRecord(record)
+            }
             val payload = buildJsonObject {
                 put("workflow_id", result.workflowId)
                 put("succeeded", result.succeeded)
@@ -105,6 +128,18 @@ fun createWorkflowTools(
                             put("name", node.nodeName)
                             put("status", node.status.name.lowercase())
                             put("output", node.output.take(2000))
+                        })
+                    }
+                })
+                if (result.error.isNotBlank()) {
+                    put("error", result.error)
+                }
+                put("logs", buildJsonArray {
+                    result.logs.forEach { entry ->
+                        add(buildJsonObject {
+                            put("level", entry.level.name.lowercase())
+                            put("message", entry.message)
+                            entry.nodeName?.let { put("node", it) }
                         })
                     }
                 })
@@ -180,8 +215,11 @@ fun createWorkflowTools(
         name = "workflow_generate",
         description = """
             Generate a workflow as a graph (DAG) from a description. Provide a graph object:
-            {"nodes": [{"id": "n1", "type": "start"|"end"|"text"|"ai"|"shell"|"http"|"delay"|"if"|"for"|"merge"|"output", "name": string, "config": {...}, "x": number, "y": number}],
-             "edges": [{"fromNodeId": string, "fromPort": "out"|"true"|"false", "toNodeId": string}]}.
+            {"nodes": [{"id": "n1", "type": "start"|"end"|"text"|"ai"|"shell"|"http"|"delay"|"if"|"for"|"merge"|"extract"|"output", "name": string, "config": {...}, "x": number, "y": number}],
+             "edges": [{"fromNodeId": string, "fromPort": "out"|"true"|"false", "toNodeId": string, "condition": string|null}]}.
+            Edge condition (optional): null/absent = run when source succeeds; "success" = same;
+            "error" = run when source FAILS (error handling); "true"/"false" = match boolean output;
+            other strings are regex matched against source output.
             Config shapes:
             - text: {"content": string} (supports {{node.<id>.output}} and {{input.NAME}} variables)
             - ai: {"assistantId": string, "prompt": string}
@@ -190,6 +228,9 @@ fun createWorkflowTools(
             - delay: {"seconds": number}
             - if: {"condition": string, e.g. "{{node.n1.output}} > 10"} (outgoing edges use fromPort "true"/"false")
             - for: {"itemsSource": string, "prompt": string, "assistantId": string} (prompt uses {{item}} and {{index}})
+            - extract: {"mode": "regex"|"json"|"sub"|"concat", "source": string, "expression": string,
+                        "group": number, "defaultValue": string, "startIndex": number, "length": number,
+                        "others": string, "separator": string}
             - merge: {} / output: {"template": string} / start|end: {}
             The graph must be acyclic. node ids must be unique strings.
         """.trimIndent().replace("\n", " "),

@@ -33,8 +33,10 @@ import com.dokar.sonner.ToastType
 import me.rerere.ai.provider.ApiEndpointResolver
 import me.rerere.ai.provider.ClaudePromptCacheTtl
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.ProxyConfig
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.DEFAULT_PROVIDERS
+import me.rerere.rikkahub.ui.components.ai.ProxyConfigEditor
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
@@ -89,6 +91,11 @@ fun ProviderSetting.convertTo(type: KClass<out ProviderSetting>): ProviderSettin
         is ProviderSetting.Google -> this.apiKey
         is ProviderSetting.Claude -> this.apiKey
     }
+    val sourceProxy = when (this) {
+        is ProviderSetting.OpenAI -> this.proxy
+        is ProviderSetting.Google -> this.proxy
+        is ProviderSetting.Claude -> this.proxy
+    }
     val sourceBaseUrl = when (this) {
         is ProviderSetting.OpenAI -> this.baseUrl
         is ProviderSetting.Google -> this.baseUrl
@@ -107,19 +114,19 @@ fun ProviderSetting.convertTo(type: KClass<out ProviderSetting>): ProviderSettin
             id = this.id, enabled = this.enabled, name = this.name, models = this.models,
             balanceOption = this.balanceOption, builtIn = this.builtIn,
             description = this.description, shortDescription = this.shortDescription,
-            apiKey = apiKey, baseUrl = convertedBaseUrl
+            proxy = sourceProxy, apiKey = apiKey, baseUrl = convertedBaseUrl
         )
         ProviderSetting.Google::class -> ProviderSetting.Google(
             id = this.id, enabled = this.enabled, name = this.name, models = this.models,
             balanceOption = this.balanceOption, builtIn = this.builtIn,
             description = this.description, shortDescription = this.shortDescription,
-            apiKey = apiKey, baseUrl = convertedBaseUrl
+            proxy = sourceProxy, apiKey = apiKey, baseUrl = convertedBaseUrl
         )
         ProviderSetting.Claude::class -> ProviderSetting.Claude(
             id = this.id, enabled = this.enabled, name = this.name, models = this.models,
             balanceOption = this.balanceOption, builtIn = this.builtIn,
             description = this.description, shortDescription = this.shortDescription,
-            apiKey = apiKey, baseUrl = convertedBaseUrl
+            proxy = sourceProxy, apiKey = apiKey, baseUrl = convertedBaseUrl
         )
         else -> error("Unsupported provider type: $type")
     }
@@ -303,6 +310,11 @@ private fun ProviderConfigureOpenAI(
         )
     }
 
+    ProviderProxySection(
+        proxy = provider.proxy,
+        onEdit = { onEdit(provider.copy(proxy = it)) },
+    )
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -390,6 +402,11 @@ private fun ProviderConfigureClaude(
             add(ApiEndpointResolver.resolveEndpoint(provider.baseUrl, "/messages"))
             add(ApiEndpointResolver.resolveEndpoint(provider.baseUrl, "/models"))
         },
+    )
+
+    ProviderProxySection(
+        proxy = provider.proxy,
+        onEdit = { onEdit(provider.copy(proxy = it)) },
     )
 
     Row(
@@ -520,6 +537,11 @@ private fun ProviderConfigureGoogle(
         )
     }
 
+    ProviderProxySection(
+        proxy = provider.proxy,
+        onEdit = { onEdit(provider.copy(proxy = it)) },
+    )
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -604,4 +626,24 @@ private fun ProviderConfigureGoogle(
             modifier = Modifier.fillMaxWidth(),
         )
     }
+}
+
+@Composable
+fun ProviderProxySection(
+    proxy: ProxyConfig?,
+    onEdit: (ProxyConfig?) -> Unit,
+) {
+    Text(
+        text = stringResource(R.string.setting_provider_page_proxy),
+        style = MaterialTheme.typography.titleSmall,
+    )
+    Text(
+        text = stringResource(R.string.setting_provider_page_proxy_subtitle),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    ProxyConfigEditor(
+        proxy = proxy,
+        onEdit = onEdit,
+    )
 }

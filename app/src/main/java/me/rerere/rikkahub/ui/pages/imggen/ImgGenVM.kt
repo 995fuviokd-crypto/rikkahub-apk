@@ -9,6 +9,7 @@ import androidx.paging.PagingConfig
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import androidx.paging.map
+import io.pebbletemplates.pebble.PebbleEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
@@ -26,6 +27,8 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.ui.ImageGenSize
 import me.rerere.ai.ui.ImageGenerationItem
 import me.rerere.common.android.appTempFolder
+import me.rerere.rikkahub.data.ai.prompts.DEFAULT_IMAGE_GENERATION_PROMPT
+import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -33,6 +36,7 @@ import me.rerere.rikkahub.data.db.entity.GenMediaEntity
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.repository.GenMediaRepository
 import java.io.File
+import java.io.StringWriter
 import kotlin.coroutines.cancellation.CancellationException
 
 @Serializable
@@ -63,6 +67,7 @@ class ImgGenVM(
     val providerManager: ProviderManager,
     val genMediaRepository: GenMediaRepository,
     private val filesManager: FilesManager,
+    private val templateEngine: PebbleEngine,
 ) : AndroidViewModel(context) {
     private val _prompt = MutableStateFlow("")
     val prompt: StateFlow<String> = _prompt
@@ -151,7 +156,7 @@ class ImgGenVM(
                 val provider = model.findProvider(settings.providers)
                     ?: throw IllegalStateException("Provider not found")
 
-                val requestPrompt = _prompt.value
+                val requestPrompt = renderPrompt(settings, _prompt.value)
                 val params = ImageGenerationParams(
                     model = model,
                     prompt = requestPrompt,
@@ -195,7 +200,7 @@ class ImgGenVM(
                 val provider = model.findProvider(settings.providers)
                     ?: throw IllegalStateException("Provider not found")
 
-                val requestPrompt = _prompt.value
+                val requestPrompt = renderPrompt(settings, _prompt.value)
                 val sourceImages = _referenceImages.value
                 val params = ImageEditParams(
                     model = model,
@@ -229,6 +234,21 @@ class ImgGenVM(
 
     fun cancelGeneration() {
         cancelJob?.cancel()
+    }
+
+    private fun renderPrompt(settings: Settings, userPrompt: String): String {
+        val template = settings.imageGenerationPrompt.trim()
+        if (template.isBlank() || template == DEFAULT_IMAGE_GENERATION_PROMPT) {
+            return userPrompt
+        }
+        return runCatching {
+            val result = StringWriter()
+            templateEngine.getLiteralTemplate(template).evaluate(result, mapOf("prompt" to userPrompt))
+            result.toString().ifBlank { userPrompt }
+        }.getOrElse {
+            Log.w(TAG, "Failed to render image prompt template", it)
+            userPrompt
+        }
     }
 
     private suspend fun collectImageGeneration(

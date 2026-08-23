@@ -10,7 +10,6 @@ import me.rerere.rikkahub.data.db.dao.GroupDAO
 import me.rerere.rikkahub.data.model.Group
 import me.rerere.rikkahub.data.model.GroupMember
 import me.rerere.rikkahub.data.model.GroupMessage
-import me.rerere.rikkahub.data.model.GroupMode
 import me.rerere.rikkahub.data.model.GroupRun
 import me.rerere.rikkahub.data.model.MessageKind
 import me.rerere.rikkahub.data.model.RunStatus
@@ -32,7 +31,14 @@ private class RoomTestCaller : GroupMemberCaller {
         member: GroupMember,
         prompt: String,
         onProgress: suspend (String) -> Unit,
-    ): MemberCallResult = MemberCallResult(text = "${member.role} 的回复")
+    ): MemberCallResult {
+        val text = when {
+            prompt.contains("JSON 数组") -> """[{"id":"t1","goal":"调研","memberId":"m1"}]"""
+            prompt.contains("汇总") -> "总结完成"
+            else -> "${member.role} 的回复"
+        }
+        return MemberCallResult(text = text)
+    }
 
     override suspend fun modelName(member: GroupMember): String = "model-${member.role}"
 }
@@ -64,14 +70,16 @@ class GroupRoomPersistenceTest {
             Group(
                 id = "g1",
                 name = "测试群组",
-                mode = GroupMode.DEBATE,
-                members = listOf(GroupMember(id = "m1", modelId = Uuid.random(), role = "A")),
-                debateRounds = 1,
+                members = listOf(
+                    GroupMember(id = "o", modelId = Uuid.random(), role = "主编"),
+                    GroupMember(id = "m1", modelId = Uuid.random(), role = "A"),
+                ),
+                orchestratorId = "o",
             )
         )
         val runner = GroupRunner(RoomTestCaller(), repo)
 
-        val result = runner.run(group, "讨论主题")
+        val result = runner.run(group, "调研任务")
 
         assertEquals(RunStatus.SUCCESS, result.status)
         val stored = dao.getMessages(result.id)
@@ -83,7 +91,7 @@ class GroupRoomPersistenceTest {
     @Test
     fun `listMessages flow re-emits after insert`() = runBlocking {
         val repo = GroupRepository(dao)
-        repo.save(Group(id = "g1", name = "g", mode = GroupMode.DEBATE))
+        repo.save(Group(id = "g1", name = "g"))
         repo.upsertRun(GroupRun(id = "run-1", groupId = "g1", mission = "m"))
 
         val emissions = mutableListOf<List<GroupMessage>>()
@@ -100,7 +108,7 @@ class GroupRoomPersistenceTest {
     @Test
     fun `run flow updates status after upsert`() = runBlocking {
         val repo = GroupRepository(dao)
-        repo.save(Group(id = "g1", name = "g", mode = GroupMode.DEBATE))
+        repo.save(Group(id = "g1", name = "g"))
         repo.upsertRun(GroupRun(id = "run-1", groupId = "g1", mission = "m", status = RunStatus.RUNNING))
 
         val emissions = mutableListOf<GroupRun?>()

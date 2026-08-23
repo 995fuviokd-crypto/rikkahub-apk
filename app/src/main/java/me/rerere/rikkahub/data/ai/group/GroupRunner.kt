@@ -13,7 +13,6 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationHandler
-import me.rerere.rikkahub.data.ai.tools.createWorkspaceTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.datastore.SettingsStore
@@ -23,15 +22,12 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Group
 import me.rerere.rikkahub.data.model.GroupMember
 import me.rerere.rikkahub.data.model.GroupMessage
-import me.rerere.rikkahub.data.model.GroupMode
 import me.rerere.rikkahub.data.model.GroupRun
 import me.rerere.rikkahub.data.model.GroupToolRecord
 import me.rerere.rikkahub.data.model.MessageKind
 import me.rerere.rikkahub.data.model.RunStatus
 import me.rerere.rikkahub.data.repository.GroupRepository
-import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.utils.JsonInstant
-import me.rerere.workspace.WorkspaceShellStatus
 import kotlin.uuid.Uuid
 
 /**
@@ -83,15 +79,13 @@ interface GroupMemberCaller {
 /**
  * 基于 GenerationHandler 的真实成员调用器。
  *
- * 群组成员以临时 [Assistant]（携带成员 systemPrompt / 群组思考深度 / 工作区绑定）
- * 复用普通聊天的完整执行管线：reasoning 思考过程、tools 工具循环、workspace 工作区
- * 执行，并自动放行工具审批（群组无人工审批界面）。首 token 45 秒无响应即视为失败。
+ * 群组成员以临时 [Assistant] 复用普通聊天的完整执行管线：reasoning 思考过程、本地工具
+ * 循环执行，并自动放行工具审批（群组无人工审批界面）。首 token 45 秒无响应即视为失败。
  */
 class ProviderGroupMemberCaller(
     private val settingsStore: SettingsStore,
     private val generationHandler: GenerationHandler,
     private val localTools: LocalTools,
-    private val workspaceRepository: WorkspaceRepository,
 ) : GroupMemberCaller {
     private companion object {
         const val TAG = "GroupMemberCaller"
@@ -114,26 +108,13 @@ class ProviderGroupMemberCaller(
             ?: error("成员「${member.role}」的模型未绑定可用的 Provider")
         Log.i(TAG, "group member call resolved: model=${model.modelId} provider=$providerSetting")
 
-        val workspaceUuid = group.workspaceId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
         val assistant = Assistant(
             name = member.role,
             systemPrompt = member.systemPrompt ?: "",
-            reasoningLevel = group.reasoningLevel,
             localTools = DEFAULT_GROUP_LOCAL_TOOLS,
-            workspaceId = workspaceUuid,
             streamOutput = true,
         )
-
-        val tools = buildList {
-            addAll(localTools.getTools(assistant.localTools))
-            if (group.enableTools && group.workspaceId != null) {
-                val workspace = workspaceRepository.getById(group.workspaceId)
-                if (workspace != null && workspace.shellStatus == WorkspaceShellStatus.READY.name) {
-                    Log.i(TAG, "group member call: attach workspace tools for workspace=${group.workspaceId}")
-                    addAll(createWorkspaceTools(group.workspaceId, workspaceRepository))
-                }
-            }
-        }
+        val tools = localTools.getTools(assistant.localTools)
 
         var snapshotText = ""
         var snapshotReasoning = ""
@@ -204,12 +185,9 @@ class ProviderGroupMemberCaller(
 
 /**
  * 群组协作执行引擎。
- * 三种模式：
- * - ORCHESTRATOR_WORKER：编排器拆解子任务并分派给工作者，最后汇总；
- * - PIPELINE：成员按顺序接力，上一位输出作为下一位输入；
- * - DEBATE：按轮次全体成员轮流发言，最后生成结论。
  *
- * 所有消息实时写入 GroupRepository 并通过 onProgress 回调推送。
+ * 仅支持「编排器-工作者」模式：主编排器把任务拆解为子任务，分派给工作者成员，
+ * 最后汇总全部结果生成结论。所有消息实时写入 GroupStore 并通过 onProgress 回调推送。
  */
 class GroupRunner(
     private val caller: GroupMemberCaller,
@@ -236,11 +214,7 @@ class GroupRunner(
         onProgress(systemMessage(run.id, group, "群组任务已发布：$mission"))
 
         val summary = try {
-            when (group.mode) {
-                GroupMode.ORCHESTRATOR_WORKER -> runOrchestratorWorker(group, run.id, mission, onProgress)
-                GroupMode.PIPELINE -> runPipeline(group, run.id, mission, onProgress)
-                GroupMode.DEBATE -> runDebate(group, run.id, mission, onProgress)
-            }
+            runOrchestratorWorker(group, run.id, mission, onProgress)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
@@ -355,86 +329,6 @@ class GroupRunner(
         return summaryResult.text
     }
 
-    // ---------- 流水线 ----------
-
-    private suspend fun runPipeline(
-        group: Group,
-        runId: String,
-        mission: String,
-        onProgress: (GroupMessage) -> Unit,
-    ): String {
-        var current = mission
-        group.members.forEachIndexed { index, member ->
-            coroutineContext.ensureActive()
-            val prompt = buildString {
-                appendLine("你是群组成员「${member.role}」，参与流水线协作，任务指令：$mission")
-                member.systemPrompt?.let { appendLine("你的职责：$it") }
-                appendedInstructions(runId)?.let { appendLine(it) }
-                if (index > 0) {
-                    appendLine("前一位成员输出：${current.take(4000)}")
-                    appendLine("请基于以上输出完成你的环节，直接输出结果。")
-                } else {
-                    appendLine("你是第一个环节，请直接处理任务并输出结果。")
-                }
-            }
-            val result = callOrNull(group, member, prompt) { note ->
-                onProgress(systemMessage(runId, group, note))
-            }
-            onProgress(memberMessage(runId, group, member, result, MessageKind.RESULT))
-            current = result.text
-        }
-        return current
-    }
-
-    // ---------- 自由讨论 ----------
-
-    private suspend fun runDebate(
-        group: Group,
-        runId: String,
-        mission: String,
-        onProgress: (GroupMessage) -> Unit,
-    ): String {
-        val rounds = group.debateRounds.coerceAtLeast(1)
-        val history = mutableListOf<Pair<GroupMember, String>>()
-
-        for (round in 1..rounds) {
-            coroutineContext.ensureActive()
-            for (member in group.members) {
-                coroutineContext.ensureActive()
-                val previous = history.takeLast(MAX_CONTEXT_MESSAGES)
-                val prompt = buildString {
-                    appendLine("你是群组成员「${member.role}」，参与第 $round 轮讨论。")
-                    member.systemPrompt?.let { appendLine("你的职责：$it") }
-                    appendLine("讨论主题：$mission")
-                    appendedInstructions(runId)?.let { appendLine(it) }
-                    if (previous.isNotEmpty()) {
-                        appendLine("已有发言：")
-                        previous.forEach { (m, c) -> appendLine("- ${m.role}：${c.take(1500)}") }
-                    }
-                    appendLine("请给出你的观点、分析或补充，直接输出内容。")
-                }
-                val result = callOrNull(group, member, prompt) { note ->
-                    onProgress(systemMessage(runId, group, note))
-                }
-                onProgress(memberMessage(runId, group, member, result, MessageKind.REPLY))
-                history += member to result.text
-            }
-        }
-
-        val conclusionPrompt = buildString {
-            appendLine("以下是群组围绕「$mission」的全部讨论内容，请综合各方观点，输出最终结论。")
-            appendedInstructions(runId)?.let { appendLine(it) }
-            history.takeLast(MAX_CONTEXT_MESSAGES).forEach { (m, c) -> appendLine("- ${m.role}：${c.take(2000)}") }
-            appendLine("请输出结构化的最终结论。")
-        }
-        val lead = group.members.firstOrNull() ?: error("群组没有成员")
-        val conclusionResult = callOrNull(group, lead, conclusionPrompt) { note ->
-            onProgress(systemMessage(runId, group, note))
-        }
-        onProgress(memberMessage(runId, group, lead, conclusionResult, MessageKind.SYSTEM))
-        return conclusionResult.text
-    }
-
     // ---------- 运行中追加的指令 ----------
 
     /**
@@ -535,6 +429,5 @@ class GroupRunner(
     companion object {
         const val SYSTEM_MEMBER_ID = "__system__"
         const val USER_MEMBER_ID = "__user__"
-        private const val MAX_CONTEXT_MESSAGES = 20
     }
 }

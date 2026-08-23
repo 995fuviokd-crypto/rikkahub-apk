@@ -107,6 +107,7 @@ import me.rerere.rikkahub.data.recall.RecallRecord
 import me.rerere.rikkahub.data.recall.SideEffectLog
 import me.rerere.rikkahub.data.recall.SideEffectRecorder
 import me.rerere.rikkahub.data.recall.WorkspaceSnapshotManager
+import me.rerere.rikkahub.data.recall.computeSegmentedRecall
 import me.rerere.rikkahub.web.BadRequestException
 import me.rerere.rikkahub.web.NotFoundException
 import me.rerere.rikkahub.utils.TokenEstimate
@@ -671,6 +672,7 @@ class ChatService(
                 conversationModeInjectionIds = conversation.modeInjectionIds,
                 conversationLorebookIds = conversation.lorebookIds,
                 workspaceCwd = conversation.workspaceCwd,
+                workspaceRoot = workspaceIds.firstOrNull()?.toString(),
                 conversationId = conversationId,
                 sideEffectRecorder = sideEffectRecorder,
                 extraSystemPrompts = pluginManager.enabledSystemPrompts(settings.enabledPlugins),
@@ -717,27 +719,13 @@ class ChatService(
                             )
                         )
                     }
-                    mcpManager.getAllAvailableTools().also { allTools ->
-                        val invalidNames = allTools
-                            .map { it.second }
-                            .distinct()
-                            .filter { name -> name.isEmpty() || !name.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' } }
-                        if (invalidNames.isNotEmpty()) {
-                            addError(
-                                error = IllegalStateException(
-                                    context.getString(
-                                        R.string.error_mcp_invalid_server_name,
-                                        invalidNames.joinToString(", ")
-                                    )
-                                ),
-                                conversationId = conversationId,
-                            )
-                            return
-                        }
-                    }.forEach { (serverId, serverName, tool) ->
+                    mcpManager.getAllAvailableTools().forEach { (serverId, serverName, tool) ->
+                        // 服务器名可能是中文/含空格等非字母数字字符，直接拼接会导致工具名非法而不可用；
+                        // 统一安全化后再作为工具名前缀
+                        val safeServerName = serverName.replace(Regex("[^a-zA-Z0-9_]"), "_")
                         add(
                             Tool(
-                                name = "mcp__${serverName}__${tool.name}",
+                                name = "mcp__${safeServerName}__${tool.name}",
                                 description = tool.description ?: "",
                                 parameters = { tool.inputSchema },
                                 needsApproval = { tool.needsApproval },
@@ -1703,26 +1691,6 @@ class ChatService(
     }
 
     /** 分段撤回：仅单一纯文本消息可截断尾部，否则返回 null（回退整条撤回）。 */
-    private fun computeSegmentedRecall(
-        lastNode: MessageNode,
-        boundaryPunctuation: String,
-    ): Pair<MessageNode, String>? {
-        if (boundaryPunctuation.isEmpty()) return null
-        val message = lastNode.messages.lastOrNull() ?: return null
-        if (message.parts.size != 1) return null
-        val onlyPart = message.parts.single()
-        if (onlyPart !is UIMessagePart.Text) return null
-        val text = onlyPart.text
-        val lastPunctIndex = text.indexOfLast { it in boundaryPunctuation }
-        if (lastPunctIndex < 0) return null
-        val kept = text.substring(0, lastPunctIndex + 1)
-        if (kept.isBlank()) return null
-        val trimmed = text.substring(lastPunctIndex + 1)
-        if (trimmed.isBlank()) return null
-        val trimmedMessage = message.copy(parts = listOf(onlyPart.copy(text = kept)))
-        return lastNode.copy(messages = listOf(trimmedMessage)) to trimmed
-    }
-
     // ---- 翻译消息 ----
 
     fun translateMessage(

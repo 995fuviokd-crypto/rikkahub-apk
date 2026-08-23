@@ -5,10 +5,11 @@ import kotlinx.serialization.Serializable
 
 /**
  * 工作流图：节点 + 连线的有向无环图（DAG），可视化工作流的存储与执行结构。
+ * version=3 起支持边条件（condition）与提取（EXTRACT）节点。
  */
 @Serializable
 data class WorkflowGraph(
-    val version: Int = 2,
+    val version: Int = 3,
     val nodes: List<WorkflowNode> = emptyList(),
     val edges: List<WorkflowEdge> = emptyList(),
 ) {
@@ -31,6 +32,13 @@ data class WorkflowNode(
 
 /**
  * 连接两个节点的有向边。IF 节点使用 "true"/"false" 端口区分分支。
+ *
+ * [condition] 为可选的边执行条件（边条件模型）：
+ *  - 空/null：源节点成功即沿边传播（默认）
+ *  - "success"/"ok"/"on_success"：仅源节点成功时沿边传播
+ *  - "error"/"failed"/"on_error"：仅源节点失败时沿边传播（错误处理分支）
+ *  - "true"/"false"：按源节点输出的布尔值匹配
+ *  - 其它：作为正则表达式匹配源节点输出
  */
 @Serializable
 data class WorkflowEdge(
@@ -39,6 +47,7 @@ data class WorkflowEdge(
     val fromPort: String = "out",
     val toNodeId: String,
     val toPort: String = "in",
+    val condition: String? = null,
 )
 
 @Serializable
@@ -73,8 +82,33 @@ enum class NodeType {
     @SerialName("merge")
     MERGE,
 
+    @SerialName("extract")
+    EXTRACT,
+
     @SerialName("output")
     OUTPUT,
+}
+
+/**
+ * 提取节点的处理模式（数据提取节点）：
+ *  - REGEX：从输入中匹配首个正则组（无组则整段匹配）
+ *  - JSON：从输入中按 JSONPath 取值
+ *  - SUB：截取输入的子串
+ *  - CONCAT：拼接固定值/变量得到输出
+ */
+@Serializable
+enum class ExtractMode {
+    @SerialName("regex")
+    REGEX,
+
+    @SerialName("json")
+    JSON,
+
+    @SerialName("sub")
+    SUB,
+
+    @SerialName("concat")
+    CONCAT,
 }
 
 /**

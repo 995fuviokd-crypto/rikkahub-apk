@@ -16,7 +16,6 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Notification01
 import me.rerere.hugeicons.stroke.PaintBoard
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Sun01
@@ -63,12 +62,6 @@ fun SettingPreferencesPage() {
                         leadingContent = { Icon(HugeIcons.Sun01, null) },
                         headlineContent = { Text(stringResource(R.string.setting_page_preferences_theme)) },
                         supportingContent = { Text(stringResource(R.string.setting_page_preferences_theme_desc)) },
-                    )
-                    item(
-                        onClick = { navController.navigate(Screen.SettingPreferencesNotification) },
-                        leadingContent = { Icon(HugeIcons.Notification01, null) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_preferences_notification)) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_preferences_notification_desc)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingPreferencesGeneral) },

@@ -28,7 +28,10 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.DEFAULT_IMAGE_GENERATION_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.DEFAULT_MEMORY_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
+import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SELF_HOSTED_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
@@ -89,6 +92,33 @@ internal fun PromptSettingsPage(settings: Settings, vm: SettingVM, contentPaddin
                 promptValue = settings.compressPrompt,
                 onPromptChange = { vm.updateSettings(settings.copy(compressPrompt = it)) },
                 onResetPrompt = { vm.updateSettings(settings.copy(compressPrompt = DEFAULT_COMPRESS_PROMPT)) },
+            )
+        }
+        item {
+            PromptSettingItem(
+                title = stringResource(R.string.setting_model_page_prompt_image_generation),
+                promptDescription = stringResource(R.string.setting_model_page_image_generation_prompt_vars),
+                promptValue = settings.imageGenerationPrompt,
+                onPromptChange = { vm.updateSettings(settings.copy(imageGenerationPrompt = it)) },
+                onResetPrompt = { vm.updateSettings(settings.copy(imageGenerationPrompt = DEFAULT_IMAGE_GENERATION_PROMPT)) },
+            )
+        }
+        item {
+            PromptSettingItem(
+                title = stringResource(R.string.setting_model_page_prompt_memory),
+                promptDescription = stringResource(R.string.setting_model_page_memory_prompt_vars),
+                promptValue = settings.memoryPrompt,
+                onPromptChange = { vm.updateSettings(settings.copy(memoryPrompt = it)) },
+                onResetPrompt = { vm.updateSettings(settings.copy(memoryPrompt = DEFAULT_MEMORY_PROMPT)) },
+            )
+        }
+        item {
+            PromptSettingItem(
+                title = stringResource(R.string.setting_model_page_prompt_self_hosted),
+                promptDescription = stringResource(R.string.setting_model_page_self_hosted_prompt_vars),
+                promptValue = settings.selfHostedPrompt,
+                onPromptChange = { vm.updateSettings(settings.copy(selfHostedPrompt = it)) },
+                onResetPrompt = { vm.updateSettings(settings.copy(selfHostedPrompt = DEFAULT_SELF_HOSTED_PROMPT)) },
             )
         }
     }

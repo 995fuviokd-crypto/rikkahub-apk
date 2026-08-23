@@ -4,7 +4,7 @@ import android.content.Context
 import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.event.AppEventBus
-import me.rerere.rikkahub.data.operit.OperitScriptRuntime
+import me.rerere.rikkahub.data.script.ScriptRuntime
 import me.rerere.rikkahub.data.plugin.PluginManager
 import me.rerere.tts.provider.TTSManager
 
@@ -14,7 +14,8 @@ class LocalTools(
     private val ttsManager: TTSManager,
     private val settingsStore: SettingsStore,
     private val pluginManager: PluginManager,
-    private val operitRuntime: OperitScriptRuntime,
+    private val scriptRuntime: ScriptRuntime,
+    private val systemControlTools: SystemControlTools,
 ) {
     val javascriptTool by lazy { buildJavascriptTool() }
 
@@ -42,7 +43,7 @@ class LocalTools(
 
     val rootTools by lazy { buildRootTools(context) }
 
-    val operitTool by lazy { buildOperitTool(pluginManager, operitRuntime, settingsStore) }
+    val scriptTool by lazy { buildScriptTool(pluginManager, scriptRuntime, settingsStore) }
 
     fun getTools(options: List<LocalToolOption>): List<Tool> {
         val tools = mutableListOf<Tool>()
@@ -83,8 +84,11 @@ class LocalTools(
         if (options.contains(LocalToolOption.Root)) {
             tools.addAll(rootTools)
         }
-        if (options.contains(LocalToolOption.OperitScripts)) {
-            tools.add(operitTool)
+        if (options.contains(LocalToolOption.Scripts)) {
+            tools.add(scriptTool)
+        }
+        if (options.contains(LocalToolOption.SystemControl)) {
+            tools.addAll(systemControlTools.tools)
         }
         return tools
     }

@@ -41,6 +41,7 @@ import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingToolbarDefaults.ScreenOffset
 import androidx.compose.material3.FloatingToolbarDefaults.floatingToolbarVerticalNestedScroll
 import androidx.compose.material3.HorizontalFloatingToolbar
@@ -93,6 +94,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Modality
+import me.rerere.ai.provider.AgentPlatform
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
@@ -636,6 +638,15 @@ private fun ModelSettingsForm(
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
+                        PlatformAgentSettings(
+                            platformAgent = model.platformAgent,
+                            agentArguments = model.agentArguments,
+                            agentEnvironment = model.agentEnvironment,
+                            onUpdate = { platformAgent, args, env ->
+                                onModelChange(model.copy(platformAgent = platformAgent, agentArguments = args, agentEnvironment = env))
+                            }
+                        )
+
                         ProviderOverrideSettings(
                             providerOverride = model.providerOverwrite,
                             onUpdateProviderOverride = { providerOverride ->
@@ -670,6 +681,113 @@ private fun ModelSettingsForm(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun PlatformAgentSettings(
+    platformAgent: AgentPlatform?,
+    agentArguments: List<String>,
+    agentEnvironment: Map<String, String>,
+    onUpdate: (AgentPlatform?, List<String>, Map<String, String>) -> Unit,
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(
+            stringResource(R.string.setting_provider_page_platform_agent),
+            style = MaterialTheme.typography.titleSmall
+        )
+        Text(
+            stringResource(R.string.setting_provider_page_platform_agent_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        val options = listOf<AgentPlatform?>(
+            null,
+            AgentPlatform.CODEX,
+            AgentPlatform.CLAUDE_CODE,
+            AgentPlatform.GEMINI_CLI,
+            AgentPlatform.ANTHROPIC_CLAUDE_CODE,
+            AgentPlatform.OPENCODE,
+            AgentPlatform.DEEPSEEK_HARNESS,
+        )
+        val labels = options.map {
+            stringResource(
+                when (it) {
+                    null -> R.string.setting_provider_page_platform_agent_none
+                    AgentPlatform.CODEX -> R.string.setting_provider_page_platform_agent_codex
+                    AgentPlatform.CLAUDE_CODE -> R.string.setting_provider_page_platform_agent_claude_code
+                    AgentPlatform.GEMINI_CLI -> R.string.setting_provider_page_platform_agent_gemini_cli
+                    AgentPlatform.ANTHROPIC_CLAUDE_CODE -> R.string.setting_provider_page_platform_agent_anthropic_claude_code
+                    AgentPlatform.OPENCODE -> R.string.setting_provider_page_platform_agent_opencode
+                    AgentPlatform.DEEPSEEK_HARNESS -> R.string.setting_provider_page_platform_agent_dsh
+                }
+            )
+        }
+
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            options.forEachIndexed { index, option ->
+                FilterChip(
+                    selected = platformAgent == option,
+                    onClick = {
+                        onUpdate(option, agentArguments, agentEnvironment)
+                    },
+                    label = {
+                        Text(
+                            text = labels[index],
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                )
+            }
+        }
+
+        if (platformAgent != null) {
+            OutlinedTextField(
+                value = agentArguments.joinToString(" "),
+                onValueChange = { raw ->
+                    onUpdate(
+                        platformAgent,
+                        raw.split(" ").filter { it.isNotBlank() },
+                        agentEnvironment
+                    )
+                },
+                label = { Text(stringResource(R.string.setting_provider_page_platform_agent_args_label)) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+
+            OutlinedTextField(
+                value = agentEnvironment.entries.joinToString("\n") { "${it.key}=${it.value}" },
+                onValueChange = { raw ->
+                    val env = raw.lineSequence()
+                        .map { it.trim() }
+                        .filter { it.isNotBlank() && '=' in it }
+                        .associate { line ->
+                            val idx = line.indexOf('=')
+                            line.substring(0, idx) to line.substring(idx + 1)
+                        }
+                    onUpdate(platformAgent, agentArguments, env)
+                },
+                label = { Text(stringResource(R.string.setting_provider_page_platform_agent_env_label)) },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 3,
+            )
+
+            Text(
+                stringResource(R.string.setting_provider_page_platform_agent_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

@@ -2,22 +2,15 @@ package me.rerere.rikkahub.data.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import me.rerere.ai.core.ReasoningLevel
 import kotlin.uuid.Uuid
 
 /**
- * 群组协作模式。
+ * 群组协作模式。当前仅保留「编排器-工作者」：主编排器拆解任务并分派给工作者，最后汇总结果。
  */
 @Serializable
 enum class GroupMode {
     @SerialName("orchestrator_worker")
     ORCHESTRATOR_WORKER,
-
-    @SerialName("pipeline")
-    PIPELINE,
-
-    @SerialName("debate")
-    DEBATE,
 }
 
 /**
@@ -38,13 +31,9 @@ data class GroupMember(
 data class Group(
     val id: String,
     val name: String,
-    val mode: GroupMode,
+    val mode: GroupMode = GroupMode.ORCHESTRATOR_WORKER,
     val members: List<GroupMember> = emptyList(),
     val orchestratorId: String? = null,
-    val debateRounds: Int = 3,
-    val reasoningLevel: ReasoningLevel = ReasoningLevel.AUTO,
-    val enableTools: Boolean = true,
-    val workspaceId: String? = null,
     val createdAt: Long = 0,
     val updatedAt: Long = 0,
 ) {

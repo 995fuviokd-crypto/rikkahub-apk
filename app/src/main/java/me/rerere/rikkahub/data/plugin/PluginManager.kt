@@ -90,11 +90,11 @@ class PluginManager(
             .map { it.systemPrompt }
     }
 
-    /** 已启用插件中是否包含 Operit 脚本/ToolPkg 插件（存在 operit/ 目录且含 JS 文件） */
-    fun hasOperitScriptPlugins(enabledPlugins: Set<String>): Boolean {
+    /** 已启用插件中是否包含 脚本/ToolPkg 插件（存在脚本目录且含 JS 文件） */
+    fun hasScriptPlugins(enabledPlugins: Set<String>): Boolean {
         if (enabledPlugins.isEmpty()) return false
         return enabledPlugins.any { id ->
-            val dir = File(getPluginDir(id), me.rerere.rikkahub.data.operit.OperitScriptRuntime.OPERIT_DIR)
+            val dir = me.rerere.rikkahub.data.script.ScriptRuntime.scriptDir(getPluginDir(id))
             dir.isDirectory && dir.listFiles()?.any { it.extension == "js" } == true
         }
     }

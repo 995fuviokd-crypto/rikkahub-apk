@@ -1,5 +1,6 @@
 package me.rerere.ai.provider.providers.openai
 
+import me.rerere.ai.provider.ProviderHttpClient
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -46,7 +47,7 @@ class ResponseApiRequestMessageTest {
 
     @Before
     fun setUp() {
-        api = ResponseAPI(OkHttpClient())
+        api = ResponseAPI(ProviderHttpClient(OkHttpClient()))
     }
 
     // Helper to invoke buildMessages method

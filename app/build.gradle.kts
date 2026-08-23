@@ -70,6 +70,14 @@ android {
                     storePassword = storePasswordValue
                     keyAlias = keyAliasValue
                     keyPassword = keyPasswordValue
+                } else {
+                    // 未配置正式签名时回退到 debug keystore，保证 release 构建可安装测试
+                    storeFile = file(
+                        System.getProperty("user.home") + "/.android/debug.keystore"
+                    )
+                    storePassword = "android"
+                    keyAlias = "androiddebugkey"
+                    keyPassword = "android"
                 }
             }
         }

@@ -1,5 +1,6 @@
 package me.rerere.ai.provider.providers.claude
 
+import me.rerere.ai.provider.ProviderHttpClient
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
@@ -34,7 +35,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ClaudeServerToolTest {
-    private val provider = ClaudeProvider(OkHttpClient())
+    private val provider = ClaudeProvider(ProviderHttpClient(OkHttpClient()))
 
     @Test
     fun `non streaming response should pair server tool use and result`() {

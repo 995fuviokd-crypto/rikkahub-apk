@@ -1,5 +1,6 @@
 package me.rerere.ai.provider.providers.openai
 
+import me.rerere.ai.provider.ProviderHttpClient
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.jsonArray
@@ -28,7 +29,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ResponseApiStreamDecoderTest {
-    private val api = ResponseAPI(OkHttpClient())
+    private val api = ResponseAPI(ProviderHttpClient(OkHttpClient()))
 
     @Test
     fun `incomplete response should preserve terminal metadata and usage`() {

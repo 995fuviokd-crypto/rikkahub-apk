@@ -173,6 +173,18 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
+                        headlineContent = { Text("自主执行任务") },
+                        supportingContent = { Text("开启后 AI 收到任务会连续调用工具直到完成，不中途停下汇报或询问（ask_user 仅在必要时使用）") },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.autonomousExecutionEnabled,
+                                onCheckedChange = {
+                                    vm.updateSettings(settings.copy(autonomousExecutionEnabled = it))
+                                }
+                            )
+                        },
+                    )
+                    item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_display_scale_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_display_page_display_scale_desc)) },
                     )

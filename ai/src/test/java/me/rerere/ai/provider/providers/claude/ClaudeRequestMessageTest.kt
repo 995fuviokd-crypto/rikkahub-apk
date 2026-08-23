@@ -1,5 +1,6 @@
 package me.rerere.ai.provider.providers.claude
 
+import me.rerere.ai.provider.ProviderHttpClient
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -38,7 +39,7 @@ class ClaudeRequestMessageTest {
 
     @Before
     fun setUp() {
-        provider = ClaudeProvider(OkHttpClient())
+        provider = ClaudeProvider(ProviderHttpClient(OkHttpClient()))
     }
 
     // Helper to invoke private buildMessages method via reflection

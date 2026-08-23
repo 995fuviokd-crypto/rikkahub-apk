@@ -36,7 +36,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.stroke.MoreVertical
-import me.rerere.rikkahub.data.operit.OperitScriptRuntime
+import me.rerere.rikkahub.data.script.ScriptRuntime
 import me.rerere.rikkahub.data.plugin.PluginJsBridge
 import me.rerere.rikkahub.data.plugin.PluginManager
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -52,9 +52,9 @@ import org.koin.compose.koinInject
 fun WebViewPage(url: String, contentId: String, pluginId: String = "") {
     val context = LocalContext.current
     val pluginManager: PluginManager = koinInject()
-    val operitRuntime: OperitScriptRuntime = koinInject()
+    val scriptRuntime: ScriptRuntime = koinInject()
     val interfaces = if (pluginId.isNotEmpty()) {
-        mapOf("AndroidPlugin" to PluginJsBridge(pluginId, pluginManager, operitRuntime))
+        mapOf("AndroidPlugin" to PluginJsBridge(pluginId, pluginManager, scriptRuntime))
     } else {
         emptyMap()
     }
