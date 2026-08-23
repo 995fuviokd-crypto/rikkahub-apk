@@ -626,7 +626,7 @@ window.__dshPanelMountAll__ = function () {
         }
     </style>"""
 
-    private fun convertToZip(info: PluginInfo, indexHtml: String, clientJs: String?): ByteArray {
+    internal fun convertToZip(info: PluginInfo, indexHtml: String, clientJs: String?): ByteArray {
         val baos = java.io.ByteArrayOutputStream()
         ZipOutputStream(baos).use { zip ->
             zip.putNextEntry(ZipEntry(PluginManager.METADATA_FILE))

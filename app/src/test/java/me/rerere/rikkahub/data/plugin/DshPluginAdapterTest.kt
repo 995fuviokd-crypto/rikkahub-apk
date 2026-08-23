@@ -266,6 +266,47 @@ class DshPluginAdapterTest {
         assertTrue(page.contains("__dshPanelMountAll__"))
     }
 
+    @Test
+    fun `convertToZip packages metadata web page and client bundle`() {
+        val dir = tempRepo()
+        try {
+            File(dir, "SKILL.md").writeText("# Sample\n\nFollow these steps.")
+            File(dir, "lib/client.js").apply { parentFile.mkdirs() }.writeText("// client bundle")
+
+            val ref = DshRepoRef("owner", "repo", "main")
+            val info = adapter.convertRepo(dir, ref)
+            val clientEntry = adapter.findClientEntry(dir)
+            val docsPage = adapter.buildDocsPage(dir, ref)
+            val indexHtml = if (clientEntry != null) {
+                adapter.buildPanelPage(ref, clientEntry.readText(), docsPage)
+            } else {
+                docsPage
+            }
+            val zipBytes = adapter.convertToZip(info, indexHtml, clientJs = clientEntry?.readText())
+
+            val names = mutableListOf<String>()
+            val contents = mutableMapOf<String, String>()
+            java.util.zip.ZipInputStream(zipBytes.inputStream()).use { zis ->
+                generateSequence { zis.nextEntry }.forEach { entry ->
+                    names += entry.name
+                    contents[entry.name] = zis.readBytes().toString(Charsets.UTF_8)
+                    zis.closeEntry()
+                }
+            }
+
+            assertTrue(PluginManager.METADATA_FILE in names)
+            assertTrue("web/index.html" in names)
+            assertTrue("web/plugin.client.js" in names)
+
+            val meta = contents.getValue(PluginManager.METADATA_FILE)
+            assertTrue(meta.contains("\"id\""))
+            assertTrue(contents.getValue("web/index.html").contains("""<script src="./plugin.client.js">"""))
+            assertEquals("// client bundle", contents.getValue("web/plugin.client.js"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
     // ---- buildWorkspaceCommandHint：npm bin → 工作区命令 ----
 
     @Test
