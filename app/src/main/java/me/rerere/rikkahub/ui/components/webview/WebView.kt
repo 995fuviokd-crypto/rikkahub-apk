@@ -125,6 +125,8 @@ fun WebView(
                     settings.javaScriptEnabled = true // Enable JavaScript
                     settings.domStorageEnabled = true
                     settings.allowContentAccess = true
+                    // targetApi >= 30 默认禁 file:// 加载；插件 webview 页面依赖包内 file 资源
+                    settings.allowFileAccess = true
                     settings.apply(state.settings)
 
                     // Use the created clients

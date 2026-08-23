@@ -318,7 +318,7 @@ class DshPluginAdapter(
             appendLine(DOCS_PAGE_CSS)
             appendLine(PANEL_PAGE_CSS)
             appendLine("""<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"
-                onerror="this.onerror=null;var s=document.createElement('script');s.src='https://fastly.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js';s.onload=function(){window.__dshReactReady__&amp;&amp;window.__dshReactReady__()};document.head.appendChild(s)"></script>""")
+                onerror="this.onerror=null;var s=document.createElement('script');s.src='https://fastly.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js';document.head.appendChild(s)"></script>""")
             appendLine("""<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"
                 onerror="this.onerror=null;var s=document.createElement('script');s.src='https://fastly.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js';document.head.appendChild(s)"></script>""")
             appendLine("<script>$PANEL_HOST_SHIM</script>")
@@ -338,7 +338,8 @@ class DshPluginAdapter(
      */
     internal val PANEL_HOST_SHIM = """
 window.__ModuleLoader__ = (function () {
-    var plugins = [];
+    var pending = [];   // 待实例化的模块定义
+    var applied = false;
     function makeRequire() {
         return function (name) {
             var key = String(name || '').toLowerCase();
@@ -377,7 +378,6 @@ window.__ModuleLoader__ = (function () {
     };
     function setStatus(text, showDocs) {
         var el = document.getElementById('status');
-        if (el) el.textContent = text;
         if (showDocs) {
             var docs = document.getElementById('docs-fallback');
             if (docs) docs.style.display = '';
@@ -389,70 +389,67 @@ window.__ModuleLoader__ = (function () {
                 el.appendChild(link);
             }
         }
+        if (el) el.textContent = text;
     }
-    }
+    var mountedOnce = false;
     function mountAll() {
+        if (mountedOnce) return;
+        if (!window.React || !window.ReactDOM) return; // 运行时未就绪，等待外部轮询
         var mounted = false;
-        plugins.forEach(function (p) {
+        // 先实例化所有 pending 定义（factory 可能 return apply 对象或写 module.exports）
+        pending.forEach(function (def) {
             try {
-                var exports = p.exports;
-                if (exports && typeof exports.apply === 'function') {
-                    exports.apply(ctx);
+                var module = { exports: {} };
+                var result = def.factory(makeRequire(), module, module.exports);
+                var target =
+                    (module.exports && typeof module.exports.apply === 'function') ? module.exports :
+                    (result && typeof result.apply === 'function') ? result : null;
+                if (target) {
+                    target.apply(ctx);
                     mounted = true;
-                } else if (typeof p.result === 'function') {
-                    p.result(ctx);
-                    mounted = true;
+                } else {
+                    console.warn('[dsh-shim] no apply export in', def.id);
                 }
             } catch (e) {
-                console.error('[dsh-shim] apply failed', e);
+                console.error('[dsh-shim] factory/apply failed', e);
             }
         });
+        pending = [];
         if (mounted) {
+            mountedOnce = true;
             setTimeout(function () { setStatus('面板已加载'); }, 300);
-            setTimeout(function () {
-                var root = document.getElementById('panel-root');
-                if (root && root.childElementCount === 0) setStatus('面板未渲染内容', true);
-            }, 4000);
         } else {
             setStatus('该插件的界面无法在本环境运行（依赖 DSH 宿主专有能力）', true);
         }
     }
     return {
         load: function (def) {
-            try {
-                var module = { exports: {} };
-                var result = def.factory(makeRequire(), module, module.exports);
-                plugins.push({ id: def.id, exports: module.exports, result: result });
-            } catch (e) {
-                console.error('[dsh-shim] factory failed', e);
-                setStatus('插件代码加载失败：' + e.message, true);
-            }
+            pending.push(def);
         },
-        _mountAll: mountAll
+        _mountAll: mountAll,
+        _runtimeFailed: function () {
+            var docs = document.getElementById('docs-fallback');
+            if (docs) docs.style.display = '';
+            setStatus('UI 运行时加载失败（网络受限），已显示文档', true);
+        }
     };
 })();
-window.__dshReactReady__ = null;
 window.__dshPanelMountAll__ = function () {
-    function go() { try { window.__ModuleLoader__._mountAll(); } catch (e) { console.error(e); } }
-    if (window.React && window.ReactDOM) {
-        window.addEventListener('load', function () { setTimeout(go, 30); });
-        setTimeout(go, 2500); // 兜底：load 事件被 CDN 阻塞时仍尝试挂载
-    } else {
-        // 等 fallback CDN 就绪
-        var tries = 0;
-        var timer = setInterval(function () {
-            tries++;
-            if (window.React && window.ReactDOM) {
-                clearInterval(timer); go();
-            } else if (tries > 20) {
-                clearInterval(timer);
-                var el = document.getElementById('status');
-                if (el) el.textContent = 'UI 运行时加载失败（网络受限）';
-                var docs = document.getElementById('docs-fallback');
-                if (docs) docs.style.display = '';
+    var tries = 0;
+    var timer = setInterval(function () {
+        tries++;
+        window.__ModuleLoader__._mountAll();
+        if (window.React && window.ReactDOM) {
+            clearInterval(timer);
+            // readyState complete 时 mountAll 已在上方 tick 执行过；否则等 load 后补一次
+            if (document.readyState !== 'complete') {
+                window.addEventListener('load', function () { window.__ModuleLoader__._mountAll(); });
             }
-        }, 500);
-    }
+        } else if (tries > 100) {
+            clearInterval(timer);
+            window.__ModuleLoader__._runtimeFailed();
+        }
+    }, 100);
 };
 """.trimIndent()
     internal fun extractDefineTools(root: File): List<ScriptToolDef> {
