@@ -122,17 +122,53 @@ class TavernCardConverterTest {
     }
 
     @Test
-    fun `importedKey is stable per name and notes`() {
-        val a = TavernCard(name = "X", creatorNotes = "built-in")
-        val b = TavernCard(name = "X", creatorNotes = "built-in")
-        val c = TavernCard(name = "X", creatorNotes = "")
-        assertEquals(
-            me.rerere.rikkahub.ui.pages.extensions.plugin.PluginMarketVM.importedKeyOf(a),
-            me.rerere.rikkahub.ui.pages.extensions.plugin.PluginMarketVM.importedKeyOf(b),
-        )
-        assertTrue(
-            me.rerere.rikkahub.ui.pages.extensions.plugin.PluginMarketVM.importedKeyOf(a) !=
-                me.rerere.rikkahub.ui.pages.extensions.plugin.PluginMarketVM.importedKeyOf(c)
-        )
+    fun `parses sillytavern preset sampling params`() {
+        val presetJson = """
+        {"name":"My Preset","temperature":0.7,"top_p":0.9,"openai_max_tokens":1024,
+         "frequency_penalty":0.1,"presence_penalty":-0.1}
+        """.trimIndent()
+        val preset = TavernCardConverter.parsePreset(presetJson)
+        assertEquals("My Preset", preset.name)
+        assertEquals(0.7f, preset.temperature!!, 1e-6f)
+        assertEquals(0.9f, preset.topP!!, 1e-6f)
+        assertEquals(1024, preset.maxTokens)
+    }
+
+    @Test
+    fun `parses regex script single and library forms`() {
+        val single = """
+        {"scriptName":"Trim quotes","findRegex":"/\u0022([^\u0022]*)\u0022/g","replaceString":"$1",
+         "placement":[2],"disabled":false,"markdownOnly":true}
+        """.trimIndent()
+        val one = TavernCardConverter.parseRegexScripts(single)
+        assertEquals(1, one.size)
+        assertEquals("Trim quotes", one[0].name)
+        assertTrue(one[0].affectingScope.contains(me.rerere.rikkahub.data.model.AssistantAffectScope.ASSISTANT))
+        assertTrue(one[0].visualOnly)
+
+        val lib = """
+        [{"scripts":[{"scriptName":"A","findRegex":"foo","replaceString":"bar","placement":[1]}]},
+         {"scriptName":"B","findRegex":"x","replaceString":"y","placement":[1,2]}]
+        """.trimIndent()
+        val many = TavernCardConverter.parseRegexScripts(lib)
+        assertEquals(2, many.size)
+        assertEquals(setOf(me.rerere.rikkahub.data.model.AssistantAffectScope.USER), many[0].affectingScope)
+    }
+
+    @Test
+    fun `parses tavern market index json`() {
+        val index = """
+        [
+          {"id":"socrates","name":"苏格拉底","description":"提问教学","tags":["教育"],"emoji":"🏛️","file":"tavern/socrates.json"},
+          {"id":"broken"},
+          {"name":"no id"}
+        ]
+        """.trimIndent()
+        val list = me.rerere.rikkahub.data.api.TavernMarketDataSource.parseIndexJson(index)
+        assertEquals(1, list.size)
+        assertEquals("socrates", list[0].id)
+        assertEquals("苏格拉底", list[0].name)
+        assertEquals("tavern/socrates.json", list[0].file)
+        assertEquals("🏛️", list[0].emoji)
     }
 }

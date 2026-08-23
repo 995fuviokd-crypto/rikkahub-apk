@@ -24,9 +24,10 @@ import me.rerere.rikkahub.data.plugin.PluginInfo
 import me.rerere.rikkahub.data.plugin.PluginManager
 import me.rerere.rikkahub.data.plugin.PluginMarketEntry
 import me.rerere.rikkahub.data.plugin.PluginStatus
+import me.rerere.rikkahub.data.api.TavernListing
+import me.rerere.rikkahub.data.api.TavernMarketDataSource
 import me.rerere.rikkahub.data.api.communityPluginIdFor
 import me.rerere.rikkahub.data.model.Lorebook
-import me.rerere.rikkahub.data.tavern.FeaturedTavernCards
 import me.rerere.rikkahub.data.tavern.TavernCardConverter
 import me.rerere.rikkahub.data.tavern.TavernCard
 import me.rerere.rikkahub.data.tavern.TavernPng
@@ -40,6 +41,7 @@ class PluginMarketVM(
     private val communityDataSource: CommunityMarketDataSource,
     private val dshPluginAdapter: DshPluginAdapter,
     private val dshMarketDataSource: DshMarketDataSource,
+    private val tavernMarketDataSource: TavernMarketDataSource,
 ) : ViewModel() {
     private val _installed = MutableStateFlow<List<InstalledPlugin>>(emptyList())
     val installed = _installed.asStateFlow()
@@ -443,10 +445,7 @@ class PluginMarketVM(
         _notice.value = null
     }
 
-    // ---- 酒馆（SillyTavern）角色卡 / 世界书 ----
-
-    /** 内置精选角色卡（离线可用，内容健康实用向） */
-    val featuredTavernCards: List<TavernCard> = FeaturedTavernCards.cards
+    // ---- 酒馆（SillyTavern）角色卡 / 世界书 / 正则 / 预设 ----
 
     private val _tavernImportedKeys = MutableStateFlow<Set<String>>(emptySet())
     val tavernImportedKeys = _tavernImportedKeys.asStateFlow()
@@ -457,6 +456,16 @@ class PluginMarketVM(
     private val _tavernImporting = MutableStateFlow(false)
     val tavernImporting = _tavernImporting.asStateFlow()
 
+    // 酒馆市场索引（与插件市场同仓库根目录 tavern.json）
+    private val _tavernEntries = MutableStateFlow<List<TavernListing>>(emptyList())
+    val tavernEntries = _tavernEntries.asStateFlow()
+
+    private val _tavernLoading = MutableStateFlow(false)
+    val tavernLoading = _tavernLoading.asStateFlow()
+
+    private val _tavernError = MutableStateFlow<String?>(null)
+    val tavernError = _tavernError.asStateFlow()
+
     init {
         viewModelScope.launch {
             settingsStore.settingsFlow.collect { settings ->
@@ -466,42 +475,86 @@ class PluginMarketVM(
         }
     }
 
-    /** 导入内置/解析好的角色卡：注册为本地助手，内嵌世界书同步注册并关联 */
+    /** 拉取酒馆角色卡市场索引 */
+    fun loadTavernMarket() {
+        if (_tavernLoading.value) return
+        viewModelScope.launch {
+            _tavernLoading.value = true
+            _tavernError.value = null
+            tavernMarketDataSource.fetchIndex(_marketRepo.value)
+                .onSuccess { _tavernEntries.value = it }
+                .onFailure { _tavernError.value = "酒馆列表加载失败: ${it.message}" }
+            _tavernLoading.value = false
+        }
+    }
+
+    /** 从市场安装角色卡：下载文件 → 解析 → 注册助手 */
+    fun installTavernEntry(entry: TavernListing) {
+        if (_downloadingId.value != null) return
+        viewModelScope.launch {
+            _downloadingId.value = "tavern-${entry.id}"
+            _notice.value = null
+            tavernMarketDataSource.downloadCard(_marketRepo.value, entry.file)
+                .onSuccess { bytes ->
+                    val isPng = entry.file.endsWith(".png", ignoreCase = true)
+                    runCatching {
+                        val jsonText = withContext(Dispatchers.IO) {
+                            if (isPng) {
+                                TavernPng.extractCharaJson(bytes) ?: error("PNG 中不含酒馆角色数据")
+                            } else {
+                                bytes.toString(Charsets.UTF_8)
+                            }
+                        }
+                        TavernCardConverter.parseCard(jsonText)
+                    }.onSuccess { card ->
+                        importCardInternal(card)
+                    }.onFailure { e ->
+                        _notice.value = "角色卡解析失败: ${e.message}"
+                    }
+                }
+                .onFailure { _notice.value = "下载失败: ${it.message}" }
+            _downloadingId.value = null
+        }
+    }
+
+    /** 核心导入：注册为本地助手，内嵌世界书同步注册并关联 */
+    private suspend fun importCardInternal(card: TavernCard) {
+        val current = settingsStore.settingsFlow.value
+        if (current.assistants.any { it.name == card.name }) {
+            _notice.value = "助手「${card.name}」已存在，无需重复导入"
+            return
+        }
+        val assistant = TavernCardConverter.toAssistant(card)
+        val lorebook = TavernCardConverter.cardToLorebook(card)
+        val linkedAssistant = if (lorebook != null) {
+            assistant.copy(lorebookIds = assistant.lorebookIds + lorebook.id)
+        } else {
+            assistant
+        }
+        settingsStore.update { settings ->
+            settings.copy(
+                assistants = settings.assistants + linkedAssistant,
+                lorebooks = if (lorebook != null) settings.lorebooks + lorebook else settings.lorebooks,
+                tavernImportedKeys = settings.tavernImportedKeys + importedKeyOf(card),
+            )
+        }
+        _notice.value = "已导入「${card.name}」为本地助手" + if (lorebook != null) "（含世界书）" else ""
+    }
+
+    /** 导入解析好的角色卡（UI 内置来源或转换结果），带并发防抖 */
     fun importTavernCard(card: TavernCard) {
         if (_tavernImporting.value) return
         viewModelScope.launch {
             _tavernImporting.value = true
             _notice.value = null
-            runCatching {
-                val current = settingsStore.settingsFlow.value
-                if (current.assistants.any { it.name == card.name }) {
-                    error("助手「${card.name}」已存在，无需重复导入")
-                }
-                val assistant = TavernCardConverter.toAssistant(card)
-                val lorebook = TavernCardConverter.cardToLorebook(card)
-                val linkedAssistant = if (lorebook != null) {
-                    assistant.copy(lorebookIds = assistant.lorebookIds + lorebook.id)
-                } else {
-                    assistant
-                }
-                settingsStore.update { settings ->
-                    settings.copy(
-                        assistants = settings.assistants + linkedAssistant,
-                        lorebooks = if (lorebook != null) settings.lorebooks + lorebook else settings.lorebooks,
-                        tavernImportedKeys = settings.tavernImportedKeys + importedKeyOf(card),
-                    )
-                }
-                _notice.value = "已导入「${card.name}」为本地助手" + if (lorebook != null) "（含世界书）" else ""
-            }.onFailure { e ->
-                _notice.value = "导入失败: ${e.message}"
-            }
+            runCatching { importCardInternal(card) }
+                .onFailure { e -> _notice.value = "导入失败: ${e.message}" }
             _tavernImporting.value = false
         }
     }
 
     /**
      * 从文件字节导入角色卡：JSON 直接解析；PNG 提取 tEXt chara chunk 后 Base64 解码。
-     * 成功后回调卡片名供 UI 提示。
      */
     fun importTavernCardFromBytes(bytes: ByteArray, fileName: String, isPng: Boolean) {
         if (_tavernImporting.value) return
@@ -517,9 +570,10 @@ class PluginMarketVM(
                     }
                 }
                 val card = TavernCardConverter.parseCard(jsonText)
-                importTavernCard(card)
+                importCardInternal(card)
             } catch (e: Throwable) {
                 _notice.value = "角色卡导入失败: ${e.message}"
+            } finally {
                 _tavernImporting.value = false
             }
         }
@@ -547,12 +601,90 @@ class PluginMarketVM(
         }
     }
 
+    /**
+     * 导入 SillyTavern 正则脚本（单个/数组/脚本库均可），
+     * 追加到当前选中助手的正则替换列表。
+     */
+    fun importRegexScripts(jsonText: String) {
+        viewModelScope.launch {
+            _notice.value = null
+            runCatching { TavernCardConverter.parseRegexScripts(jsonText) }
+                .onSuccess { scripts ->
+                    if (scripts.isEmpty()) {
+                        _notice.value = "未在文件中找到可用正则脚本"
+                        return@launch
+                    }
+                    val current = settingsStore.settingsFlow.value
+                    val targetId = current.assistantId
+                    val applied = current.getCurrentAssistantOrNull()?.let { assistant ->
+                        val existingNames = assistant.regexes.map { it.name }.toSet()
+                        val fresh = scripts.filter { it.name !in existingNames }
+                        if (fresh.isEmpty()) {
+                            _notice.value = "正则脚本已存在，跳过重复导入"
+                            null
+                        } else {
+                            val updated = assistant.copy(regexes = assistant.regexes + fresh)
+                            Pair(updated, fresh.size)
+                        }
+                    }
+                    if (applied != null) {
+                        val (updated, count) = applied
+                        settingsStore.update { s ->
+                            s.copy(assistants = s.assistants.map { if (it.id == updated.id) updated else it })
+                        }
+                        _notice.value = "已导入 $count 条正则到当前助手"
+                    } else if (_notice.value == null) {
+                        _notice.value = "未找到当前助手"
+                    }
+                }
+                .onFailure { e -> _notice.value = "正则导入失败: ${e.message}" }
+        }
+    }
+
+    /**
+     * 应用 SillyTavern 预设的采样参数（temperature/top_p/max_tokens）
+     * 到当前选中助手。
+     */
+    fun applyPreset(jsonText: String) {
+        viewModelScope.launch {
+            _notice.value = null
+            runCatching { TavernCardConverter.parsePreset(jsonText) }
+                .onSuccess { preset ->
+                    val current = settingsStore.settingsFlow.value
+                    val assistant = current.getCurrentAssistantOrNull()
+                    if (assistant == null) {
+                        _notice.value = "未找到当前助手"
+                        return@onSuccess
+                    }
+                    val updated = assistant.copy(
+                        temperature = preset.temperature ?: assistant.temperature,
+                        topP = preset.topP ?: assistant.topP,
+                        maxTokens = preset.maxTokens ?: assistant.maxTokens,
+                    )
+                    settingsStore.update { s ->
+                        s.copy(assistants = s.assistants.map { if (it.id == updated.id) updated else it })
+                    }
+                    val parts = buildList {
+                        preset.temperature?.let { add("temperature=$it") }
+                        preset.topP?.let { add("top_p=$it") }
+                        preset.maxTokens?.let { add("max_tokens=$it") }
+                    }
+                    _notice.value = "预设「${preset.name}」已应用到助手：${parts.joinToString(", ").ifEmpty { "无匹配参数" }}"
+                }
+                .onFailure { e -> _notice.value = "预设应用失败: ${e.message}" }
+        }
+    }
+
     companion object {
         /** 卡片导入去重 key 生成（UI 判断"已导入"用） */
         fun importedKeyOf(card: TavernCard): String =
             "${card.name}@${card.creatorNotes.take(24).ifEmpty { "custom" }}"
     }
 }
+
+private fun me.rerere.rikkahub.data.datastore.Settings.getCurrentAssistantOrNull(): me.rerere.rikkahub.data.model.Assistant? =
+    assistants.find { it.id == assistantId } ?: assistants.firstOrNull()
+
 
 data class PluginUiState(
     val info: PluginInfo,

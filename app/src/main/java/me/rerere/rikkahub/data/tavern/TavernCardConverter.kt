@@ -3,7 +3,9 @@ package me.rerere.rikkahub.data.tavern
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -11,6 +13,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.JsonPrimitive
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.AssistantAffectScope
+import me.rerere.rikkahub.data.model.AssistantRegex
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.InjectionPosition
 import me.rerere.rikkahub.data.model.Lorebook
@@ -218,6 +222,80 @@ object TavernCardConverter {
             name = fileName?.removeSuffix(".json").orEmpty().ifEmpty { "导入的世界书" },
             description = "导入自 SillyTavern 世界书（${entries.size} 条目）",
             entries = entries,
+        )
+    }
+
+    /** SillyTavern 预设中与 RikkaHub 助手可映射的采样参数 */
+    data class TavernPreset(
+        val name: String,
+        val temperature: Float? = null,
+        val topP: Float? = null,
+        val maxTokens: Int? = null,
+    )
+
+    /**
+     * 解析 SillyTavern 预设 JSON（采样参数集）。
+     * 兼容字段别名：openai_max_tokens / genamt / max_tokens；top_p / topP。
+     */
+    fun parsePreset(jsonText: String): TavernPreset {
+        val root = runCatching { json.parseToJsonElement(jsonText).jsonObject }
+            .getOrElse { error("预设不是合法 JSON: ${it.message}") }
+        fun num(vararg keys: String): Float? =
+            keys.firstNotNullOfOrNull { k ->
+                (root[k] as? JsonPrimitive)?.contentOrNull?.toFloatOrNull()
+                    ?: (root[k] as? JsonPrimitive)?.doubleOrNull?.toFloat()
+            }
+        return TavernPreset(
+            name = root.str("name") ?: "导入的预设",
+            temperature = num("temperature", "temp"),
+            topP = num("top_p", "topP", "top_p_"),
+            maxTokens = num("openai_max_tokens", "genamt", "max_tokens", "maxTokens")?.toInt(),
+        )
+    }
+
+    /**
+     * 解析 SillyTavern 正则脚本（单个对象或脚本库数组均可）→ AssistantRegex 列表。
+     * placement: 1=用户输入(USER) 2=AI输出(ASSISTANT)；markdownOnly → 仅视觉替换。
+     */
+    fun parseRegexScripts(jsonText: String): List<AssistantRegex> {
+        val root = runCatching { json.parseToJsonElement(jsonText) }
+            .getOrElse { error("正则脚本不是合法 JSON: ${it.message}") }
+        val array = when {
+            root is kotlinx.serialization.json.JsonArray -> root.jsonArray
+            else -> listOf(root)
+        }
+        val result = mutableListOf<AssistantRegex>()
+        for (el in array) {
+            val obj = el as? JsonObject ?: continue
+            if (obj.containsKey("scripts")) {
+                // ST 正则库：{"scripts": [...]}
+                obj["scripts"]?.jsonArray?.forEach { inner ->
+                    (inner as? JsonObject)?.let { regexFromObject(it) }?.let { result.add(it) }
+                }
+            } else {
+                regexFromObject(obj)?.let { result.add(it) }
+            }
+        }
+        return result
+    }
+
+    private fun regexFromObject(obj: JsonObject): AssistantRegex? {
+        val find = obj.str("findRegex", "find_regex", "find") ?: return null
+        val placementNumbers = obj["placement"]?.jsonArray
+            ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.toIntOrNull() }
+            .orEmpty()
+        val scopes = buildSet {
+            if (placementNumbers.isEmpty() || 1 in placementNumbers) add(AssistantAffectScope.USER)
+            if (2 in placementNumbers || 0 in placementNumbers) add(AssistantAffectScope.ASSISTANT)
+        }.ifEmpty { setOf(AssistantAffectScope.ASSISTANT) }
+        return AssistantRegex(
+            id = Uuid.parse(java.util.UUID.randomUUID().toString()),
+            name = obj.str("scriptName", "name") ?: find.take(20),
+            enabled = !(obj["disabled"]?.jsonPrimitive?.booleanOrNull ?: false),
+            findRegex = find,
+            replaceString = obj.str("replaceString", "replace") ?: "",
+            affectingScope = scopes,
+            visualOnly = obj["markdownOnly"]?.jsonPrimitive?.booleanOrNull ?: false,
         )
     }
 

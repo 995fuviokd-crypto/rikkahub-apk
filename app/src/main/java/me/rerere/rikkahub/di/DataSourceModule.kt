@@ -77,6 +77,9 @@ val dataSourceModule = module {
     single {
         me.rerere.rikkahub.data.api.DshMarketDataSource(httpClient = get())
     }
+    single {
+        me.rerere.rikkahub.data.api.TavernMarketDataSource(httpClient = get())
+    }
 
     single {
         val context: Context = get()
