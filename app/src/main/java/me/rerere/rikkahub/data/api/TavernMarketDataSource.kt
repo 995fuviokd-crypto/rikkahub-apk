@@ -35,19 +35,28 @@ class TavernMarketDataSource(
     private val httpClient: OkHttpClient,
 ) {
 
-    /** 索引候选：依次尝试，直到一个可用 */
+    /** 索引候选：依次尝试，直到一个可用（支持 .gz 自动解压） */
     suspend fun fetchDefault(): Result<List<TavernListing>> =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             var lastError: Throwable? = null
             for (url in defaultIndexUrls) {
                 try {
-                    return@withContext Result.success(parseIndexJson(download(url).toString(Charsets.UTF_8)))
+                    return@withContext Result.success(parseIndexJson(decodeBytes(download(url))))
                 } catch (e: Throwable) {
                     lastError = e
                 }
             }
             Result.failure(lastError ?: IllegalStateException("所有索引源均不可用"))
         }
+
+    /** gz 自动解压为 UTF-8 文本 */
+    private fun decodeBytes(bytes: ByteArray): String {
+        if (bytes.size >= 2 && (bytes[0].toInt() and 0xff) == 0x1f && (bytes[1].toInt() and 0xff) == 0x8b) {
+            java.util.zip.GZIPInputStream(bytes.inputStream()).use { it.readBytes() }
+                .also { return it.toString(Charsets.UTF_8) }
+        }
+        return bytes.toString(Charsets.UTF_8)
+    }
 
     private fun candidates(repoPath: String): List<String> = listOf(
         "https://raw.githubusercontent.com/$repoPath",
@@ -117,11 +126,11 @@ class TavernMarketDataSource(
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
 
-        /** 酒馆索引自动降级候选：市场仓库 → 公共直链 */
+        /** 酒馆索引自动降级候选：市场仓库 → 公共直链（gzip） */
         val defaultIndexUrls = listOf(
-            "https://raw.githubusercontent.com/995fuviokd-crypto/plugin-market/main/tavern.json",
-            "https://gh-proxy.com/https://raw.githubusercontent.com/995fuviokd-crypto/plugin-market/main/tavern.json",
-            "https://github.com/995fuviokd-crypto/plugin-market/raw/main/tavern.json",
+            "https://raw.githubusercontent.com/995fuviokd-crypto/plugin-market/main/tavern.json.gz",
+            "https://gh-proxy.com/https://raw.githubusercontent.com/995fuviokd-crypto/plugin-market/main/tavern.json.gz",
+            "https://github.com/995fuviokd-crypto/plugin-market/raw/main/tavern.json.gz",
         )
 
         internal fun parseIndexJson(text: String): List<TavernListing> {
