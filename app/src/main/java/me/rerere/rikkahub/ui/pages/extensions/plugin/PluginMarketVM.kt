@@ -481,7 +481,7 @@ class PluginMarketVM(
         viewModelScope.launch {
             _tavernLoading.value = true
             _tavernError.value = null
-            tavernMarketDataSource.fetchIndex(_marketRepo.value)
+            tavernMarketDataSource.fetchDefault()
                 .onSuccess { _tavernEntries.value = it }
                 .onFailure { _tavernError.value = "酒馆列表加载失败: ${it.message}" }
             _tavernLoading.value = false

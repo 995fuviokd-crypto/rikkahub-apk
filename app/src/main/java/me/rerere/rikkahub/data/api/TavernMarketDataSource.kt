@@ -35,6 +35,20 @@ class TavernMarketDataSource(
     private val httpClient: OkHttpClient,
 ) {
 
+    /** 索引候选：依次尝试，直到一个可用 */
+    suspend fun fetchDefault(): Result<List<TavernListing>> =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            var lastError: Throwable? = null
+            for (url in defaultIndexUrls) {
+                try {
+                    return@withContext Result.success(parseIndexJson(download(url).toString(Charsets.UTF_8)))
+                } catch (e: Throwable) {
+                    lastError = e
+                }
+            }
+            Result.failure(lastError ?: IllegalStateException("所有索引源均不可用"))
+        }
+
     private fun candidates(repoPath: String): List<String> = listOf(
         "https://raw.githubusercontent.com/$repoPath",
         "https://gh-proxy.com/https://raw.githubusercontent.com/$repoPath",
@@ -64,12 +78,16 @@ class TavernMarketDataSource(
         throw lastError ?: IllegalStateException("拉取失败")
     }
 
-    /** 拉取 tavern.json 索引 */
+    /** 拉取 tavern.json 索引；repo 可为 owner/repo 或完整 https 直链 */
     suspend fun fetchIndex(repo: String): Result<List<TavernListing>> =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
-                val parts = repo.trim().trim('/').split('/')
-                if (parts.size != 2 || parts.any { it.isBlank() }) error("仓库格式应为 owner/repo")
+                val r = repo.trim().trim('/')
+                if (r.startsWith("http://") || r.startsWith("https://")) {
+                    return@runCatching parseIndexJson(download(r).toString(Charsets.UTF_8))
+                }
+                val parts = r.split('/')
+                if (parts.size != 2 || parts.any { it.isBlank() }) error("仓库格式应为 owner/repo 或完整 URL")
                 parseIndexJson(fetchViaMirrors("${parts[0]}/${parts[1]}/main/tavern.json"))
             }
         }
@@ -98,6 +116,13 @@ class TavernMarketDataSource(
 
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
+
+        /** 酒馆索引自动降级候选：市场仓库 → 公共直链 */
+        val defaultIndexUrls = listOf(
+            "https://raw.githubusercontent.com/995fuviokd-crypto/plugin-market/main/tavern.json",
+            "https://gh-proxy.com/https://raw.githubusercontent.com/995fuviokd-crypto/plugin-market/main/tavern.json",
+            "https://github.com/995fuviokd-crypto/plugin-market/raw/main/tavern.json",
+        )
 
         internal fun parseIndexJson(text: String): List<TavernListing> {
             val array = json.parseToJsonElement(text).jsonArray
