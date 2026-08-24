@@ -77,7 +77,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.core.InputSchema
@@ -200,7 +203,7 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                 )
             ) {
                 items(
-                    mcpConfigs.filter { it !is McpServerConfig.CommandServerConfig },
+                    mcpConfigs,
                     key = { it.id }
                 ) { mcpConfig ->
                     McpServerItem(
@@ -220,7 +223,7 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                 }
             }
 
-            if (mcpConfigs.none { it !is McpServerConfig.CommandServerConfig }) {
+            if (mcpConfigs.isEmpty()) {
                 Column(
                     modifier = Modifier.align(Alignment.Center),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -390,7 +393,7 @@ private fun McpServerItem(
                             when (item) {
                                 is McpServerConfig.SseTransportServer -> Text("SSE")
                                 is McpServerConfig.StreamableHTTPServer -> Text("Streamable HTTP")
-                                is McpServerConfig.CommandServerConfig -> Text("本地命令")
+                                is McpServerConfig.CommandServerConfig -> Text("Local Command")
                             }
                         }
                     }
@@ -518,7 +521,13 @@ private fun McpServerConfigModal(state: EditState<McpServerConfig>) {
                 ) {
                     TextButton(
                         onClick = {
-                            if (config.commonOptions.name.isNotBlank() && isValidMcpName(config.commonOptions.name)) {
+                            val nameValid = config.commonOptions.name.isNotBlank() && isValidMcpName(config.commonOptions.name)
+                            val urlValid = when (config) {
+                                is McpServerConfig.StreamableHTTPServer -> config.url.isNotBlank() && config.url.startsWith("http")
+                                is McpServerConfig.SseTransportServer -> config.url.isNotBlank() && config.url.startsWith("http")
+                                is McpServerConfig.CommandServerConfig -> config.command.isNotBlank()
+                            }
+                            if (nameValid && urlValid) {
                                 state.confirm()
                             }
                         }
@@ -1074,15 +1083,34 @@ private fun parseMcpServersFromJson(json: String): List<McpServerConfig> {
     val mcpServers = root["mcpServers"]?.jsonObject ?: return emptyList()
     return mcpServers.entries.mapNotNull { (name, element) ->
         val obj = element.jsonObject
-        val type = obj["type"]?.jsonPrimitive?.contentOrNull ?: "streamable_http"
-        val url = obj["url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+        val type = obj["type"]?.jsonPrimitive?.contentOrNull ?: obj["transport"]?.jsonPrimitive?.contentOrNull
+            ?: if (obj.containsKey("command")) "command" else "streamable_http"
         val headers = obj["headers"]?.jsonObject?.entries?.map { (k, v) ->
             k to (v.jsonPrimitive.contentOrNull ?: "")
         } ?: emptyList()
         val commonOptions = McpCommonOptions(name = name, headers = headers)
         when (type) {
-            "sse" -> McpServerConfig.SseTransportServer(commonOptions = commonOptions, url = url)
-            else -> McpServerConfig.StreamableHTTPServer(commonOptions = commonOptions, url = url)
+            "sse", "http", "http-sse" -> {
+                val url = obj["url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                McpServerConfig.SseTransportServer(commonOptions = commonOptions, url = url)
+            }
+            "streamable_http", "streamable-http", "http_streamable" -> {
+                val url = obj["url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                McpServerConfig.StreamableHTTPServer(commonOptions = commonOptions, url = url)
+            }
+            "command", "stdio", "local", "npx" -> {
+                val command = obj["command"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val args = obj["args"]?.jsonArray?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
+                McpServerConfig.CommandServerConfig(
+                    commonOptions = commonOptions,
+                    command = command,
+                    args = args,
+                )
+            }
+            else -> {
+                val url = obj["url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                McpServerConfig.StreamableHTTPServer(commonOptions = commonOptions, url = url)
+            }
         }
     }
 }

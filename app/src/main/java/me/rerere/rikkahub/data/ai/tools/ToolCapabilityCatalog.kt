@@ -38,7 +38,5 @@ object ToolCapabilityCatalog {
         ToolCapabilityEntry("工作流", "工作流工具", "触发与执行用户配置的多步工作流"),
         ToolCapabilityEntry("网络搜索", "搜索工具", "调用已配置的搜索服务联网检索信息"),
         ToolCapabilityEntry("技能", "技能工具", "调用已启用的内置技能完成专业任务"),
-        ToolCapabilityEntry("MCP", "MCP 服务器工具", "调用已配置的 MCP 插件服务器导出的工具"),
-        ToolCapabilityEntry("对话参考", "会话引用工具", "检索历史对话作为上下文参考"),
     )
 }

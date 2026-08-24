@@ -202,7 +202,8 @@ class PluginManager(
         val file = Companion.findFile(dir) {
             it.equals("mcp.json", ignoreCase = true) || it.equals(".mcp.json", ignoreCase = true)
         } ?: return emptyList()
-        return runCatching { Companion.parseMcpServers(file) }.getOrDefault(emptyList())
+        val servers = runCatching { Companion.parseMcpServers(file) }.getOrDefault(emptyList())
+        return servers.filter { it !is McpServerConfig.CommandServerConfig }
     }
 
     /** 卸载插件目录 */
@@ -241,19 +242,32 @@ class PluginManager(
 
             val targetDir = pluginsDir.resolve(info.id)
             // 旧版本备份，异常时回滚
-            val backup = createTempDirectory(pluginsDir)
             if (targetDir.exists()) {
-                if (!targetDir.renameTo(backup)) {
-                    return@withContext Result.failure(IllegalStateException("无法备份旧插件版本"))
+                val backup = File(pluginsDir, ".backup_${info.id}_${System.nanoTime()}")
+                try {
+                    targetDir.copyRecursively(backup, overwrite = true)
+                    targetDir.deleteRecursively()
+                    if (!staging.renameTo(targetDir)) {
+                        if (backup.exists()) {
+                            targetDir.deleteRecursively()
+                            backup.copyRecursively(targetDir, overwrite = true)
+                            backup.deleteRecursively()
+                        }
+                        return@withContext Result.failure(IllegalStateException("安装插件失败"))
+                    }
+                    backup.deleteRecursively()
+                } catch (e: Throwable) {
+                    if (backup.exists()) backup.deleteRecursively()
+                    if (!targetDir.exists() && staging.exists()) {
+                        staging.renameTo(targetDir)
+                    }
+                    return@withContext Result.failure(IllegalStateException("插件备份/恢复失败", e))
+                }
+            } else {
+                if (!staging.renameTo(targetDir)) {
+                    return@withContext Result.failure(IllegalStateException("安装插件失败"))
                 }
             }
-            if (!staging.renameTo(targetDir)) {
-                if (backup.listFiles()?.isNotEmpty() == true || !targetDir.exists()) {
-                    backup.renameTo(targetDir)
-                }
-                return@withContext Result.failure(IllegalStateException("安装插件失败"))
-            }
-            backup.deleteRecursively()
             Result.success(info)
         } catch (e: Throwable) {
             Log.w(TAG, "installZip failed", e)
@@ -308,7 +322,10 @@ class PluginManager(
 
         /**
          * 第三方插件包 schema 归一化：
-         * 1. 标准包（可正常解析）：仅修正历史适配包中错误的工具引用后返回；无需处理返回 null
+         * 1. 标准包（可正常解析）：ignoreUnknownKeys 会静默丢弃蛇形命名等替代字段，仅在标准
+         *    字段缺省时从 desc/summary/publisher/repo/system_prompt 等替代键补齐；未知的 type
+         *    值按包内特征文件重新推断并生成能力提示词；另修正历史适配包中错误的工具引用。
+         *    无需处理返回 null
          * 2. Operit 原生格式等非标准 plugin.json（package 字段当 id、web_path/sidebar 声明入口、
          *    缺 type/systemPrompt）：自动映射字段、推断类型、生成能力提示词与侧边栏入口，
          *    保证第三方市场收录包安装即可用，无需人工修补
@@ -317,10 +334,44 @@ class PluginManager(
         fun normalizePluginJson(text: String, dir: File?): String? {
             val standard = runCatching { PluginJson.fromJson(text) }.getOrNull()
             if (standard != null) {
-                if (!text.contains(LEGACY_OPERIT_TOOL_REF)) return null
+                var patched: PluginInfo = standard
+                runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull()?.let { root ->
+                    fun alt(vararg keys: String): String? = keys.firstNotNullOfOrNull { key ->
+                        (root[key] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+                    }
+                    if (patched.description.isBlank()) {
+                        alt("desc", "summary", "long_description")?.let { patched = patched.copy(description = it) }
+                    }
+                    if (patched.author.isBlank()) {
+                        alt("publisher")?.let { patched = patched.copy(author = it) }
+                    }
+                    if (patched.repository.isBlank()) {
+                        alt("repo")?.let { patched = patched.copy(repository = it) }
+                    }
+                    if (patched.systemPrompt.isBlank()) {
+                        alt("system_prompt")?.let { patched = patched.copy(systemPrompt = it.take(MAX_SYSTEM_PROMPT_LEN)) }
+                    }
+                    val knownType = patched.type == PluginCategories.TYPE_PLUGIN ||
+                        patched.type == PluginCategories.TYPE_SKILL ||
+                        patched.type == PluginCategories.TYPE_MCP ||
+                        patched.type == PluginCategories.TYPE_JSON ||
+                        patched.type == PluginCategories.TYPE_CHARACTER
+                    if (!knownType) {
+                        val resolved = resolveNormalizedType(patched.type, dir)
+                        if (resolved != patched.type) {
+                            patched = patched.copy(
+                                type = resolved,
+                                systemPrompt = patched.systemPrompt.ifBlank { buildNormalizedSystemPrompt(resolved, dir) },
+                            )
+                        }
+                    }
+                }
+                if (!text.contains(LEGACY_OPERIT_TOOL_REF)) {
+                    return if (patched != standard) PluginJson.toJson(patched) else null
+                }
                 return PluginJson.toJson(
-                    standard.copy(
-                        systemPrompt = standard.systemPrompt.replace(LEGACY_OPERIT_TOOL_REF, RUNNER_TOOL_REF),
+                    patched.copy(
+                        systemPrompt = patched.systemPrompt.replace(LEGACY_OPERIT_TOOL_REF, RUNNER_TOOL_REF),
                     )
                 )
             }
@@ -329,11 +380,15 @@ class PluginManager(
             fun str(vararg keys: String): String? = keys.firstNotNullOfOrNull { key ->
                 (root[key] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
             }
-            val rawId = str("id", "package", "packageName", "slug")
+            var rawId = str("id", "package", "packageName", "slug")
             val rawName = str("name", "title")
+            val rawRepo = str("repository", "repo")
             if (rawId == null && rawName == null) {
-                // 无任何标识字段时仅可依赖目录名兜底（安装场景）；上传校验场景（dir=null）放弃
-                if (dir == null || dir.name.startsWith(".")) return null
+                if (dir == null || dir.name.startsWith(".")) {
+                    val repoId = rawRepo?.substringAfterLast("/")?.takeIf { it.isNotBlank() }
+                    if (repoId == null) return null
+                    rawId = repoId
+                }
             }
             val id = rawId ?: rawName?.let(::slugifyId) ?: dir!!.name
             val name = rawName ?: rawId ?: id
@@ -484,10 +539,11 @@ class PluginManager(
             findFile(stagingDir) { it.equals("SKILL.md", ignoreCase = true) }?.let { skillFile ->
                 runCatching { parseSkillFile(skillFile) }.getOrNull()?.let { return it }
             }
-            // 3. mcp.json / .mcp.json
+            // 3. mcp.json / .mcp.json（过滤 Android 端不可用的 command 类型，只保留远程服务）
             findFile(stagingDir) { it.equals("mcp.json", ignoreCase = true) || it.equals(".mcp.json", ignoreCase = true) }
                 ?.let { mcpFile ->
                     val servers = runCatching { parseMcpServers(mcpFile) }.getOrDefault(emptyList())
+                        .filter { it !is McpServerConfig.CommandServerConfig }
                     if (servers.isNotEmpty()) {
                         val name = servers.first().commonOptions.name.ifBlank { "MCP" }
                         return PluginInfo(

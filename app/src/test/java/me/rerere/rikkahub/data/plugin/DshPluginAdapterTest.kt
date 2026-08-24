@@ -155,6 +155,41 @@ class DshPluginAdapterTest {
         }
     }
 
+    @Test
+    fun `convertRepo falls back to dsh plugin json metadata`() {
+        val dir = tempRepo()
+        try {
+            File(dir, "dsh.plugin.json").writeText(
+                """{"name":"清单名","version":"2.5.0","description":"清单简介","author":"清单作者"}"""
+            )
+
+            val info = adapter.convertRepo(dir, DshRepoRef("owner", "meta-repo", "main"))
+
+            assertEquals("清单名", info.name)
+            assertEquals("2.5.0", info.version)
+            assertEquals("清单简介", info.description)
+            assertEquals("清单作者", info.author)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `convertRepo prefers package json over dsh manifest metadata`() {
+        val dir = tempRepo()
+        try {
+            File(dir, "package.json").writeText("""{"name":"pkg-name","version":"1.0.1"}""")
+            File(dir, "dsh.plugin.json").writeText("""{"name":"清单名","version":"2.5.0"}""")
+
+            val info = adapter.convertRepo(dir, DshRepoRef("owner", "prio-repo", "main"))
+
+            assertEquals("pkg-name", info.name)
+            assertEquals("1.0.1", info.version)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
     // ---- markdownToHtml / 文档页 ----
 
     @Test

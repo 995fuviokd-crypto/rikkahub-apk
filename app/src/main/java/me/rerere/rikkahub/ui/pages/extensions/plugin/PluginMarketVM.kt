@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.api.CommunityListItem
 import me.rerere.rikkahub.data.api.CommunityMarketDataSource
@@ -43,6 +45,8 @@ class PluginMarketVM(
     private val dshMarketDataSource: DshMarketDataSource,
     private val tavernMarketDataSource: TavernMarketDataSource,
 ) : ViewModel() {
+    private val installMutex = Mutex()
+
     private val _installed = MutableStateFlow<List<InstalledPlugin>>(emptyList())
     val installed = _installed.asStateFlow()
 
@@ -107,7 +111,7 @@ class PluginMarketVM(
 
     /**
      * 社区市场更新检测：已安装 community-* 插件的 version 与市场 latestVersion 对比，
-     * 版本不同即提示可更新（重装覆盖，installZip 自带旧版备份回滚）。
+     * 仅当市场版本更高时提示更新。
      */
     fun communityUpdateFor(entry: CommunityListItem, installed: List<InstalledPlugin>): String? {
         val marketVersion = entry.latestVersion.version.trim().takeIf { it.isNotEmpty() } ?: return null
@@ -116,7 +120,39 @@ class PluginMarketVM(
             it.id == pid || it.id == pid.replaceFirst("community-", "operit-")
         } ?: return null
         val localVersion = current.info?.version?.trim().orEmpty()
-        return if (localVersion.isNotEmpty() && !localVersion.equals(marketVersion, ignoreCase = true)) {
+        return if (localVersion.isNotEmpty() && isNewerVersion(marketVersion, localVersion)) {
+            marketVersion
+        } else {
+            null
+        }
+    }
+
+    /** 简单的语义版本比较：marketVersion 高于 localVersion 时返回 true */
+    private fun isNewerVersion(marketVersion: String, localVersion: String): Boolean {
+        if (marketVersion.equals(localVersion, ignoreCase = true)) return false
+        // 剥离前导 v/V 后按数字段逐段比较（"v2.0.0" 应高于 "1.5.0"）
+        val marketParts = marketVersion.trim().removePrefix("v").removePrefix("V")
+            .split(Regex("[._-]")).mapNotNull { it.toIntOrNull() }
+        val localParts = localVersion.trim().removePrefix("v").removePrefix("V")
+            .split(Regex("[._-]")).mapNotNull { it.toIntOrNull() }
+        val maxLen = maxOf(marketParts.size, localParts.size)
+        for (i in 0 until maxLen) {
+            val m = marketParts.getOrElse(i) { 0 }
+            val l = localParts.getOrElse(i) { 0 }
+            if (m != l) return m > l
+        }
+        return false
+    }
+
+    /**
+     * 官方市场更新检测：已安装插件的 version 与市场条目 version 对比，
+     * 仅当市场版本更高时提示更新。
+     */
+    fun officialUpdateFor(entry: PluginMarketEntry, installed: List<InstalledPlugin>): String? {
+        val marketVersion = entry.version.trim().takeIf { it.isNotEmpty() } ?: return null
+        val current = installed.firstOrNull { it.id == entry.id } ?: return null
+        val localVersion = current.info?.version?.trim().orEmpty()
+        return if (localVersion.isNotEmpty() && isNewerVersion(marketVersion, localVersion)) {
             marketVersion
         } else {
             null
@@ -186,9 +222,11 @@ class PluginMarketVM(
 
     /** 安装社区市场条目：GitHub 目录打包为插件 zip，经 autoAdapt 自动适配后本地生效 */
     fun installCommunity(entry: CommunityListItem) {
-        if (_communityInstallingId.value != null) return
         viewModelScope.launch {
-            _communityInstallingId.value = entry.id
+            installMutex.withLock {
+                if (_communityInstallingId.value != null) return@withLock
+                _communityInstallingId.value = entry.id
+            }
             _notice.value = null
             communityDataSource.downloadAsPlugin(entry)
                 .onSuccess { bytes ->
@@ -222,15 +260,25 @@ class PluginMarketVM(
             }
             _enabledPlugins = enabled
             settingsStore.update { it.copy(enabledPlugins = enabled) }
-            if (pluginId in enabled) registerMcpServersIfNeeded(pluginId)
+            if (pluginId in enabled) {
+                registerMcpServersIfNeeded(pluginId)
+            } else {
+                unregisterMcpServers(pluginId)
+            }
             refreshInstalled()
         }
     }
 
     fun install(entry: PluginMarketEntry) {
-        if (_downloadingId.value != null) return
+        if (entry.downloadUrl.isBlank()) {
+            _notice.value = "安装失败：该条目缺少下载地址"
+            return
+        }
         viewModelScope.launch {
-            _downloadingId.value = entry.id
+            installMutex.withLock {
+                if (_downloadingId.value != null) return@withLock
+                _downloadingId.value = entry.id
+            }
             _notice.value = null
             try {
                 val bytes = withContext(Dispatchers.IO) {
@@ -266,9 +314,11 @@ class PluginMarketVM(
 
     /** 从 OpenAI 兼容插件仓库地址安装（读取 /.well-known/ai-plugin.json 自动转换） */
     fun installOpenAIPlugin(url: String) {
-        if (_downloadingId.value != null) return
         viewModelScope.launch {
-            _downloadingId.value = "openai"
+            installMutex.withLock {
+                if (_downloadingId.value != null) return@withLock
+                _downloadingId.value = "openai"
+            }
             _notice.value = null
             openAIPluginAdapter.fetchAsZip(url)
                 .onSuccess { bytes ->
@@ -329,9 +379,11 @@ class PluginMarketVM(
 
     /** 从 DeepSeek Harness（DSH）插件仓库地址安装：github:owner/repo#ref 自动转换为可迁移能力插件 */
     fun installDsh(repoRef: String, downloadingKey: String = "dsh") {
-        if (_downloadingId.value != null) return
         viewModelScope.launch {
-            _downloadingId.value = downloadingKey
+            installMutex.withLock {
+                if (_downloadingId.value != null) return@withLock
+                _downloadingId.value = downloadingKey
+            }
             _notice.value = null
             dshPluginAdapter.fetchAsZip(repoRef)
                 .onSuccess { bytes ->
@@ -350,12 +402,12 @@ class PluginMarketVM(
 
     /** 安装成功后自动启用插件，避免"装了但没生效" */
     private fun autoEnablePlugin(pluginId: String) {
+        // 先同步更新内存态，使紧随其后的 refreshInstalled() 能立即反映"已生效"
+        _enabledPlugins = _enabledPlugins + pluginId
         viewModelScope.launch {
-            val settings = settingsStore.settingsFlow.first()
-            val enabled = settings.enabledPlugins + pluginId
-            _enabledPlugins = enabled
-            settingsStore.update { it.copy(enabledPlugins = enabled) }
+            settingsStore.update { it.copy(enabledPlugins = it.enabledPlugins + pluginId) }
             registerMcpServersIfNeeded(pluginId)
+            refreshInstalled()
         }
     }
 
@@ -367,8 +419,8 @@ class PluginMarketVM(
             val servers = pluginManager.mcpServersFromPlugin(pluginId)
             if (servers.isEmpty()) return@launch
             val settings = settingsStore.settingsFlow.first()
-            val existingUrls = settings.mcpServers.map { it.serverUrl }.toSet()
-            val newServers = servers.filter { it.serverUrl !in existingUrls }
+            val existingKeys = settings.mcpServers.map { it.id to it.serverUrl }.toSet()
+            val newServers = servers.filter { (it.id to it.serverUrl) !in existingKeys }
             if (newServers.isNotEmpty()) {
                 settingsStore.update {
                     it.copy(mcpServers = it.mcpServers + newServers)
@@ -378,8 +430,21 @@ class PluginMarketVM(
         }
     }
 
+    /** 卸载插件时清理其注册的 MCP 服务 */
+    private fun unregisterMcpServers(pluginId: String) {
+        viewModelScope.launch {
+            val servers = pluginManager.mcpServersFromPlugin(pluginId)
+            if (servers.isEmpty()) return@launch
+            val serverUrls = servers.map { it.serverUrl }.toSet()
+            settingsStore.update { s ->
+                s.copy(mcpServers = s.mcpServers.filter { it.serverUrl !in serverUrls })
+            }
+        }
+    }
+
     fun uninstall(pluginId: String) {
         viewModelScope.launch {
+            unregisterMcpServers(pluginId)
             pluginManager.uninstall(pluginId)
             val enabled = _enabledPlugins - pluginId
             _enabledPlugins = enabled
@@ -586,14 +651,19 @@ class PluginMarketVM(
         }
     }
 
-    /** 导入 SillyTavern 世界书 JSON 为 Lorebook（在 助手详情→提示词注入 中关联启用） */
+    /** 导入 SillyTavern 世界书 JSON 为 Lorebook（在 助手详情→提示词注入 中关联启用），按名称去重 */
     fun importWorldInfo(jsonText: String, fileName: String?) {
         viewModelScope.launch {
             _notice.value = null
             runCatching { TavernCardConverter.parseWorldInfo(jsonText, fileName) }
                 .onSuccess { book ->
-                    settingsStore.update { it.copy(lorebooks = it.lorebooks + book) }
-                    _notice.value = "已导入世界书「${book.name}」（${book.entries.size} 条目）"
+                    val current = settingsStore.settingsFlow.value
+                    if (current.lorebooks.any { it.name == book.name }) {
+                        _notice.value = "世界书「${book.name}」已存在，跳过重复导入"
+                    } else {
+                        settingsStore.update { s -> s.copy(lorebooks = s.lorebooks + book) }
+                        _notice.value = "已导入世界书「${book.name}」（${book.entries.size} 条目）"
+                    }
                 }
                 .onFailure { e -> _notice.value = "世界书导入失败: ${e.message}" }
         }

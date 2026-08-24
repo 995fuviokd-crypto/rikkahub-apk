@@ -246,11 +246,18 @@ class CommunityMarketDataSource(
         val manifest = manifestFile
             ?.readText()
             ?.let { runCatching { Json.parseToJsonElement(it).jsonObject }.getOrNull() }
+        // manifest 缺失或字段缺失时回退包内 package.json 元数据
+        val pkgMeta = PluginManager.findFile(scriptDir) { it.equals("package.json", ignoreCase = true) }
+            ?.let { runCatching { Json.parseToJsonElement(it.readText()).jsonObject }.getOrNull() }
         val pkgName = jsonLocalizedString(manifest, "display_name", "name", "toolpkg_id")
             ?.takeIf { it.isNotBlank() }
+            ?: jsonLocalizedString(pkgMeta, "displayName", "name")
             ?: entry.title.ifBlank { entry.id.substringAfter("package-") }
-        val desc = jsonLocalizedString(manifest, "description") ?: entry.description
-        val version = (manifest?.get("version") as? JsonPrimitive)?.contentOrNull
+        val desc = jsonLocalizedString(manifest, "description")
+            ?: jsonLocalizedString(pkgMeta, "description")
+            ?: entry.description
+        val version = (manifest?.get("version") as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+            ?: (pkgMeta?.get("version") as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
             ?: "1.0.0"
         val tools = ScriptToolManifest.toolsFromDirectory(scriptDir)
         val systemPrompt = ScriptToolManifest.describeSystemPrompt(pkgName, desc, tools)
@@ -323,7 +330,7 @@ class CommunityMarketDataSource(
     private fun ensureAdapted(dir: File, entry: CommunityListItem) {
         val infoFile = dir.resolve("plugin.json")
         if (infoFile.exists()) {
-            // 第三方自带 plugin.json 字段未必兼容 RikkaHub 格式，解析失败则忽略并重新适配
+            // 第三方自带 plugin.json 字段未必兼容 RikkaHub 格式，解析失败则先尝试 schema 归一化
             val compatible = runCatching {
                 val info = PluginJson.fromJson(infoFile.readText())
                 info.id.isNotBlank() && info.name.isNotBlank()
@@ -331,6 +338,15 @@ class CommunityMarketDataSource(
             if (compatible) {
                 PluginManager.ensurePluginJson(dir)
                 return
+            }
+            PluginManager.normalizePluginJson(infoFile.readText(), dir)?.let { normalized ->
+                runCatching {
+                    val info = PluginJson.fromJson(normalized)
+                    if (info.id.isNotBlank() && info.name.isNotBlank()) {
+                        infoFile.writeText(normalized)
+                        return
+                    }
+                }
             }
             infoFile.delete()
         }
@@ -378,50 +394,93 @@ class CommunityMarketDataSource(
     }
 
     /**
-     * 从 MCP 源码仓库识别可执行配置：依次尝试 mcp.json（已存在）、smithery.yaml、
-     * package.json（bin/scripts.start/main）、README 中的 npx/uvx 启动命令。
-     * 命中后写入 mcp.json（Claude Code 兼容），使插件安装后可注册到 MCP 设置。
-     * @return 是否成功生成 mcp.json
+     * 从 MCP 源码仓库识别可执行配置。不生成 command 类型 MCP 配置（Android 端无法运行本地
+     * 进程型 MCP Server），因此会规范化仓库自带的 mcp.json：
+     * - 保留远程服务（sse/http/streamable_http）
+     * - command 服务尝试从仓库识别远程部署端点补写；识别不到则丢弃
+     * - 处理后可注册服务为空时删除 mcp.json 返回 false，让 ensureAdapted 走说明型插件兜底
+     * @return 是否成功识别（存在可用远程服务配置）
      */
     private fun generateMcpConfigIfPossible(dir: File, entry: CommunityListItem, fallbackName: String): Boolean {
         val existing = PluginManager.findFile(dir) {
             it.equals("mcp.json", ignoreCase = true) || it.equals(".mcp.json", ignoreCase = true)
         }
-        if (existing != null) return true
-        val servers = mutableListOf<Pair<String, List<String>>>()
-        PluginManager.findFile(dir) { it.equals("smithery.yaml", ignoreCase = true) || it.equals("smithery.yml", ignoreCase = true) }
-            ?.let { servers.addAll(parseSmitheryCommand(it.readText())) }
-        if (servers.isEmpty()) {
-            PluginManager.findFile(dir) { it.equals("package.json", ignoreCase = true) }
-                ?.let { parsePackageJsonCommand(it.readText())?.let { c -> servers.add(c) } }
+        if (existing != null) {
+            val servers = runCatching { PluginManager.parseMcpServers(existing) }.getOrDefault(emptyList())
+            val remoteServers = servers.filter { it !is me.rerere.rikkahub.data.ai.mcp.McpServerConfig.CommandServerConfig }
+            if (remoteServers.isNotEmpty()) {
+                // 已含可用远程服务（可能混有 command，注册时会被过滤，不影响远程服务生效）
+                return true
+            }
+            // 全部是 command 类型：尝试识别远程端点补写；否则删除配置让兜底接管
+            val remoteUrl = findRemoteServiceUrl(dir)
+            if (remoteUrl != null && writeRemoteMcpConfig(dir, fallbackName, remoteUrl)) return true
+            existing.delete()
+            return false
         }
-        if (servers.isEmpty()) {
-            PluginManager.findFile(dir) {
-                it.matches(Regex("(?i)readme(\\.md|\\.txt|\\.markdown)?$"))
-            }?.let { parseReadmeRunCommand(it.readText())?.let { c -> servers.add(c) } }
-        }
-        if (servers.isEmpty()) return false
-        val safeName = fallbackName.replace(Regex("[^a-zA-Z0-9._-]"), "-").trim('-').ifBlank { "community-mcp" }
+        // 无 mcp.json：尝试识别远程服务端点（SSE/HTTP URL），command 类型在 Android 端不可用，不生成
+        val remoteUrl = findRemoteServiceUrl(dir)
+        if (remoteUrl != null && writeRemoteMcpConfig(dir, fallbackName, remoteUrl)) return true
+        // 无远程服务配置，不生成 command 类型 MCP，返回 false 让 ensureAdapted 走说明型插件兜底
+        return false
+    }
+
+    /** 写入仅含远程服务（streamable_http）的 mcp.json，供 autoAdapt 识别为 MCP 插件 */
+    private fun writeRemoteMcpConfig(dir: File, name: String, remoteUrl: String): Boolean {
+        val safeName = name.replace(Regex("[^a-zA-Z0-9._-]"), "-").trim('-').ifBlank { "community-mcp" }
         val mcpJson = buildJsonObject {
             put("mcpServers", buildJsonObject {
-                servers.take(3).forEachIndexed { index, (cmd, args) ->
-                    val serverName = if (index == 0) safeName.take(40) else "$safeName-${index + 1}"
-                    put(serverName, buildJsonObject {
-                        put("type", "command")
-                        put("command", cmd)
-                        put("args", JsonArray(args.map { JsonPrimitive(it) }))
-                    })
-                }
+                put(safeName.take(40), buildJsonObject {
+                    put("type", "streamable_http")
+                    put("url", remoteUrl)
+                })
             })
         }
-        runCatching { dir.resolve("mcp.json").writeText(mcpJson.toString()) }
-        return true
+        return runCatching { dir.resolve("mcp.json").writeText(mcpJson.toString()) }.isSuccess
+    }
+
+    /** 尝试从仓库中识别远程 MCP 服务端点 URL */
+    private fun findRemoteServiceUrl(dir: File): String? {
+        // 检查 compose.yaml 或 docker-compose.yaml 中暴露的端口
+        val composeFile = PluginManager.findFile(dir) {
+            it.equals("compose.yaml", ignoreCase = true) || it.equals("docker-compose.yaml", ignoreCase = true) || it.equals("docker-compose.yml", ignoreCase = true)
+        }
+        if (composeFile != null) {
+            val content = composeFile.readText()
+            Regex("""(?i)(?:url|endpoint|server)\s*[:=]\s*["']?(https?://[^"' \t\n\r]+)""").find(content)?.let {
+                return it.groupValues[1]
+            }
+        }
+        // 检查 Dockerfile 中 EXPOSE 的端口
+        val dockerfile = PluginManager.findFile(dir) { it.equals("Dockerfile", ignoreCase = true) }
+        if (dockerfile != null) {
+            val content = dockerfile.readText()
+            Regex("""(?i)EXPOSE\s+(\d+)""").find(content)?.let {
+                return "http://0.0.0.0:${it.groupValues[1]}"
+            }
+        }
+        // 检查 README 中是否有远程部署 URL
+        val readme = PluginManager.findFile(dir) {
+            it.matches(Regex("(?i)readme(\\.md|\\.txt|\\.markdown)?$"))
+        }
+        if (readme != null) {
+            val content = readme.readText()
+            Regex("""(?i)(?:deploy|访问|endpoint|server)\s*[:：]\s*(https?://[^\s\)\]>]+)""").find(content)?.let {
+                return it.groupValues[1]
+            }
+        }
+        return null
     }
 
     /** 解析 smithery.yaml 中的 startCommand.command 列表 */
     private fun parseSmitheryCommand(content: String): List<Pair<String, List<String>>> {
-        val cmd = Regex("""(?m)^\s*command:\s*$""").find(content) ?: return emptyList()
-        val rest = content.substring(cmd.range.last)
+        val cmdMatch = Regex("""(?m)^\s*(?:startCommand\s*:)?\s*command\s*:\s*(.+?)\s*$""").find(content) ?: return emptyList()
+        val cmdText = cmdMatch.groupValues[1].takeIf { it.isNotBlank() }
+        if (cmdText != null) {
+            val parts = cmdText.split(Regex("\\s+")).filter { it.isNotBlank() }
+            return listOf(parts.first() to parts.drop(1))
+        }
+        val rest = content.substring(cmdMatch.range.last)
         val args = Regex("""(?m)^\s*-\s*(.+?)\s*$""").findAll(rest)
             .map { it.groupValues[1].trim().trim('"', '\'', '`') }
             .filter { it.isNotBlank() && !it.startsWith("#") }
@@ -450,10 +509,11 @@ class CommunityMarketDataSource(
         return null
     }
 
-    /** 解析 README 中的 npx/uvx 启动命令 */
+    /** 解析 README 中的 npx/uvx 启动命令（先剥离代码块，避免匹配示例代码） */
     private fun parseReadmeRunCommand(content: String): Pair<String, List<String>>? {
+        val noCodeBlocks = content.replace(Regex("```[\\s\\S]*?```"), "")
         val regex = Regex("""(npx|uvx|node)\s+([@\w][\w@./-]*)((?:[\s-]+[@\w./-][\w@./-]*)*)""")
-        val m = regex.find(content) ?: return null
+        val m = regex.find(noCodeBlocks) ?: return null
         val runner = m.groupValues[1]
         val pkg = m.groupValues[2]
         val tail = m.groupValues[3].trim().split(Regex("\\s+")).filter { it.isNotBlank() && it != "-y" }

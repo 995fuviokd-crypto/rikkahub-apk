@@ -31,6 +31,18 @@ class OpenAIPluginAdapterTest {
     }
 
     @Test
+    fun `build candidate urls for bare owner repo`() {
+        val urls = adapter().buildCandidateUrls("owner/repo")
+        assertEquals(
+            listOf(
+                "https://raw.githubusercontent.com/owner/repo/main/.well-known/ai-plugin.json",
+                "https://raw.githubusercontent.com/owner/repo/master/.well-known/ai-plugin.json",
+            ),
+            urls,
+        )
+    }
+
+    @Test
     fun `manifest maps to plugin info with sanitized id`() {
         val info = adapter().manifestToInfo(
             OpenAIPluginManifest(

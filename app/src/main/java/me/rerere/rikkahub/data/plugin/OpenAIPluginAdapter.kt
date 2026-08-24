@@ -69,10 +69,12 @@ class OpenAIPluginAdapter(
 
     internal fun buildCandidateUrls(input: String): List<String> {
         val urls = mutableListOf<String>()
-        if (input.startsWith("github.com") || input.contains("github.com/")) {
-            // GitHub 仓库：raw.githubusercontent.com 的 main/master 分支
+        val isGithubUrl = input.startsWith("github.com") || input.contains("github.com/")
+        // GitHub 仓库：完整链接（github.com/owner/repo），或裸 owner/repo（无协议、非域名）
+        val isBareRepo = !isGithubUrl && !input.contains("://") && !input.contains(".")
+        if (isGithubUrl || isBareRepo) {
             val parts = input.substringAfter("github.com/").trim('/').split('/')
-            if (parts.size >= 2) {
+            if (parts.size >= 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) {
                 val owner = parts[0]
                 val repo = parts[1]
                 urls += "https://raw.githubusercontent.com/$owner/$repo/main/.well-known/ai-plugin.json"
@@ -87,7 +89,7 @@ class OpenAIPluginAdapter(
             val base = "https://$host"
             urls += "$base/.well-known/ai-plugin.json"
         }
-        return urls
+        return urls.distinct()
     }
 
     private fun fetchManifest(manifestUrl: String): OpenAIPluginManifest {

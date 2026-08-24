@@ -371,11 +371,8 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
                     onSelect = { selectedEntry = it },
                     onRetryMarket = vm::loadMarket,
                     onRetryCommunity = vm::loadCommunity,
-                    onRefresh = {
-                        vm.loadMarket()
-                        vm.loadCommunity()
-                    },
                     communityUpdateFor = vm::communityUpdateFor,
+                    officialUpdateFor = vm::officialUpdateFor,
                 )
 
                 2 -> DshMarketTab(
@@ -745,8 +742,8 @@ private fun MarketTab(
     onSelect: (PluginMarketEntry) -> Unit,
     onRetryMarket: () -> Unit,
     onRetryCommunity: () -> Unit,
-    onRefresh: () -> Unit,
     communityUpdateFor: (CommunityListItem, List<InstalledPlugin>) -> String?,
+    officialUpdateFor: (PluginMarketEntry, List<InstalledPlugin>) -> String?,
 ) {
     val installedIds = remember(installed) { installed.map { it.id }.toSet() }
     var source by remember { mutableStateOf(MARKET_SOURCE_ALL) }
@@ -809,7 +806,10 @@ private fun MarketTab(
         }
         PullToRefreshBox(
             isRefreshing = loading || communityLoading,
-            onRefresh = onRefresh,
+            onRefresh = {
+                if (source != MARKET_SOURCE_COMMUNITY) onRetryMarket()
+                if (source != MARKET_SOURCE_OFFICIAL) onRetryCommunity()
+            },
             modifier = Modifier.fillMaxSize(),
         ) {
             when {
@@ -853,6 +853,7 @@ private fun MarketTab(
                                 entry = entry,
                                 installed = entry.id in installedIds,
                                 downloading = downloadingId == entry.id,
+                                availableUpdate = officialUpdateFor(entry, installed),
                                 onClick = { onSelect(entry) },
                                 onInstall = { onInstall(entry) },
                             )
@@ -1097,6 +1098,7 @@ private fun MarketEntryCard(
     entry: PluginMarketEntry,
     installed: Boolean,
     downloading: Boolean,
+    availableUpdate: String?,
     onClick: () -> Unit,
     onInstall: () -> Unit,
 ) {
@@ -1137,6 +1139,7 @@ private fun MarketEntryCard(
             }
             when {
                 downloading -> CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                availableUpdate != null -> TextButton(onClick = onInstall) { Text("更新 $availableUpdate") }
                 installed -> Text(
                     text = "已安装",
                     style = MaterialTheme.typography.labelMedium,
@@ -1578,7 +1581,10 @@ private fun TavernMarketTab(
 
                 else -> items(filtered, key = { "tav-${it.id}" }) { entry ->
                     val downloading = downloadingId == "tavern-${entry.id}"
-                    val installed = !downloading && importedKeys.any { it.substringBefore("@") == entry.name }
+                    val installed = !downloading && (
+                        importedKeys.any { it.substringBefore("@") == entry.name } ||
+                        importedKeys.any { it.contains(entry.id) }
+                    )
                     TavernEntryCard(
                         entry = entry,
                         installed = installed,

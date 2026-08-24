@@ -473,4 +473,82 @@ val legacy = validPluginJson().replace(
             dir.deleteRecursively()
         }
     }
+
+    @Test
+    fun `normalize fills snake case fallback fields in standard packages`() {
+        val raw = """
+            {
+              "id": "alt-fields",
+              "name": "Alt Fields",
+              "version": "1.0.0",
+              "desc": "替代字段简介",
+              "publisher": "someone",
+              "repo": "https://github.com/a/b",
+              "system_prompt": "你是助手"
+            }
+        """.trimIndent()
+        val normalized = PluginManager.normalizePluginJson(raw, null)
+        assertNotNull(normalized)
+        val info = PluginJson.fromJson(normalized!!)
+        assertEquals("替代字段简介", info.description)
+        assertEquals("someone", info.author)
+        assertEquals("https://github.com/a/b", info.repository)
+        assertEquals("你是助手", info.systemPrompt)
+    }
+
+    @Test
+    fun `normalize rewrites unknown type via package layout`() {
+        val dir = kotlin.io.path.createTempDirectory("norm-type").toFile()
+        try {
+            File(dir, "SKILL.md").writeText("# 技能说明\n内容正文。")
+            val raw = """{"id":"t","name":"T","version":"1.0.0","type":"operit_module"}"""
+            val normalized = PluginManager.normalizePluginJson(raw, dir)
+            assertNotNull(normalized)
+            val info = PluginJson.fromJson(normalized!!)
+            assertEquals("skill", info.type)
+            assertTrue(info.systemPrompt.contains("技能说明"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `autoAdapt skips command only mcp config`() {
+        val dir = kotlin.io.path.createTempDirectory("adapt-mcp-cmd").toFile()
+        try {
+            // Claude Code 标准 mcp.json：只有本地 command 服务，Android 端不可运行
+            File(dir, "mcp.json").writeText(
+                """
+                {"mcpServers":{"github":{"command":"npx","args":["-y","@modelcontextprotocol/server-github"]}}}
+                """.trimIndent()
+            )
+            val info = PluginManager.autoAdapt(dir)
+            // 不得生成注册不到任何服务的 mcp 型死插件
+            assertTrue(info == null || info.type != PluginCategories.TYPE_MCP)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `autoAdapt counts remote servers only for mixed mcp config`() {
+        val dir = kotlin.io.path.createTempDirectory("adapt-mcp-mix").toFile()
+        try {
+            File(dir, "mcp.json").writeText(
+                """
+                {"mcpServers":{
+                  "remote":{"type":"sse","url":"https://example.com/sse"},
+                  "local":{"command":"npx","args":["some-pkg"]}
+                }}
+                """.trimIndent()
+            )
+            val info = PluginManager.autoAdapt(dir)
+            assertNotNull(info)
+            info!!
+            assertEquals(PluginCategories.TYPE_MCP, info.type)
+            assertTrue(info.description.contains("1 个"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }

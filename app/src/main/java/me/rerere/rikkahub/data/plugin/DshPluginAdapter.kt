@@ -145,8 +145,16 @@ class DshPluginAdapter(
         fun pkgString(vararg keys: String): String? = keys.firstNotNullOfOrNull { key ->
             (pkg?.get(key) as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
         }
-        val name = pkgString("displayName", "name") ?: ref.repo
-        val description = pkgString("description").orEmpty()
+        // dsh.plugin.json 清单兜底：package.json 缺失或字段缺失时回退读取 DSH 自有清单
+        val manifest = root.resolve("dsh.plugin.json").takeIf { it.isFile }
+            ?.let { runCatching { json.parseToJsonElement(it.readText()).jsonObject }.getOrNull() }
+        fun manifestString(vararg keys: String): String? = keys.firstNotNullOfOrNull { key ->
+            (manifest?.get(key) as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+        }
+        val name = pkgString("displayName", "name") ?: manifestString("name", "title") ?: ref.repo
+        val description = pkgString("description") ?: manifestString("description", "desc").orEmpty()
+        val version = pkgString("version") ?: manifestString("version") ?: "1.0.0"
+        val author = pkgString("author") ?: manifestString("author") ?: ref.owner
         val npmPackage = (pkg?.get("name") as? JsonPrimitive)?.contentOrNull?.trim()
             ?.takeIf { it.isNotBlank() && !it.startsWith("github:") }
         val workspaceCommandHint = buildWorkspaceCommandHint(npmPackage, root)
@@ -163,9 +171,9 @@ class DshPluginAdapter(
             return PluginInfo(
                 id = "dsh-${ref.slug}",
                 name = name,
-                version = pkgString("version") ?: "1.0.0",
+                version = version,
                 description = description.ifBlank { "DeepSeek Harness 技能包 $name" },
-                author = ref.owner,
+                author = author,
                 category = "skill",
                 repository = "https://github.com/${ref.owner}/${ref.repo}",
                 systemPrompt = (prompt + workspaceCommandHint).take(PluginManager.MAX_SYSTEM_PROMPT_LEN),
@@ -195,9 +203,9 @@ class DshPluginAdapter(
             return PluginInfo(
                 id = "dsh-${ref.slug}",
                 name = name,
-                version = pkgString("version") ?: "1.0.0",
+                version = version,
                 description = description.ifBlank { "DeepSeek Harness 插件 $name" },
-                author = ref.owner,
+                author = author,
                 category = "general",
                 repository = "https://github.com/${ref.owner}/${ref.repo}",
                 systemPrompt = (prompt + workspaceCommandHint).take(PluginManager.MAX_SYSTEM_PROMPT_LEN),
@@ -221,9 +229,9 @@ class DshPluginAdapter(
             return PluginInfo(
                 id = "dsh-${ref.slug}",
                 name = name,
-                version = pkgString("version") ?: "1.0.0",
+                version = version,
                 description = description.ifBlank { "DeepSeek Harness CLI 工具 $name" },
-                author = ref.owner,
+                author = author,
                 category = "tools",
                 repository = "https://github.com/${ref.owner}/${ref.repo}",
                 systemPrompt = prompt,
@@ -246,9 +254,9 @@ class DshPluginAdapter(
         return PluginInfo(
             id = "dsh-${ref.slug}",
             name = name,
-            version = pkgString("version") ?: "1.0.0",
+            version = version,
             description = description.ifBlank { "DeepSeek Harness 插件 $name" },
-            author = ref.owner,
+            author = author,
             category = if (readme.length >= MIN_README_LEN) "knowledge" else "ui",
             repository = "https://github.com/${ref.owner}/${ref.repo}",
             systemPrompt = (

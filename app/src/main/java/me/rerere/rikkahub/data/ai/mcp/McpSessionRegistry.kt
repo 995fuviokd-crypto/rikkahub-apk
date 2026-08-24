@@ -451,8 +451,8 @@ internal class McpSessionRegistry(
 
         is McpServerConfig.CommandServerConfig ->
             throw UnsupportedOperationException(
-                "本地命令 MCP「${config.commonOptions.name}」需 外部 Node 运行环境，" +
-                    "RikkaHub 仅支持远程 SSE / Streamable HTTP 传输"
+                "Local command MCP「${config.commonOptions.name}」requires external Node runtime, " +
+                    "RikkaHub only supports remote SSE / Streamable HTTP transport"
             )
     }
 
