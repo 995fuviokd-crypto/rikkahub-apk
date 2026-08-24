@@ -411,16 +411,16 @@ class PluginMarketVM(
         }
     }
 
-    /** mcp 类型插件启用时，把插件包内 mcp.json 的服务注册到 MCP 设置，使对话中真正可用 */
+    /** 插件启用时，把插件包内 mcp.json 的远程服务注册到 MCP 设置，使对话中真正可用。
+     *  以包内实际存在的 mcp.json 为准（不要求 type=mcp，兼容标准包附带 MCP 配置的场景）；
+     *  按 serverUrl 判重，避免解析产生的随机 id 导致重复开关时堆积同一服务 */
     private fun registerMcpServersIfNeeded(pluginId: String) {
         viewModelScope.launch {
-            val info = pluginManager.loadInfo(pluginId) ?: return@launch
-            if (info.type != "mcp") return@launch
             val servers = pluginManager.mcpServersFromPlugin(pluginId)
             if (servers.isEmpty()) return@launch
             val settings = settingsStore.settingsFlow.first()
-            val existingKeys = settings.mcpServers.map { it.id to it.serverUrl }.toSet()
-            val newServers = servers.filter { (it.id to it.serverUrl) !in existingKeys }
+            val existingUrls = settings.mcpServers.map { it.serverUrl }.toSet()
+            val newServers = servers.filter { it.serverUrl !in existingUrls }
             if (newServers.isNotEmpty()) {
                 settingsStore.update {
                     it.copy(mcpServers = it.mcpServers + newServers)

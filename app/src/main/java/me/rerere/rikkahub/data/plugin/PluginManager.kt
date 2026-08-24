@@ -223,9 +223,20 @@ class PluginManager(
                 // 缺少 plugin.json：尝试把角色卡/SKILL 技能/MCP 配置等资源包自动适配为本地插件
                 val adapted = Companion.autoAdapt(staging)
                 if (adapted == null) {
-                    return@withContext Result.failure(
-                        IllegalArgumentException("插件包缺少 plugin.json，且无法自动识别为 skill/MCP/角色卡资源包")
-                    )
+                    val commandOnlyMcp = Companion.findFile(staging) {
+                        it.equals("mcp.json", ignoreCase = true) || it.equals(".mcp.json", ignoreCase = true)
+                    }?.let { file ->
+                        runCatching { Companion.parseMcpServers(file) }.getOrDefault(emptyList())
+                            .filter { it !is McpServerConfig.CommandServerConfig }
+                            .isEmpty()
+                    } == true
+                    val reason = if (commandOnlyMcp) {
+                        "该包仅含本地命令型 MCP 服务（command/stdio），Android 端无法运行本地进程，" +
+                            "请在其官方仓库部署为远程服务后通过「设置-MCP」添加"
+                    } else {
+                        "插件包缺少 plugin.json，且无法自动识别为 skill/MCP/角色卡资源包"
+                    }
+                    return@withContext Result.failure(IllegalArgumentException(reason))
                 }
                 infoFile.writeText(PluginJson.toJson(adapted))
             } else {
@@ -418,12 +429,13 @@ class PluginManager(
         /** 推断插件资源类型：显式声明优先，其次按包内特征文件识别 */
         private fun resolveNormalizedType(raw: String?, dir: File?): String {
             when (raw) {
+                null -> {}
                 PluginCategories.TYPE_PLUGIN,
                 PluginCategories.TYPE_SKILL,
                 PluginCategories.TYPE_MCP,
                 PluginCategories.TYPE_JSON,
                 PluginCategories.TYPE_CHARACTER,
-                -> return raw!!
+                -> return raw
             }
             if (dir != null) {
                 if (findFile(dir) { it.equals("SKILL.md", ignoreCase = true) } != null) {

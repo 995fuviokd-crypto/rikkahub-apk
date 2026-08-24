@@ -125,4 +125,22 @@ class PluginManagerInstallTest {
         val bytes = zipWith("plugin.json" to "{not json".toByteArray())
         assertTrue(manager.installZip(bytes).isFailure)
     }
+
+    @Test
+    fun `installZip rejects command only mcp package with clear reason`() = runTest {
+        // Claude Code 标准 mcp.json：仅本地 command 服务，Android 端不可运行，应拒绝并说明原因
+        val bytes = zipWith(
+            "mcp.json" to
+                """{"mcpServers":{"github":{"command":"npx","args":["-y","some-server"]}}}"""
+                    .toByteArray(),
+        )
+        val result = manager.installZip(bytes)
+        assertTrue(result.isFailure)
+        assertTrue(
+            "错误信息应解释 command 型 MCP 不可运行: ${result.exceptionOrNull()?.message}",
+            result.exceptionOrNull()?.message?.contains("command/stdio") == true,
+        )
+        // 不应落盘任何插件目录（避免死插件）
+        assertTrue(manager.listPlugins().isEmpty())
+    }
 }

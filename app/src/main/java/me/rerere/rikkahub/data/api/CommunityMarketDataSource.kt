@@ -381,7 +381,8 @@ class CommunityMarketDataSource(
         writePluginInfo(
             dir, entry, name, "1.0.0", desc, systemPrompt,
             tags = listOf("community", if (isMcpSource) PluginCategories.TYPE_MCP else "other"),
-            type = if (isMcpSource) PluginCategories.TYPE_MCP else PluginCategories.TYPE_PLUGIN,
+            // 说明型承载一律用 plugin 类型：type=mcp 但无可注册服务会形成"死 MCP 插件"
+            type = PluginCategories.TYPE_PLUGIN,
             category = if (isMcpSource) "mcp" else "general",
         )
         // 生成 web 索引展示页（含文件清单），供应用内 webview 展示
