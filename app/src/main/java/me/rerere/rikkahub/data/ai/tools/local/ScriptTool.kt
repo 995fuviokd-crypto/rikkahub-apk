@@ -79,6 +79,10 @@ internal fun buildScriptTool(
             ?: error("tool is required")
         val argsObj = json["args"]?.jsonObject
         val argsJson = argsObj?.toString() ?: "{}"
+        // 与 systemPrompt 清单一致：仅已启用插件可执行，防止绕过用户禁用决策
+        if (pluginId !in settingsStore.settingsFlow.value.enabledPlugins) {
+            return@Tool listOf(UIMessagePart.Text("插件 $pluginId 未启用，请在「扩展-插件」页启用后使用"))
+        }
         val dir = pluginManager.getPluginDir(pluginId)
         if (!dir.isDirectory) {
             return@Tool listOf(UIMessagePart.Text("插件 $pluginId 未安装"))

@@ -134,17 +134,20 @@ interface CommunityMarketApi {
     ): CommunityListResponse
 
     companion object {
+        // 复用同一 Json 实例：避免每次 create 重复构建（解析配置开销大）
+        private val jsonFormat = Json {
+            ignoreUnknownKeys = true
+            // 社区市场各端点大量字段显式为 null（source/assets 等），按缺失处理走默认值
+            explicitNulls = false
+            coerceInputValues = true
+        }
+
         fun create(httpClient: OkHttpClient): CommunityMarketApi {
             return Retrofit.Builder()
                 .baseUrl("https://static.operit.app/")
                 .client(httpClient)
                 .addConverterFactory(
-                    Json {
-                        ignoreUnknownKeys = true
-                        // 社区市场各端点大量字段显式为 null（source/assets 等），按缺失处理走默认值
-                        explicitNulls = false
-                        coerceInputValues = true
-                    }.asConverterFactory("application/json; charset=UTF8".toMediaType())
+                    jsonFormat.asConverterFactory("application/json; charset=UTF8".toMediaType())
                 )
                 .build()
                 .create(CommunityMarketApi::class.java)

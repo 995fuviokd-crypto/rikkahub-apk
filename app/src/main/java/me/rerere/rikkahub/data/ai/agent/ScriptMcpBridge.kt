@@ -211,6 +211,12 @@ class ScriptMcpBridge(
             return buildJsonObject { put("text", "plugin_id and tool are required") } to true
         }
         val argsJson = arguments["args"]?.toString() ?: "{}"
+        // 与工具清单一致：仅已启用插件可执行，防止绕过用户禁用决策
+        if (pluginId !in settingsStore.settingsFlow.value.enabledPlugins) {
+            return buildJsonObject {
+                put("text", "插件 $pluginId 未启用，请在「扩展-插件」页启用后使用")
+            } to true
+        }
         val dir = pluginManager.getPluginDir(pluginId)
         if (!dir.isDirectory) {
             return buildJsonObject { put("text", "插件 $pluginId 未安装") } to true

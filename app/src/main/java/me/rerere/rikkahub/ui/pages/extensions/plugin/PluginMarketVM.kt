@@ -5,7 +5,9 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -95,6 +97,18 @@ class PluginMarketVM(
             }
             refreshInstalled()
             loadMarket()
+        }
+        // 持续同步启用集合：助手详情/技能页/AI 工具等其他入口修改后，市场页状态保持一致
+        viewModelScope.launch {
+            settingsStore.settingsFlow
+                .map { it.enabledPlugins }
+                .distinctUntilChanged()
+                .collect { enabled ->
+                    if (enabled != _enabledPlugins) {
+                        _enabledPlugins = enabled
+                        refreshInstalled()
+                    }
+                }
         }
     }
 
