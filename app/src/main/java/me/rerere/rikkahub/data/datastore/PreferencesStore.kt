@@ -137,6 +137,8 @@ class SettingsStore(
         val FLOATING_BUBBLE_EXPAND_HEIGHT = intPreferencesKey("floating_bubble_expand_height")
         val FLOATING_BUBBLE_SHOW_TODO_TAB = booleanPreferencesKey("floating_bubble_show_todo_tab")
         val FLOATING_BUBBLE_SHOW_LIVE_TAB = booleanPreferencesKey("floating_bubble_show_live_tab")
+        // 无操作 N 秒后悬浮球自动贴边弱化（0 = 禁用）
+        val FLOATING_BUBBLE_AUTO_HIDE_SECONDS = intPreferencesKey("floating_bubble_auto_hide_seconds")
 
         // 提供商
         val PROVIDERS = stringPreferencesKey("providers")
@@ -268,6 +270,7 @@ class SettingsStore(
                 floatingBubbleExpandHeight = preferences[FLOATING_BUBBLE_EXPAND_HEIGHT] ?: 420,
                 floatingBubbleShowTodoTab = preferences[FLOATING_BUBBLE_SHOW_TODO_TAB] ?: true,
                 floatingBubbleShowLiveTab = preferences[FLOATING_BUBBLE_SHOW_LIVE_TAB] ?: true,
+                floatingBubbleAutoHideSeconds = preferences[FLOATING_BUBBLE_AUTO_HIDE_SECONDS] ?: 15,
                 assistantId = preferences[SELECT_ASSISTANT]?.let { Uuid.parse(it) }
                     ?: DEFAULT_ASSISTANT_ID,
                 assistantTags = preferences[ASSISTANT_TAGS]?.let {
@@ -514,6 +517,7 @@ class SettingsStore(
             preferences[FLOATING_BUBBLE_EXPAND_HEIGHT] = settings.floatingBubbleExpandHeight
             preferences[FLOATING_BUBBLE_SHOW_TODO_TAB] = settings.floatingBubbleShowTodoTab
             preferences[FLOATING_BUBBLE_SHOW_LIVE_TAB] = settings.floatingBubbleShowLiveTab
+            preferences[FLOATING_BUBBLE_AUTO_HIDE_SECONDS] = settings.floatingBubbleAutoHideSeconds
 
             preferences[PROVIDERS] = JsonInstant.encodeToString(settings.providers)
 
@@ -770,6 +774,8 @@ data class Settings(
     val floatingBubbleExpandHeight: Int = 420,
     val floatingBubbleShowTodoTab: Boolean = true,
     val floatingBubbleShowLiveTab: Boolean = true,
+    // 无操作 N 秒后悬浮球自动贴边弱化（0 = 禁用）
+    val floatingBubbleAutoHideSeconds: Int = 15,
 ) {
     companion object {
         // 构造一个用于初始化的settings, 但它不能用于保存，防止使用初始值存储

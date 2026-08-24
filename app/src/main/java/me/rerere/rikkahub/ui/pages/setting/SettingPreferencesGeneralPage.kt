@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -491,6 +492,42 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                                         modifier = Modifier.weight(1f),
                                     )
                                     Text("${settings.floatingBubbleSize}dp")
+                                }
+                            },
+                        )
+                        item(
+                            headlineContent = {
+                                Text(stringResource(R.string.setting_page_floating_bubble_auto_hide))
+                            },
+                            supportingContent = {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(stringResource(R.string.setting_page_floating_bubble_auto_hide_desc))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        Slider(
+                                            value = settings.floatingBubbleAutoHideSeconds.toFloat(),
+                                            onValueChange = { value ->
+                                                vm.updateSettings(
+                                                    settings.copy(floatingBubbleAutoHideSeconds = value.roundToInt())
+                                                )
+                                            },
+                                            valueRange = 0f..120f,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        Text(
+                                            if (settings.floatingBubbleAutoHideSeconds == 0) {
+                                                stringResource(R.string.setting_page_floating_bubble_auto_hide_off)
+                                            } else {
+                                                stringResource(
+                                                    R.string.setting_page_floating_bubble_auto_hide_seconds,
+                                                    settings.floatingBubbleAutoHideSeconds,
+                                                )
+                                            }
+                                        )
+                                    }
                                 }
                             },
                         )

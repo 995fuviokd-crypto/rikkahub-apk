@@ -474,6 +474,10 @@
   <string name="setting_page_floating_bubble_desc">Show a draggable bubble above all apps. Tap it to return to the app</string>
   <string name="setting_page_floating_bubble_color">Color</string>
   <string name="setting_page_floating_bubble_size">Size</string>
+  <string name="setting_page_floating_bubble_auto_hide">Auto edge-snap when idle</string>
+  <string name="setting_page_floating_bubble_auto_hide_desc">Automatically snap the bubble to the nearest edge and dim it after being idle for a while; touching it restores</string>
+  <string name="setting_page_floating_bubble_auto_hide_off">Off</string>
+  <string name="setting_page_floating_bubble_auto_hide_seconds">%1$ds</string>
   <string name="setting_page_floating_bubble_expand_width">Expand window width</string>
   <string name="setting_page_floating_bubble_expand_height">Expand window height</string>
   <string name="setting_page_floating_bubble_show_todo_tab">Show todo tab</string>

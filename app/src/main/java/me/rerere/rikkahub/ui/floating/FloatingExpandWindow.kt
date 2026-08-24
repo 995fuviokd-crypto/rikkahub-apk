@@ -5,6 +5,12 @@ import android.graphics.PixelFormat
 import android.os.Bundle
 import android.view.Gravity
 import android.view.WindowManager
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -14,6 +20,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,10 +33,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -42,10 +48,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -272,13 +282,28 @@ private fun ExpandWindowHeader(
                     onDrag(dragAmount.x.toInt(), dragAmount.y.toInt())
                 }
             }
-            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // AI 活动指示点：生成中为高亮色，空闲为弱化色
+        // AI 活动指示点：生成中呼吸脉冲，空闲为静态弱化色
+        val pulseAlpha = if (state.isGenerating) {
+            val transition = rememberInfiniteTransition(label = "activity-pulse")
+            transition.animateFloat(
+                initialValue = 1f,
+                targetValue = 0.25f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(800, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse,
+                ),
+                label = "activity-pulse-alpha",
+            ).value
+        } else {
+            1f
+        }
         Box(
             modifier = Modifier
-                .size(8.dp)
+                .size(9.dp)
+                .alpha(pulseAlpha)
                 .clip(CircleShape)
                 .background(
                     if (state.isGenerating) {
@@ -288,30 +313,37 @@ private fun ExpandWindowHeader(
                     }
                 )
         )
-        Spacer(modifier = Modifier.width(8.dp))
+        Spacer(modifier = Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {
-            val title = if (state.isGenerating) state.senderName else "RikkaHub"
             Text(
-                text = title,
+                text = if (state.isGenerating) state.senderName else "RikkaHub",
                 style = MaterialTheme.typography.titleSmall,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (state.isGenerating && state.status.isNotBlank()) {
                 Text(
                     text = state.status,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
         }
-        Icon(
-            imageVector = HugeIcons.Cancel01,
-            contentDescription = "关闭",
+        // 关闭按钮：IconButton 保证 40dp 触达区域
+        Box(
             modifier = Modifier
-                .size(28.dp)
+                .size(36.dp)
+                .clip(CircleShape)
                 .clickable { onClose() },
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = HugeIcons.Cancel01,
+                contentDescription = "关闭",
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -339,34 +371,106 @@ private fun ExpandWindowBody(
         return
     }
 
-    if (showTodoTab && showLiveTab) {
-        TabRow(selectedTabIndex = selectedTab) {
-            Tab(
-                selected = selectedTab == 0,
-                onClick = { selectedTab = 0 },
-                text = { Text("待办") },
+    val scrollState = rememberScrollState()
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (showTodoTab && showLiveTab) {
+            SegmentedTabs(
+                selectedTab = selectedTab,
+                onSelect = { selectedTab = it },
+                todoCount = state.todos.count { !it.done },
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             )
-            Tab(
+        } else if (showTodoTab) {
+            selectedTab = 0
+        } else {
+            selectedTab = 1
+        }
+        val contentModifier = Modifier
+            .fillMaxSize()
+            .padding(12.dp)
+        if (selectedTab == 0) {
+            TodoContent(state.todos, state.terminalCommands, scrollState, contentModifier)
+        } else {
+            LiveOutputContent(state, scrollState, contentModifier)
+        }
+    }
+}
+
+/** 紧凑 pill 分段切换：比 TabRow 更省高度，适配小尺寸悬浮窗 */
+@Composable
+private fun SegmentedTabs(
+    selectedTab: Int,
+    onSelect: (Int) -> Unit,
+    todoCount: Int,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    ) {
+        Row(modifier = Modifier.padding(3.dp)) {
+            SegmentedTabItem(
+                text = "待办",
+                badge = todoCount.takeIf { it > 0 },
+                selected = selectedTab == 0,
+                onClick = { onSelect(0) },
+                modifier = Modifier.weight(1f),
+            )
+            SegmentedTabItem(
+                text = "实时输出",
+                badge = null,
                 selected = selectedTab == 1,
-                onClick = { selectedTab = 1 },
-                text = { Text("实时输出") },
+                onClick = { onSelect(1) },
+                modifier = Modifier.weight(1f),
             )
         }
-    } else if (showTodoTab) {
-        selectedTab = 0
-    } else {
-        selectedTab = 1
     }
+}
 
-    val scrollState = rememberScrollState()
-    val contentModifier = Modifier
-        .fillMaxSize()
-        .padding(12.dp)
-
-    if (selectedTab == 0) {
-        TodoContent(state.todos, state.terminalCommands, scrollState, contentModifier)
-    } else {
-        LiveOutputContent(state, scrollState, contentModifier)
+@Composable
+private fun RowScope.SegmentedTabItem(
+    text: String,
+    badge: Int?,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(
+                if (selected) MaterialTheme.colorScheme.surface else Color.Transparent
+            )
+            .clickable(onClick = onClick)
+            .padding(vertical = 7.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+            if (badge != null) {
+                Text(
+                    text = badge.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                )
+            }
+        }
     }
 }
 
@@ -382,6 +486,35 @@ private fun TodoContent(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (todos.isNotEmpty()) {
+            // 进度概览：完成数 + 进度条
+            val doneCount = todos.count { it.done }
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "任务进度",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = "$doneCount/${todos.size}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (doneCount == todos.size) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+                LinearProgressIndicator(
+                    progress = { doneCount.toFloat() / todos.size },
+                    modifier = Modifier.fillMaxWidth(),
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                )
+            }
             todos.forEach { todo ->
                 TodoRow(todo)
             }
@@ -433,6 +566,7 @@ private fun TodoRow(todo: TodoItem) {
         Text(
             text = todo.text,
             style = MaterialTheme.typography.bodyMedium,
+            textDecoration = if (todo.done) TextDecoration.LineThrough else null,
             color = if (todo.done) {
                 MaterialTheme.colorScheme.onSurfaceVariant
             } else {
@@ -488,33 +622,42 @@ private fun LiveOutputContent(
 
 @Composable
 private fun CommandLine(command: String, output: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+    // 卡片化命令块：tonal 背景与正文视觉分层
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Icon(
-                imageVector = HugeIcons.CommandLine,
-                contentDescription = null,
-                modifier = Modifier.size(14.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                text = command,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-        if (output.isNotBlank()) {
-            Text(
-                text = output,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 20.dp),
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(
+                    imageVector = HugeIcons.CommandLine,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = command,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            if (output.isNotBlank()) {
+                Text(
+                    text = output,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

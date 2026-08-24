@@ -57,7 +57,12 @@ class FloatingBubbleService : Service() {
         private const val SIZE_MIN_DP = 32
         private const val SIZE_MAX_DP = 80
         private const val HALF_HIDE_ALPHA = 0.5f
+        private const val AUTO_HIDE_ALPHA = 0.35f
         private const val DOUBLE_CLICK_INTERVAL_MS = 350L
+
+        /** 无操作自动贴边秒数允许范围（0 = 禁用） */
+        const val AUTO_HIDE_MIN_SECONDS = 0
+        const val AUTO_HIDE_MAX_SECONDS = 120
     }
 
     private val settingsStore: SettingsStore by inject()
@@ -80,9 +85,16 @@ class FloatingBubbleService : Service() {
     private var isHalfHidden = false
     private var hasDragged = false
     private var lastClickTime = 0L
+    // 无操作自动贴边状态：超时后球贴边并弱化，任意触摸恢复
+    private var isAutoHidden = false
+    private var autoHideSeconds = 15
 
     private val singleClickRunnable = Runnable {
         toggleExpandWindow()
+    }
+
+    private val autoHideRunnable = Runnable {
+        autoSnapToEdge()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -193,16 +205,25 @@ class FloatingBubbleService : Service() {
             setTouchListener(object : IFxTouchListener {
                 override fun onDown() {
                     hasDragged = false
+                    // 任意触摸即视为"操控"：退出自动弱化并重置空闲计时
+                    if (isAutoHidden) {
+                        isAutoHidden = false
+                        bubbleAlpha = 1f
+                        bubbleView?.setBubbleAlpha(bubbleAlpha)
+                    }
+                    resetIdleTimer()
                 }
 
                 override fun onUp() {
                     if (hasDragged) {
                         mainHandler.postDelayed({ updateHalfHideState() }, 150)
                     }
+                    resetIdleTimer()
                 }
 
                 override fun onDragIng(event: MotionEvent, x: Float, y: Float) {
                     hasDragged = true
+                    resetIdleTimer()
                 }
 
                 override fun onTouch(event: MotionEvent, control: IFxInternalHelper?): Boolean = false
@@ -231,11 +252,40 @@ class FloatingBubbleService : Service() {
                 bubbleSizeDp = settings.floatingBubbleSize.coerceIn(SIZE_MIN_DP, SIZE_MAX_DP)
                 bubbleView?.setBubbleColor(bubbleColor)
                 bubbleView?.setBubbleSize(dp2px(bubbleSizeDp).toInt())
+                // 自动贴边秒数变化时按新配置重排计时（0 = 禁用）
+                val newSeconds = settings.floatingBubbleAutoHideSeconds
+                    .coerceIn(AUTO_HIDE_MIN_SECONDS, AUTO_HIDE_MAX_SECONDS)
+                if (newSeconds != autoHideSeconds) {
+                    autoHideSeconds = newSeconds
+                    resetIdleTimer()
+                }
             }
         }
     }
 
+    /** 重置无操作计时器：autoHideSeconds=0 表示禁用，取消挂起任务 */
+    private fun resetIdleTimer() {
+        mainHandler.removeCallbacks(autoHideRunnable)
+        if (autoHideSeconds > 0) {
+            mainHandler.postDelayed(autoHideRunnable, autoHideSeconds * 1000L)
+        }
+    }
+
+    /** 无操作超时：自动吸附到最近边缘并弱化，等待下次触摸恢复 */
+    private fun autoSnapToEdge() {
+        val c = control ?: return
+        isAutoHidden = true
+        bubbleAlpha = AUTO_HIDE_ALPHA
+        bubbleView?.setBubbleAlpha(bubbleAlpha)
+        val sizePx = dp2px(bubbleSizeDp)
+        val screenWidthPx = resources.displayMetrics.widthPixels
+        val targetX = if (c.getX() + sizePx / 2f < screenWidthPx / 2f) 0f else screenWidthPx - sizePx
+        c.move(targetX, c.getY(), true)
+    }
+
     private fun handleClick() {
+        // 点击也是一次"操控"，重置空闲计时
+        resetIdleTimer()
         if (isHalfHidden) {
             restoreFromHalfHide()
             return

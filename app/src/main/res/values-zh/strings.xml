@@ -1413,6 +1413,10 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_page_floating_bubble_desc">在所有应用上方显示可拖动的悬浮小球，点击回到软件</string>
   <string name="setting_page_floating_bubble_color">颜色</string>
   <string name="setting_page_floating_bubble_size">大小</string>
+  <string name="setting_page_floating_bubble_auto_hide">无操作自动贴边</string>
+  <string name="setting_page_floating_bubble_auto_hide_desc">悬浮球闲置一段时间后自动吸附到最近边缘并弱化显示，触碰即恢复</string>
+  <string name="setting_page_floating_bubble_auto_hide_off">关闭</string>
+  <string name="setting_page_floating_bubble_auto_hide_seconds">%1$d 秒</string>
   <string name="setting_page_floating_bubble_expand_width">展开窗口宽度</string>
   <string name="setting_page_floating_bubble_expand_height">展开窗口高度</string>
   <string name="setting_page_floating_bubble_show_todo_tab">显示待办标签</string>
