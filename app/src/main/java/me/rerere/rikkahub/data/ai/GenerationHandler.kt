@@ -115,11 +115,11 @@ class GenerationHandler(
         maxSteps: Int = 256,
         processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
         conversationSystemPrompt: String? = null,
+        conversationId: Uuid? = null,
         conversationModeInjectionIds: Set<Uuid> = emptySet(),
         conversationLorebookIds: Set<Uuid> = emptySet(),
         workspaceCwd: String? = null,
         workspaceRoot: String? = null,
-        conversationId: Uuid? = null,
         sideEffectRecorder: SideEffectRecorder? = null,
         extraSystemPrompts: List<String> = emptyList(),
     ): Flow<GenerationChunk> = flow {
@@ -266,11 +266,11 @@ class GenerationHandler(
                     stream = assistant.streamOutput,
                     processingStatus = processingStatus,
                     conversationSystemPrompt = conversationSystemPrompt,
+                    conversationId = conversationId,
                     conversationModeInjectionIds = conversationModeInjectionIds,
                     conversationLorebookIds = conversationLorebookIds,
                     workspaceCwd = workspaceCwd,
                     workspaceRoot = workspaceRoot,
-                    conversationId = conversationId,
                     extraSystemPrompts = extraSystemPrompts,
                     // 多线路并发仅用于无工具首轮：工具调用会让不同线路产生分叉的工具参数，
                     // 状态无法合并；已有工具调用历史（hasToolCalls）或首轮就带工具时只用主线路
@@ -501,11 +501,11 @@ class GenerationHandler(
         stream: Boolean,
         processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
         conversationSystemPrompt: String? = null,
+        conversationId: Uuid? = null,
         conversationModeInjectionIds: Set<Uuid> = emptySet(),
         conversationLorebookIds: Set<Uuid> = emptySet(),
         workspaceCwd: String? = null,
         workspaceRoot: String? = null,
-        conversationId: Uuid? = null,
         backupRoutes: List<Pair<Provider<ProviderSetting>, ProviderSetting>> = emptyList(),
         extraSystemPrompts: List<String> = emptyList(),
     ) {
@@ -604,7 +604,8 @@ class GenerationHandler(
             customBody = buildList {
                 addAll(assistant.customBodies)
                 addAll(model.customBodies)
-            }
+            },
+            sessionId = conversationId?.toString(),
         )
         if (stream) {
             if (backupRoutes.isEmpty()) {

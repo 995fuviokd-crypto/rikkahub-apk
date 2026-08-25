@@ -60,6 +60,7 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.ai.provider.BuiltInTools
@@ -108,6 +109,7 @@ import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
 import java.io.File
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.uuid.Uuid
 
 @Composable
@@ -412,6 +414,7 @@ private fun ChatPageContent(
                         } else {
                             vm.handleMessageSend(inputState.getContents())
                             scope.launch {
+                                delay(100.milliseconds)
                                 chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
                             }
                         }

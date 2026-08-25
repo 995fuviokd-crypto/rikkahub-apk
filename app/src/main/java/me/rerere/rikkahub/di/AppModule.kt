@@ -16,6 +16,7 @@ import me.rerere.rikkahub.data.ai.group.ProviderGroupMemberCaller
 import me.rerere.rikkahub.data.permission.HeadlessController
 import me.rerere.rikkahub.data.permission.PermissionManager
 import me.rerere.rikkahub.service.FloatingActivityHub
+import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceTerminalSessionManager
 import me.rerere.rikkahub.utils.EmojiData
 import me.rerere.rikkahub.utils.EmojiUtils
 import me.rerere.rikkahub.utils.JsonInstant
@@ -69,6 +70,10 @@ val appModule = module {
 
     single {
         SoundEffectPlayer(get())
+    }
+
+    single {
+        WorkspaceTerminalSessionManager(get(), get())
     }
 
     // 生成通知与业务解耦：ChatService 只发事件，通知由这里消费；

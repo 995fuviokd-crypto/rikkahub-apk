@@ -206,6 +206,19 @@ private fun parseStewardJudgement(text: String): StewardJudgement {
     }.getOrDefault(StewardJudgement(completed = false))
 }
 
+internal fun createForkConversation(
+    source: Conversation,
+    messageNodes: List<MessageNode>,
+): Conversation = Conversation(
+    id = Uuid.random(),
+    assistantId = source.assistantId,
+    messageNodes = messageNodes,
+    customSystemPrompt = source.customSystemPrompt,
+    modeInjectionIds = source.modeInjectionIds,
+    lorebookIds = source.lorebookIds,
+    workspaceCwd = source.workspaceCwd,
+    folderId = source.folderId,
+)
 data class ChatError(
     val id: Uuid = Uuid.random(),
     val title: String? = null,
@@ -834,12 +847,12 @@ class ChatService(
                     addAll(activeMessages)
                 },
                 assistant = assistant,
+                conversationId = conversationId,
                 conversationSystemPrompt = conversation.customSystemPrompt,
                 conversationModeInjectionIds = conversation.modeInjectionIds,
                 conversationLorebookIds = conversation.lorebookIds,
                 workspaceCwd = conversation.workspaceCwd,
                 workspaceRoot = workspaceIds.firstOrNull()?.toString(),
-                conversationId = conversationId,
                 sideEffectRecorder = sideEffectRecorder,
                 extraSystemPrompts = applyRequestBeforeSendHook(
                     prompts = pluginManager.enabledSystemPrompts(settings.enabledPlugins),
@@ -2037,14 +2050,7 @@ class ChatService(
                 )
             }
 
-        val forkConversation = Conversation(
-            id = Uuid.random(),
-            assistantId = currentConversation.assistantId,
-            messageNodes = copiedNodes,
-            customSystemPrompt = currentConversation.customSystemPrompt,
-            modeInjectionIds = currentConversation.modeInjectionIds,
-            lorebookIds = currentConversation.lorebookIds,
-        )
+        val forkConversation = createForkConversation(currentConversation, copiedNodes)
 
         saveConversation(forkConversation.id, forkConversation)
         return forkConversation
