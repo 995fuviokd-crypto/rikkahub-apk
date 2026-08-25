@@ -8,6 +8,7 @@ import me.rerere.rikkahub.data.files.WorkspaceMounts
 import me.rerere.rikkahub.data.ai.agent.AcpEnvironmentManager
 import me.rerere.rikkahub.data.ai.agent.AcpMcpServersBuilder
 import me.rerere.rikkahub.data.ai.agent.AcpRuntime
+import me.rerere.rikkahub.data.ai.agent.AgentInstallLogBus
 import me.rerere.rikkahub.data.ai.agent.ScriptMcpBridge
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FavoriteRepository
@@ -76,8 +77,13 @@ val repositoryModule = module {
         )
     }
 
+    // Agent 安装日志总线: 安装命令输出实时流向「工作区终端」页面的日志面板
     single {
-        AcpEnvironmentManager(get())
+        AgentInstallLogBus()
+    }
+
+    single {
+        AcpEnvironmentManager(get(), get())
     }
 
     single {

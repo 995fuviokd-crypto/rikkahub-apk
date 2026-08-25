@@ -1,7 +1,10 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -16,11 +19,24 @@ import me.rerere.rikkahub.data.ai.agent.AgentInstallProgress
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 
+/** 离线导入包(.tgz)的 UI 状态 */
+sealed interface AgentImportUiState {
+    data object Idle : AgentImportUiState
+
+    /** @param fileName 正在导入的文件名 */
+    data class Running(val fileName: String) : AgentImportUiState
+
+    /** @param detail 导入结果说明(包含识别到的平台信息) */
+    data class Done(val detail: String) : AgentImportUiState
+}
+
 /**
  * 「Agent 模式管理」页面 ViewModel：
  * 维护目标工作区、6 种平台 Agent 的安装状态与逐步安装进度。
+ * 支持取消进行中的安装, 以及从本地 .tgz 离线包导入 CLI。
  */
 class SettingAgentVM(
+    private val context: Context,
     private val workspaceRepository: WorkspaceRepository,
     private val environmentManager: AcpEnvironmentManager,
 ) : ViewModel() {
@@ -38,6 +54,11 @@ class SettingAgentVM(
 
     private val _installing = MutableStateFlow<AgentPlatform?>(null)
     val installing: StateFlow<AgentPlatform?> = _installing
+
+    private val _importState = MutableStateFlow<AgentImportUiState>(AgentImportUiState.Idle)
+    val importState: StateFlow<AgentImportUiState> = _importState
+
+    private var installJob: Job? = null
 
     init {
         // 自动选中第一个工作区；工作区变化时同步选中项
@@ -86,7 +107,7 @@ class SettingAgentVM(
         if (_installing.value != null) return
         _installing.value = platform
         _progress.value = _progress.value + (platform to AgentInstallProgress(AgentInstallPhase.CHECKING, "准备中…"))
-        viewModelScope.launch {
+        installJob = viewModelScope.launch {
             environmentManager.installWithProgress(root, platform) { progress ->
                 _progress.value = _progress.value + (platform to progress)
             }.onSuccess {
@@ -99,4 +120,48 @@ class SettingAgentVM(
             _installing.value = null
         }
     }
+
+    /** 取消进行中的安装: 协程取消会中断容器内命令并杀掉进程 */
+    fun cancelInstall() {
+        installJob?.cancel()
+        installJob = null
+        _installing.value = null
+    }
+
+    /**
+     * 从系统文件选择器选中的 .tgz npm 包导入安装。
+     * 导入完成后重新检测全部平台状态, 命中的平台自动变为「已安装」。
+     */
+    fun importArchive(uri: Uri) {
+        val root = selectedRoot() ?: return
+        if (_importState.value is AgentImportUiState.Running) return
+        viewModelScope.launch {
+            _importState.value = runCatching {
+                val fileName = queryDisplayName(uri) ?: "package.tgz"
+                _importState.value = AgentImportUiState.Running(fileName)
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: error("无法读取所选文件")
+                var logTail = ""
+                environmentManager.importPackageArchive(
+                    root = root,
+                    archiveName = fileName.takeIf { it.lowercase().endsWith(".tgz") || it.lowercase().endsWith(".tar.gz") }
+                        ?: "$fileName.tgz",
+                    bytes = bytes,
+                    onLog = { line -> logTail = (logTail + line).takeLast(400) },
+                ).getOrThrow()
+                // 重新检测, 让新导入的平台显示为已安装
+                refreshStatuses()
+                AgentImportUiState.Done(logTail.lineSequence().lastOrNull { it.isNotBlank() } ?: "导入完成")
+            }.getOrElse { throwable ->
+                AgentImportUiState.Done("导入失败：${throwable.message}")
+            }
+        }
+    }
+
+    private fun queryDisplayName(uri: Uri): String? = runCatching {
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+        }
+    }.getOrNull()
 }

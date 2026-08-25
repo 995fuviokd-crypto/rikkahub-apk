@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -43,6 +44,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -52,7 +54,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
 import kotlinx.coroutines.flow.flowOf
+import me.rerere.ai.provider.AgentPlatform
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.ai.agent.AgentInstallLogBus
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.theme.ColorMode
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
@@ -179,6 +183,7 @@ private fun WorkspaceTerminalContent(
         color = Color.Black,
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
+            AgentInstallLogOverlay(root = root)
             SecondaryScrollableTabRow(
                 selectedTabIndex = selectedIndex,
                 edgePadding = 0.dp,
@@ -395,4 +400,97 @@ private fun TerminalExtraKey(
 private fun TerminalSession.writeText(text: String) {
     val bytes = text.toByteArray()
     write(bytes, 0, bytes.size)
+}
+
+/** 平台标识的展示名 */
+private fun AgentPlatform.displayName(): String = when (this) {
+    AgentPlatform.GEMINI_CLI -> "Gemini CLI"
+    AgentPlatform.CODEX -> "Codex"
+    AgentPlatform.CLAUDE_CODE -> "Claude Code (ACP)"
+    AgentPlatform.ANTHROPIC_CLAUDE_CODE -> "Claude Code"
+    AgentPlatform.OPENCODE -> "OpenCode"
+    AgentPlatform.DEEPSEEK_HARNESS -> "DeepSeek Harness"
+}
+
+/**
+ * 「Agent 安装」实时日志面板: 从「Agent 模式管理」页发起安装后, 命令输出经
+ * [AgentInstallLogBus] 流到这里, 用户可在终端页直接看到 npm/curl 的下载安装过程。
+ * 仅当前工作区存在活跃安装或近期日志时显示, 可手动收起。
+ */
+@Composable
+private fun AgentInstallLogOverlay(root: String?) {
+    if (root == null) return
+    val logBus: AgentInstallLogBus = koinInject()
+    val logs by logBus.logs.collectAsStateWithLifecycle()
+    // 只展示当前工作区的最近一条安装日志
+    val entry = logs.values
+        .filter { it.root == root && (it.active || it.lines.isNotEmpty()) }
+        .maxByOrNull { it.platform?.name.orEmpty() }
+        ?: return
+    var collapsed by remember(entry.platform) { mutableStateOf(false) }
+
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = buildString {
+                        append("安装日志 · ${entry.platform?.displayName()}")
+                        if (entry.active) append("（进行中）")
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(
+                    onClick = { collapsed = !collapsed },
+                    modifier = Modifier.size(24.dp),
+                ) {
+                    Text(
+                        text = if (collapsed) "▾" else "▴",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (!collapsed) {
+                val scrollState = rememberScrollState()
+                val lines = entry.lines
+                // 新日志到达时自动滚到底部
+                LaunchedEffect(lines.size, lines.lastOrNull()?.text) {
+                    scrollState.animateScrollTo(scrollState.maxValue)
+                }
+                val context = LocalContext.current
+                val terminalTypeface = remember(context) {
+                    ResourcesCompat.getFont(context, R.font.jetbrains_mono)
+                        ?: Typeface.MONOSPACE
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(160.dp)
+                        .verticalScroll(scrollState),
+                ) {
+                    lines.forEach { line ->
+                        Text(
+                            text = line.text,
+                            fontFamily = terminalTypeface?.let { FontFamily(it) },
+                            fontSize = 10.sp,
+                            lineHeight = 13.sp,
+                            color = if (line.isError) {
+                                Color(0xFFFF6B6B)
+                            } else {
+                                Color(0xFF9E9E9E)
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
 }

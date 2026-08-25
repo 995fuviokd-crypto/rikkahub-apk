@@ -195,6 +195,29 @@ class WorkspaceManager(
         )
     }
 
+    /** 与 [writeRootfsText] 对称的二进制写入, 用于导入离线安装包等场景 */
+    fun writeRootfsBytes(
+        root: String,
+        path: String,
+        bytes: ByteArray,
+        overwrite: Boolean = true,
+        includeAndroidLocal: Boolean = true,
+    ): WorkspaceFileEntry {
+        val location = resolveRootfsPath(root, path, includeAndroidLocal)
+        val file = fileSystem.resolve(location.rootDir, location.relativePath)
+        require(!file.exists() || overwrite) { "File already exists: $path" }
+        require(!file.exists() || file.isFile) { "Path is not a file: $path" }
+        file.parentFile?.mkdirs()
+        file.writeBytes(bytes)
+        return WorkspaceFileEntry(
+            path = path.trimEnd('/'),
+            name = file.name,
+            isDirectory = false,
+            sizeBytes = file.length(),
+            updatedAt = file.lastModified(),
+        )
+    }
+
     private fun resolveRootfsFile(root: String, path: String, includeAndroidLocal: Boolean = true): File {
         val location = resolveRootfsPath(root, path, includeAndroidLocal)
         return fileSystem.resolve(location.rootDir, location.relativePath)

@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
@@ -40,11 +42,13 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import android.net.Uri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.ai.provider.AgentPlatform
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.CheckmarkCircle02
+import me.rerere.hugeicons.stroke.Package02
 import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
@@ -107,6 +111,7 @@ fun SettingAgentPage(vm: SettingAgentVM = koinViewModel()) {
     val statuses by vm.statuses.collectAsStateWithLifecycle()
     val progress by vm.progress.collectAsStateWithLifecycle()
     val installing by vm.installing.collectAsStateWithLifecycle()
+    val importState by vm.importState.collectAsStateWithLifecycle()
     val navController = LocalNavController.current
 
     val selectedWorkspace = workspaces.firstOrNull { it.id == selectedWorkspaceId }
@@ -145,10 +150,20 @@ fun SettingAgentPage(vm: SettingAgentVM = koinViewModel()) {
 
             item {
                 Text(
-                    text = "在此安装 CLI 编码智能体，安装完成后可在「供应商」中绑定为 Agent 模式。安装目标为所选工作区的运行环境（Node.js + npm 会自动安装）。",
+                    text = "在此安装 CLI 编码智能体，安装完成后可在「供应商」中绑定为 Agent 模式。安装目标为所选工作区的运行环境（Node.js + npm 会自动安装）。点击安装后会跳转到工作区终端页面，可实时查看下载与安装日志。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 8.dp),
+                )
+            }
+
+            item {
+                OfflineImportCard(
+                    importState = importState,
+                    enabled = selectedWorkspace != null && installing == null,
+                    onPickArchive = { uri ->
+                        vm.importArchive(uri)
+                    },
                 )
             }
 
@@ -159,7 +174,14 @@ fun SettingAgentPage(vm: SettingAgentVM = koinViewModel()) {
                     installProgress = progress[descriptor.platform],
                     isInstalling = installing == descriptor.platform,
                     workspaceReady = selectedWorkspace != null,
-                    onInstall = { vm.install(descriptor.platform) },
+                    onInstall = {
+                        vm.install(descriptor.platform)
+                        // 跳转工作区终端页实时查看安装输出
+                        selectedWorkspace?.let { workspace ->
+                            navController.navigate(Screen.WorkspaceTerminal(workspace.id))
+                        }
+                    },
+                    onCancelInstall = { vm.cancelInstall() },
                 )
             }
         }
@@ -240,6 +262,7 @@ private fun AgentItemCard(
     isInstalling: Boolean,
     workspaceReady: Boolean,
     onInstall: () -> Unit,
+    onCancelInstall: () -> Unit,
 ) {
     Card(
         colors = CardDefaults.cardColors(
@@ -292,11 +315,16 @@ private fun AgentItemCard(
             val failed = !isInstalling && installProgress?.phase == AgentInstallPhase.FAILED
             if (isInstalling || failed) {
                 InstallProgressBlock(installProgress)
-                if (failed) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                    ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    if (isInstalling) {
+                        // 安装可能因网络问题长时间挂起, 提供取消入口避免只能干等
+                        OutlinedButton(onClick = onCancelInstall) {
+                            Text("取消")
+                        }
+                    } else {
                         Button(onClick = onInstall, enabled = workspaceReady) {
                             Text("重试")
                         }
@@ -326,6 +354,78 @@ private fun AgentItemCard(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OfflineImportCard(
+    importState: AgentImportUiState,
+    enabled: Boolean,
+    onPickArchive: (Uri) -> Unit,
+) {
+    val picker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) onPickArchive(uri)
+    }
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = CustomColors.listItemColors.containerColor
+        ),
+        modifier = Modifier.padding(horizontal = 8.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = HugeIcons.Package02,
+                contentDescription = null,
+                modifier = Modifier.size(28.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = "离线导入",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                val hint = when (val state = importState) {
+                    is AgentImportUiState.Running -> "正在导入 ${state.fileName}…"
+                    is AgentImportUiState.Done -> state.detail
+                    else -> "已通过终端或其他方式下载好 .tgz 安装包？选择后自动装入全局环境并识别对应平台"
+                }
+                Text(
+                    text = hint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (importState is AgentImportUiState.Done && importState.detail.startsWith("导入失败")) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            val running = importState is AgentImportUiState.Running
+            OutlinedButton(
+                onClick = {
+                    picker.launch(
+                        arrayOf(
+                            "application/gzip",
+                            "application/x-gzip",
+                            "application/x-tar",
+                            "application/octet-stream",
+                        )
+                    )
+                },
+                enabled = enabled && !running,
+            ) {
+                Text(if (running) "导入中…" else "选择 .tgz")
             }
         }
     }

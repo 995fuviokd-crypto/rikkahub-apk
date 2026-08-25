@@ -71,6 +71,7 @@ data class AgentInstallProgress(
  */
 class AcpEnvironmentManager(
     private val workspaceManager: WorkspaceManager,
+    private val logBus: AgentInstallLogBus = AgentInstallLogBus(),
 ) {
     private val readyRoots = mutableSetOf<String>()
 
@@ -102,90 +103,173 @@ class AcpEnvironmentManager(
             val cacheKey = "$root|${platform.name}"
             if (cacheKey in readyRoots) return@withContext Unit
 
+            logBus.begin(root, platform)
             var nodeStage = -1 // node 脚本内已见的最大 __P__ 标记, 防止跨块/重放导致回退
 
             fun report(phase: AgentInstallPhase, detail: String, percent: Int?) =
                 onProgress(AgentInstallProgress(phase, detail, percent))
 
-            report(AgentInstallPhase.CHECKING, "正在检测工作区环境…", 2)
-            if (!workspaceManager.hasRootfs(root)) {
-                throw IllegalStateException("工作区根文件系统未安装，请先在对应工作区安装系统环境")
-            }
-
-            if (!hasNode(root)) {
-                val nodeDetail = "正在安装 Node.js 与 npm（已启用国内镜像加速）…"
-                report(AgentInstallPhase.INSTALLING_NODE, nodeDetail, 5)
-                runWithRetry("node/npm") {
-                    workspaceManager.executeCommand(
-                        root = root,
-                        command = NODE_INSTALL_SCRIPT,
-                        timeoutMillis = INSTALL_TIMEOUT_MS,
-                        onOutput = { chunk ->
-                            // 脚本通过 echo __P__NN 上报里程碑, 累积解析避免标记被流块截断
-                            Regex("__P__(\\d+)").findAll(chunk).forEach { match ->
-                                val marker = match.groupValues[1].toIntOrNull() ?: return@forEach
-                                if (marker > nodeStage) {
-                                    nodeStage = marker
-                                    report(
-                                        AgentInstallPhase.INSTALLING_NODE,
-                                        nodeDetail,
-                                        5 + marker * 45 / 100, // 映射到整体 [5, 50]
-                                    )
-                                }
-                            }
-                        },
-                    )
-                } ?: error("node/npm 安装失败，请重试")
-                check(hasNode(root)) { "node/npm 安装后校验失败" }
-                report(AgentInstallPhase.INSTALLING_NODE, nodeDetail, 50)
-            }
-
-            if (!hasCli(root, platform)) {
-                val cliDetail = "正在下载并安装 ${platform.cliPackage}（国内镜像加速中）…"
-                report(AgentInstallPhase.INSTALLING_CLI, cliDetail, 55)
-                // npmmirror 优先(国内直连快, 免去官方源超时等待), 官方源兜底;
-                // --no-audit --no-fund 省去安全审计与赞助信息请求, --loglevel=error 降低输出量
-                val cliCommand = buildString {
-                    append("npm install -g ${platform.cliPackage} --registry=$NPM_MIRROR_REGISTRY --no-audit --no-fund --loglevel=error 2>&1 && echo __OK__ || ")
-                    append("(npm install -g ${platform.cliPackage} --no-audit --no-fund --loglevel=error 2>&1 && echo __OK__) || true")
+            try {
+                report(AgentInstallPhase.CHECKING, "正在检测工作区环境…", 2)
+                if (!workspaceManager.hasRootfs(root)) {
+                    throw IllegalStateException("工作区根文件系统未安装，请先在对应工作区安装系统环境")
                 }
-                // npm 无标准进度输出, 用缓慢逼近的估算值补间(封顶 92%), 完成后由真实结果接管
-                coroutineScope {
-                    val ticker = launch {
-                        var estimate = 56
-                        while (estimate < 92) {
-                            delay(PROGRESS_TICK_MS)
-                            estimate += maxOf(1, ((92 - estimate) * 0.04).toInt())
-                            report(AgentInstallPhase.INSTALLING_CLI, cliDetail, estimate)
+
+                if (!hasNode(root)) {
+                    val nodeDetail = "正在安装 Node.js 与 npm（已启用国内镜像加速）…"
+                    report(AgentInstallPhase.INSTALLING_NODE, nodeDetail, 5)
+                    val nodeResult = runWithRetry("node/npm") {
+                        workspaceManager.executeCommand(
+                            root = root,
+                            command = NODE_INSTALL_SCRIPT,
+                            timeoutMillis = INSTALL_TIMEOUT_MS,
+                            onOutput = { chunk ->
+                                // 实时透出到终端页日志面板
+                                logBus.append(platform, chunk)
+                                // 脚本通过 echo __P__NN 上报里程碑, 累积解析避免标记被流块截断
+                                Regex("__P__(\\d+)").findAll(chunk).forEach { match ->
+                                    val marker = match.groupValues[1].toIntOrNull() ?: return@forEach
+                                    if (marker > nodeStage) {
+                                        nodeStage = marker
+                                        report(
+                                            AgentInstallPhase.INSTALLING_NODE,
+                                            nodeDetail,
+                                            5 + marker * 45 / 100, // 映射到整体 [5, 50]
+                                        )
+                                    }
+                                }
+                            },
+                        )
+                    }
+                    nodeResult.getOrElse { error("node/npm 安装失败：${it.message}，请重试") }
+                        .takeIf { it.exitCode == 0 && it.stdout.contains("__OK__") }
+                        ?: error("node/npm 安装失败${nodeResult.exceptionOrNull()?.let { e -> "（${e.message}）" } ?: ""}，请重试")
+                    check(hasNode(root)) { "node/npm 安装后校验失败" }
+                    report(AgentInstallPhase.INSTALLING_NODE, nodeDetail, 50)
+                } else {
+                    logBus.append(platform, "Node.js 已就绪，跳过运行时安装\n")
+                }
+
+                if (!hasCli(root, platform)) {
+                    val cliDetail = "正在下载并安装 ${platform.cliPackage}（国内镜像加速中）…"
+                    report(AgentInstallPhase.INSTALLING_CLI, cliDetail, 55)
+                    // npmmirror 优先(国内直连快, 免去官方源超时等待), 官方源兜底;
+                    // --no-audit --no-fund 省去安全审计与赞助信息请求;
+                    // 保留默认输出级别让 npm 的下载/安装过程在终端页可见
+                    val cliCommand = buildString {
+                        append("npm install -g ${platform.cliPackage} --registry=$NPM_MIRROR_REGISTRY --no-audit --no-fund ")
+                        append("--fetch-retries=2 --fetch-timeout=60000 2>&1 && echo __OK__ || ")
+                        append("(npm install -g ${platform.cliPackage} --no-audit --no-fund ")
+                        append("--fetch-retries=2 --fetch-timeout=60000 2>&1 && echo __OK__)")
+                    }
+                    logBus.append(platform, "\$ $cliCommand\n")
+                    // npm 无标准进度输出, 用缓慢逼近的估算值补间(封顶 92%), 完成后由真实结果接管
+                    coroutineScope {
+                        val ticker = launch {
+                            var estimate = 56
+                            while (estimate < 92) {
+                                delay(PROGRESS_TICK_MS)
+                                estimate += maxOf(1, ((92 - estimate) * 0.04).toInt())
+                                report(AgentInstallPhase.INSTALLING_CLI, cliDetail, estimate)
+                            }
+                        }
+                        try {
+                            val cliResult = runWithRetry(platform.cliPackage) {
+                                workspaceManager.executeCommand(
+                                    root = root,
+                                    command = cliCommand,
+                                    timeoutMillis = CLI_INSTALL_TIMEOUT_MS,
+                                    onOutput = { chunk -> logBus.append(platform, chunk) },
+                                )
+                            }
+                            cliResult.getOrElse { error("CLI 安装失败：${it.message}") }
+                                .takeIf { it.exitCode == 0 && it.stdout.contains("__OK__") }
+                                ?: error(
+                                    "CLI 安装失败：${platform.cliPackage}（官方源与国内镜像均失败）\n" +
+                                        cliResult.getOrNull()?.combinedTail().orEmpty().ifBlank { "请检查网络后重试" },
+                                )
+                        } finally {
+                            ticker.cancel()
                         }
                     }
-                    try {
-                        runWithRetry(platform.cliPackage) {
-                            workspaceManager.executeCommand(
-                                root = root,
-                                command = cliCommand,
-                                timeoutMillis = INSTALL_TIMEOUT_MS,
-                            )
-                        } ?: error("CLI 安装失败：${platform.cliPackage}（官方源与国内镜像均失败，请检查网络）")
-                    } finally {
-                        ticker.cancel()
-                    }
+                    check(hasCli(root, platform)) { "CLI 安装后校验失败" }
+                    report(AgentInstallPhase.INSTALLING_CLI, cliDetail, 95)
+                } else {
+                    logBus.append(platform, "${platform.cliPackage} 已存在，跳过安装\n")
                 }
-                check(hasCli(root, platform)) { "CLI 安装后校验失败" }
-                report(AgentInstallPhase.INSTALLING_CLI, cliDetail, 95)
+
+                report(AgentInstallPhase.VERIFYING, "正在校验安装结果…", 97)
+                ensureCliInstalled(root, platform)
+
+                readyRoots += cacheKey
+                logBus.append(platform, "安装完成\n")
+                report(AgentInstallPhase.DONE, "安装完成", 100)
+                Log.i(TAG, "environment ready for ${platform.name} in $root")
+                Unit
+            } finally {
+                logBus.finish(platform)
             }
-
-            report(AgentInstallPhase.VERIFYING, "正在校验安装结果…", 97)
-            ensureCliRunnable(root, platform)
-
-            readyRoots += cacheKey
-            report(AgentInstallPhase.DONE, "安装完成", 100)
-            Log.i(TAG, "environment ready for ${platform.name} in $root")
-            Unit
         }
     }.onFailure { error ->
         Log.w(TAG, "install failed for ${platform.name} in $root", error)
-        onProgress(AgentInstallProgress(AgentInstallPhase.FAILED, error.message ?: "安装失败"))
+        onProgress(
+            AgentInstallProgress(
+                AgentInstallPhase.FAILED,
+                error.message?.take(ERROR_DETAIL_MAX_CHARS) ?: "安装失败",
+            ),
+        )
+    }
+
+    /**
+     * 从本地离线包(.tgz, `npm pack` 或官网下载的 npm tarball)导入安装 CLI 到全局环境。
+     * 包内容先写入工作区文件区, 再由容器内 `npm install -g` 完成 bin 链接与依赖处理,
+     * 因此导入后的平台会被 hasCli 正常识别为 READY, 与在线安装行为完全一致。
+     */
+    suspend fun importPackageArchive(
+        root: String,
+        archiveName: String,
+        bytes: ByteArray,
+        onLog: (String) -> Unit = {},
+    ): Result<Unit> = runCatching {
+        withContext(Dispatchers.IO) {
+            require(archiveName.lowercase().endsWith(".tgz") || archiveName.lowercase().endsWith(".tar.gz")) {
+                "仅支持 .tgz / .tar.gz 格式的 npm 离线包"
+            }
+            check(hasNode(root)) { "Node.js 运行环境未安装，请先完成运行时安装再导入" }
+
+            val containerPath = "$IMPORT_DIR_IN_CONTAINER/$archiveName"
+            workspaceManager.writeRootfsBytes(root, IMPORT_ARCHIVE_PATH, bytes)
+
+            val command = "npm install -g \"$containerPath\" --no-audit --no-fund " +
+                "--fetch-retries=2 --fetch-timeout=60000 2>&1 && echo __OK__"
+            onLog("\$ $command\n")
+            val result = runWithRetry("import:$archiveName") {
+                workspaceManager.executeCommand(
+                    root = root,
+                    command = command,
+                    timeoutMillis = CLI_INSTALL_TIMEOUT_MS,
+                    onOutput = { chunk -> onLog(chunk) },
+                )
+            }
+            result.getOrElse { error("导入失败：${it.message}") }
+                .takeIf { it.exitCode == 0 && it.stdout.contains("__OK__") }
+                ?: error("导入失败：npm install 返回异常\n${result.getOrNull()?.combinedTail().orEmpty()}")
+            // 清理临时包文件, 保持文件区整洁
+            runCatching {
+                workspaceManager.executeCommand(
+                    root = root,
+                    command = "rm -f \"$containerPath\"",
+                    timeoutMillis = CHECK_TIMEOUT_MS,
+                )
+            }
+            // 导入完成后失效缓存, 让状态检测重新识别新装的 CLI
+            invalidate(root)
+            onLog("导入完成\n")
+            Unit
+        }
+    }.onFailure { error ->
+        Log.w(TAG, "import failed in $root", error)
+        onLog("导入失败：${error.message}\n")
     }
 
     /**
@@ -215,14 +299,18 @@ class AcpEnvironmentManager(
         )
     }
 
-    private fun ensureCliRunnable(root: String, platform: AgentPlatform) {
-        // --no-install 强制仅使用本地/全局缓存，避免再次触发网络下载
+    /**
+     * 校验 CLI 已正确落入全局 node_modules。纯文件存在性检查:
+     * 此前用 `npx --no-install <pkg> --version` 试运行, 大体积包在 PRoot 内首次
+     * 启动动辄超过校验超时, 造成"安装成功却报 CLI 无法启动"的误判。
+     */
+    private fun ensureCliInstalled(root: String, platform: AgentPlatform) {
         val result = workspaceManager.executeCommand(
             root = root,
-            command = "npx --no-install ${platform.cliPackage} --version >/dev/null 2>&1 && echo __OK__ || echo __NO__",
+            command = "test -d \"/usr/local/lib/node_modules/${platform.cliPackage}\" && echo __OK__ || echo __NO__",
             timeoutMillis = CHECK_TIMEOUT_MS,
         )
-        check(result.stdout.contains("__OK__")) { "CLI 无法启动：${platform.cliPackage}" }
+        check(result.stdout.contains("__OK__")) { "CLI 校验失败：${platform.cliPackage} 未出现在全局 node_modules" }
     }
 
     private fun runCommandOk(root: String, command: String): Boolean = runCatching {
@@ -234,26 +322,26 @@ class AcpEnvironmentManager(
         result.exitCode == 0 && result.stdout.contains("__OK__")
     }.getOrDefault(false)
 
-    private fun runWithRetry(
+    private suspend fun runWithRetry(
         label: String,
         block: () -> me.rerere.workspace.WorkspaceCommandResult,
-    ): me.rerere.workspace.WorkspaceCommandResult? {
+    ): Result<me.rerere.workspace.WorkspaceCommandResult> {
         var lastError: String? = null
         repeat(MAX_ATTEMPTS) { attempt ->
-            val result = runCatching(block).getOrNull()
-            val ok = result?.exitCode == 0 && result.stdout.contains("__OK__")
+            val result = runCatching(block)
+            val ok = result.getOrNull()?.let { it.exitCode == 0 && it.stdout.contains("__OK__") } == true
             if (ok) return result
             lastError = when {
-                result == null -> "命令执行异常"
-                result.timedOut -> "安装超时"
-                else -> result.stderr.ifBlank { result.stdout }.take(200)
+                result.exceptionOrNull() != null -> result.exceptionOrNull()!!.message ?: "命令执行异常"
+                result.getOrNull()!!.timedOut -> "命令超时"
+                else -> result.getOrNull()!!.combinedTail().ifBlank { "未知错误" }
             }
             if (attempt < MAX_ATTEMPTS - 1) {
                 Log.w(TAG, "install $label attempt ${attempt + 1} failed: $lastError, retrying…")
-                kotlinx.coroutines.runBlocking { delay(RETRY_DELAY_MS) }
+                delay(RETRY_DELAY_MS)
             }
         }
-        return null
+        return Result.failure(IllegalStateException(lastError ?: "安装失败"))
     }
 
     /** Forgets cached readiness, e.g. when the workspace rootfs is reinstalled. */
@@ -263,16 +351,26 @@ class AcpEnvironmentManager(
 
     companion object {
         private const val TAG = "AcpEnvironmentManager"
-        private const val MAX_ATTEMPTS = 3
+        private const val MAX_ATTEMPTS = 2
         private const val RETRY_DELAY_MS = 3_000L
         private const val CHECK_TIMEOUT_MS = 60_000L
         private const val INSTALL_TIMEOUT_MS = 10 * 60 * 1000L
+
+        /** CLI 包体积普遍较大(claude-code 等 100MB 级), 单次安装给足 20 分钟 */
+        private const val CLI_INSTALL_TIMEOUT_MS = 20 * 60 * 1000L
+
+        /** 失败详情展示的最大字符数 */
+        private const val ERROR_DETAIL_MAX_CHARS = 300
 
         /** CLI 安装阶段估算进度的推进间隔 */
         private const val PROGRESS_TICK_MS = 500L
 
         /** npmmirror（原淘宝）npm 镜像，官方 registry 不可达时的降级源 */
         private const val NPM_MIRROR_REGISTRY = "https://registry.npmmirror.com"
+
+        /** 离线导入包在工作区文件区的暂存路径(容器内挂载为 /workspace) */
+        private const val IMPORT_ARCHIVE_PATH = "/.agent-import/package.tgz"
+        private const val IMPORT_DIR_IN_CONTAINER = "/workspace/.agent-import"
 
         /**
          * Node.js 安装脚本(提速版):
@@ -331,3 +429,14 @@ class AcpEnvironmentManager(
         """.trimIndent()
     }
 }
+
+/** 取输出尾部用于错误详情: stdout/stderr 合并后裁剪到 [maxChars], 过滤 __OK__ 标记 */
+private fun me.rerere.workspace.WorkspaceCommandResult.combinedTail(maxChars: Int = 300): String =
+    buildList {
+        addAll(stdout.lineSequence())
+        addAll(stderr.lineSequence())
+    }
+        .filter { it.isNotBlank() && !it.contains("__OK__") }
+        .takeLast(8)
+        .joinToString("\n")
+        .take(maxChars)
