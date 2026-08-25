@@ -153,14 +153,6 @@ class AcpEnvironmentManager(
                 if (!hasCli(root, platform)) {
                     val cliDetail = "正在下载并安装 ${platform.cliPackage}（国内镜像加速中）…"
                     report(AgentInstallPhase.INSTALLING_CLI, cliDetail, 55)
-                    // 修复 PRoot 环境下 npm 缓存目录缺失导致的 ENOENT rename 错误
-                    runCatching {
-                        workspaceManager.executeCommand(
-                            root = root,
-                            command = "mkdir -p /root/.npm/_cacache/content-v2/sha512 /root/.npm/_cacache/tmp && npm cache clean --force 2>/dev/null; true",
-                            timeoutMillis = CHECK_TIMEOUT_MS,
-                        )
-                    }
                     // npmmirror 优先(国内直连快, 免去官方源超时等待), 官方源兜底;
                     // --no-audit --no-fund 省去安全审计与赞助信息请求;
                     // 保留默认输出级别让 npm 的下载/安装过程在终端页可见
@@ -416,8 +408,6 @@ class AcpEnvironmentManager(
                   ln -sf /opt/nodejs/bin/node /usr/local/bin/node
                   ln -sf /opt/nodejs/bin/npm /usr/local/bin/npm
                   ln -sf /opt/nodejs/bin/npx /usr/local/bin/npx
-                  # 预创建 npm 缓存目录结构, 防止后续安装时 PRoot 下 rename ENOENT
-                  mkdir -p /root/.npm/_cacache/content-v2/sha512 /root/.npm/_cacache/tmp
                   echo __P__45
                   node --version >/dev/null 2>&1 && { echo __OK__; exit 0; }
                 fi
