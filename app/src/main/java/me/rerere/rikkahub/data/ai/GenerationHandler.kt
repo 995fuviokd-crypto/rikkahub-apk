@@ -71,7 +71,11 @@ private const val TOOL_OUTPUT_PREVIEW_CHARS = 4 * 1024
 
 // 流式 SSE delta 合并发射的时间窗口（毫秒）：高频 token 按此节流，
 // 只把最新状态发射给 UI，减少每 token 一次的全量 transform 与重组
-private const val STREAM_EMIT_INTERVAL_MS = 32L
+// 流式 UI 更新节流间隔。每次更新会触发 Conversation 复制 → StateFlow 发射 →
+// Compose 全列表重组扫描 → 尾部消息全文重新排版，成本随对话长度线性增长。
+// 100ms (10fps) 对打字机效果依然流畅，同时把长对话下的 UI 开销降到原来的约 1/3，
+// 显著改善生成卡顿与接收延迟。32ms 的旧值在长消息场景下单次布局即可超过 16ms 帧预算。
+private const val STREAM_EMIT_INTERVAL_MS = 100L
 
 // 自主执行引导：开启后注入系统提示，要求 AI 收到任务后连续调用工具直到完成，
 // 不中途输出进度汇报后停止、不主动用 ask_user 打断任务流程（对标全自主执行 agent）

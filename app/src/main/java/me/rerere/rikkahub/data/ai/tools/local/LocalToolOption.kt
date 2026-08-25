@@ -60,4 +60,8 @@ sealed class LocalToolOption {
     @Serializable
     @SerialName("system_control")
     data object SystemControl : LocalToolOption()
+
+    @Serializable
+    @SerialName("image_generation")
+    data object ImageGeneration : LocalToolOption()
 }

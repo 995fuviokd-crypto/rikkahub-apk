@@ -57,6 +57,8 @@ object TokenEstimate {
     }
 
     fun estimateConversationTokens(conversation: Conversation): Int {
-        return conversation.currentMessages.sumOf { estimateMessageTokens(it) }
+        // 与实际发送上下文一致：历史摘要 + 未压缩的活跃消息（已压缩消息不再计入）
+        val summary = conversation.compression?.summary.orEmpty()
+        return estimateTokens(summary) + conversation.activeMessages.sumOf { estimateMessageTokens(it) }
     }
 }

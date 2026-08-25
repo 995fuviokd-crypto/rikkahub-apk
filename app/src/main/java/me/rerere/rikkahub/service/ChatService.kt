@@ -34,9 +34,11 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import kotlin.time.Clock
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
@@ -57,11 +59,13 @@ import me.rerere.common.android.Logging
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.GenerationChunk
+import me.rerere.rikkahub.data.plugin.PluginHook
 import me.rerere.rikkahub.service.ConversationCompressor.markedAsCompressionSummary
 import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.DeepSeekAnchor
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.createConversationTools
+import me.rerere.rikkahub.data.ai.tools.createImageGenerationTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
 import me.rerere.rikkahub.data.ai.tools.createSkillTools
@@ -91,6 +95,7 @@ import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.ConversationCompression
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.MessageNode
@@ -98,6 +103,7 @@ import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.data.model.toMessageNode
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
+import me.rerere.rikkahub.data.repository.GenMediaRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.WorkflowRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
@@ -252,6 +258,7 @@ class ChatService(
     private val workflowRepository: WorkflowRepository,
     private val workflowRunner: WorkflowRunner,
     private val pluginManager: me.rerere.rikkahub.data.plugin.PluginManager,
+    private val genMediaRepository: GenMediaRepository,
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
@@ -271,6 +278,10 @@ class ChatService(
     // 错误状态
     private val _errors = MutableStateFlow<List<ChatError>>(emptyList())
     val errors: StateFlow<List<ChatError>> = _errors.asStateFlow()
+
+    // 正在执行自动压缩的会话 id 集合：UI 据此在消息列表尾部显示"正在压缩历史对话"指示
+    private val _compressingConversations = MutableStateFlow<Set<Uuid>>(emptySet())
+    val compressingConversations: StateFlow<Set<Uuid>> = _compressingConversations.asStateFlow()
 
     fun addError(
         error: Throwable,
@@ -446,7 +457,11 @@ class ChatService(
                 val settings = settingsStore.settingsFlow.first()
                 val assistant = settings.getAssistantById(currentConversation.assistantId)
                     ?: settings.getCurrentAssistant()
-                val processedContent = preprocessUserInputParts(content, assistant)
+                val processedContent = applyMessageBeforeSendHook(
+                    content = preprocessUserInputParts(content, assistant),
+                    conversationId = conversationId,
+                    enabledPlugins = settings.enabledPlugins,
+                )
 
                 // 添加消息到列表
                 val newConversation = currentConversation.copy(
@@ -487,6 +502,148 @@ class ChatService(
                 else -> part
             }
         }
+    }
+
+    /**
+     * title:afterGenerate 动态 Hook：标题生成后交由插件改写。
+     * payload { conversationId, text }，返回 { text }；无插件声明或未返回时保持原标题。
+     */
+    private suspend fun applyTitleHook(
+        title: String,
+        conversationId: Uuid,
+        enabledPlugins: Set<String>,
+    ): String {
+        if (enabledPlugins.isEmpty()) return title
+        val hasHandler = enabledPlugins.any { id ->
+            pluginManager.loadInfo(id)?.hooks?.any { it.name == PluginHook.TITLE_AFTER_GENERATE } == true
+        }
+        if (!hasHandler) return title
+
+        val result = runCatching {
+            pluginManager.dispatchHook(
+                enabledPlugins = enabledPlugins,
+                hook = PluginHook.TITLE_AFTER_GENERATE,
+                payload = buildJsonObject {
+                    put("conversationId", conversationId.toString())
+                    put("text", title)
+                },
+            )
+        }.getOrElse { e ->
+            Log.w(TAG, "applyTitleHook dispatch failed", e)
+            return title
+        }
+        return result["text"]?.jsonPrimitive?.contentOrNull ?: title
+    }
+
+    /**
+     * request:beforeSend 动态 Hook：把插件注入的系统提示合并后交由插件改写。
+     * 无插件声明该 hook 时原样返回；有改写时以单个提示的形式替换原列表。
+     */
+    private suspend fun applyRequestBeforeSendHook(
+        prompts: List<String>,
+        conversationId: Uuid,
+        enabledPlugins: Set<String>,
+    ): List<String> {
+        if (prompts.isEmpty() || enabledPlugins.isEmpty()) return prompts
+        val hasHandler = enabledPlugins.any { id ->
+            pluginManager.loadInfo(id)?.hooks?.any { it.name == PluginHook.REQUEST_BEFORE_SEND } == true
+        }
+        if (!hasHandler) return prompts
+
+        val original = prompts.joinToString(separator = "\n\n")
+        val result = runCatching {
+            pluginManager.dispatchHook(
+                enabledPlugins = enabledPlugins,
+                hook = PluginHook.REQUEST_BEFORE_SEND,
+                payload = buildJsonObject {
+                    put("conversationId", conversationId.toString())
+                    put("systemPrompt", original)
+                },
+            )
+        }.getOrElse { e ->
+            Log.w(TAG, "applyRequestBeforeSendHook dispatch failed", e)
+            return prompts
+        }
+        val newText = result["systemPrompt"]?.jsonPrimitive?.contentOrNull ?: return prompts
+        if (newText == original || newText.isBlank()) return prompts
+        return listOf(newText)
+    }
+
+    /**
+     * message:beforeSend 动态 Hook：用户消息入列前交由插件改写首个 Text part。
+     * 无插件声明该 hook、hook 未返回 text 或返回原文本时保持不变。
+     */
+    private suspend fun applyMessageBeforeSendHook(
+        content: List<UIMessagePart>,
+        conversationId: Uuid,
+        enabledPlugins: Set<String>,
+    ): List<UIMessagePart> {
+        val firstTextIndex = content.indexOfFirst { it is UIMessagePart.Text }
+        if (firstTextIndex < 0 || enabledPlugins.isEmpty()) return content
+        val original = (content[firstTextIndex] as UIMessagePart.Text).text
+        val result = runCatching {
+            pluginManager.dispatchHook(
+                enabledPlugins = enabledPlugins,
+                hook = PluginHook.MESSAGE_BEFORE_SEND,
+                payload = buildJsonObject {
+                    put("conversationId", conversationId.toString())
+                    put("text", original)
+                },
+            )
+        }.getOrElse { e ->
+            Log.w(TAG, "applyMessageBeforeSendHook dispatch failed", e)
+            return content
+        }
+        val newText = result["text"]?.jsonPrimitive?.contentOrNull ?: return content
+        if (newText == original) return content
+        return content.mapIndexed { index, part ->
+            if (index == firstTextIndex) (part as UIMessagePart.Text).copy(text = newText) else part
+        }
+    }
+
+    /**
+     * message:afterGenerate 动态 Hook：生成正常结束后改写最后一条 assistant 消息的首个 Text part。
+     */
+    private suspend fun applyMessageAfterGenerateHook(
+        conversationId: Uuid,
+        enabledPlugins: Set<String>,
+    ) {
+        if (enabledPlugins.isEmpty()) return
+        val conversation = getConversationFlow(conversationId).value
+        val lastNode = conversation.messageNodes.lastOrNull() ?: return
+        val lastMessage = lastNode.currentMessage
+        if (lastMessage.role != MessageRole.ASSISTANT) return
+        val textIndex = lastMessage.parts.indexOfFirst { it is UIMessagePart.Text }
+        if (textIndex < 0) return
+        val original = (lastMessage.parts[textIndex] as UIMessagePart.Text).text
+
+        val result = runCatching {
+            pluginManager.dispatchHook(
+                enabledPlugins = enabledPlugins,
+                hook = PluginHook.MESSAGE_AFTER_GENERATE,
+                payload = buildJsonObject {
+                    put("conversationId", conversationId.toString())
+                    put("text", original)
+                },
+            )
+        }.getOrElse { e ->
+            Log.w(TAG, "applyMessageAfterGenerateHook dispatch failed", e)
+            return
+        }
+        val newText = result["text"]?.jsonPrimitive?.contentOrNull ?: return
+        if (newText == original) return
+
+        val newParts = lastMessage.parts.toMutableList()
+        newParts[textIndex] = (newParts[textIndex] as UIMessagePart.Text).copy(text = newText)
+        val newNode = lastNode.copy(
+            messages = lastNode.messages.map {
+                if (it.id == lastMessage.id) it.copy(parts = newParts) else it
+            },
+        )
+        val newNodes = conversation.messageNodes.toMutableList().also {
+            it[conversation.messageNodes.lastIndex] = newNode
+        }
+        saveConversation(conversationId, conversation.copy(messageNodes = newNodes))
     }
 
     // ---- 重新生成消息 ----
@@ -660,12 +817,21 @@ class ChatService(
                 settings = settings,
                 model = model,
                 processingStatus = session.processingStatus,
-                messages = conversation.currentMessages.let {
-                    if (messageRange != null) {
-                        it.subList(messageRange.start, messageRange.endInclusive + 1)
-                    } else {
-                        it
+                messages = buildList {
+                    // 压缩摘要以临时消息注入请求头部：仅存在于本次请求，
+                    // 不写入存储、不显示为用户气泡（静默压缩）
+                    val compression = conversation.compression
+                    if (compression != null && compression.summary.isNotBlank() && messageRange == null) {
+                        add(UIMessage.user(compression.summary))
                     }
+                    val activeMessages = conversation.activeMessages.let {
+                        if (messageRange != null) {
+                            conversation.currentMessages.subList(messageRange.start, messageRange.endInclusive + 1)
+                        } else {
+                            it
+                        }
+                    }
+                    addAll(activeMessages)
                 },
                 assistant = assistant,
                 conversationSystemPrompt = conversation.customSystemPrompt,
@@ -675,7 +841,11 @@ class ChatService(
                 workspaceRoot = workspaceIds.firstOrNull()?.toString(),
                 conversationId = conversationId,
                 sideEffectRecorder = sideEffectRecorder,
-                extraSystemPrompts = pluginManager.enabledSystemPrompts(settings.enabledPlugins),
+                extraSystemPrompts = applyRequestBeforeSendHook(
+                    prompts = pluginManager.enabledSystemPrompts(settings.enabledPlugins),
+                    conversationId = conversationId,
+                    enabledPlugins = settings.enabledPlugins,
+                ),
                 memories = if (!assistant.enableMemory) {
                     emptyList()
                 } else {
@@ -706,6 +876,14 @@ class ChatService(
                         addAll(createSearchTools(settings))
                     }
                     addAll(localTools.getTools(assistant.localTools))
+                    addAll(
+                        createImageGenerationTools(
+                            settings = settings,
+                            providerManager = providerManager,
+                            filesManager = filesManager,
+                            genMediaRepository = genMediaRepository,
+                        )
+                    )
                     if (assistant.enableRecentChatsReference) {
                         addAll(createConversationTools(conversationRepo, assistant.id))
                     }
@@ -736,7 +914,7 @@ class ChatService(
                         )
                     }
                 },
-            ).onCompletion {
+            ).onCompletion { cause ->
                 // 可能被取消了，或者意外结束，兜底更新
                 val updatedConversation = getConversationFlow(conversationId).value.copy(
                     messageNodes = getConversationFlow(conversationId).value.messageNodes.map { node ->
@@ -745,6 +923,11 @@ class ChatService(
                     updateAt = Instant.now()
                 )
                 updateConversation(conversationId, updatedConversation)
+
+                // 生成正常结束时执行 message:afterGenerate 动态 Hook（取消/异常时不改写）
+                if (cause == null) {
+                    applyMessageAfterGenerateHook(conversationId, settings.enabledPlugins)
+                }
 
                 // 生成结束：取消 Live Update 通知，后台时发送完成通知
                 appEventBus.emit(
@@ -1064,9 +1247,11 @@ class ChatService(
 
             // 生成完，conversation可能不是最新了，因此需要重新获取
             conversationRepo.getConversationById(conversation.id)?.let {
+                val generated = result.message.toText().trim()
+                val finalTitle = applyTitleHook(generated, conversationId, settings.enabledPlugins)
                 saveConversation(
                     conversationId,
-                    it.copy(title = result.message.toText().trim())
+                    it.copy(title = finalTitle)
                 )
             }
         }.onFailure {
@@ -1186,23 +1371,30 @@ class ChatService(
 
         val providerHandler = providerManager.getProviderByType(provider)
 
-        val allMessages = conversation.currentMessages
+        // 只在未压缩的活跃消息范围内切分：历史消息本体保留在 messageNodes 中，
+        // 已压缩内容由滚动摘要代表，避免摘要套摘要造成循环压缩。
+        val allActiveMessages = conversation.activeMessages
 
         // Split messages into those to compress and those to keep
         val (messagesToCompress, messagesToKeep) = try {
-            ConversationCompressor.splitRecent(allMessages, keepRecentMessages)
+            ConversationCompressor.splitRecent(allActiveMessages, keepRecentMessages)
         } catch (e: IllegalArgumentException) {
             throw IllegalStateException(context.getString(R.string.chat_page_compress_not_enough_messages), e)
         }
 
-        suspend fun compressMessages(messages: List<UIMessage>): String {
-            val contentToCompress = messages.joinToString("\n\n") { ConversationCompressor.compressionText(it, maxLength = 2000) }
+        suspend fun compressMessages(content: String, instructionHint: String): String {
             val prompt = settings.compressPrompt.applyPlaceholders(
-                "content" to contentToCompress,
+                "content" to content,
                 "target_tokens" to targetTokens.toString(),
-                "additional_context" to if (additionalPrompt.isNotBlank()) {
-                    "Additional instructions from user: $additionalPrompt"
-                } else "",
+                "additional_context" to buildString {
+                    if (additionalPrompt.isNotBlank()) {
+                        append("Additional instructions from user: $additionalPrompt")
+                    }
+                    if (instructionHint.isNotBlank()) {
+                        if (isNotEmpty()) append("\n")
+                        append(instructionHint)
+                    }
+                },
                 "locale" to Locale.getDefault().displayName
             )
 
@@ -1217,23 +1409,45 @@ class ChatService(
                 ?: throw IllegalStateException("Failed to generate compressed summary")
         }
 
+        val previousSummary = conversation.compression?.summary.orEmpty()
+
         val compressedSummaries = coroutineScope {
-            // 按 token 预算分块：避免 256 条长消息拼出几十万 token 的 prompt
+            // 按 token 预算分块：避免长消息拼出几十万 token 的 prompt
             // 导致压缩请求超出模型上下文窗口而失败
             ConversationCompressor.splitChunksByTokens(messagesToCompress)
-                .map { chunk -> async { compressMessages(chunk) } }
+                .map { chunk ->
+                    val content = chunk.joinToString("\n\n") {
+                        ConversationCompressor.compressionText(it, maxLength = 2000)
+                    }
+                    async { compressMessages(content, "") }
+                }
                 .awaitAll()
         }
 
-        // Create new conversation with compressed history as multiple user messages + kept messages
-        val newMessageNodes = buildList {
-            compressedSummaries.forEach { summary ->
-                add(UIMessage.user(summary.markedAsCompressionSummary()).toMessageNode())
-            }
-            addAll(messagesToKeep.map { it.toMessageNode() })
+        // 滚动式摘要：已有前情摘要时与新块摘要融合为一份连贯摘要，保证上下文单点连续；
+        // 融合失败则退化为直接拼接，仍保证功能可用。
+        val mergedSummary = if (previousSummary.isNotBlank()) {
+            runCatching {
+                compressMessages(
+                    content = listOf(previousSummary, *compressedSummaries.toTypedArray())
+                        .joinToString("\n\n"),
+                    instructionHint = "以下是一份已有的前情摘要与本轮新增内容的分段摘要，请将其融合为一份连贯、去重的整体摘要",
+                )
+            }.getOrNull() ?: (listOf(previousSummary, *compressedSummaries.toTypedArray()).joinToString("\n\n"))
+        } else {
+            compressedSummaries.joinToString("\n\n")
         }
+
+        // 历史消息全部保留：仅更新压缩状态（摘要 + 已压缩消息 id 集合），
+        // UI 据此折叠已压缩节点并在发送时以摘要代替原文进入上下文。
+        val newCompression = ConversationCompression(
+            summary = mergedSummary.markedAsCompressionSummary(),
+            compressedMessageIds = conversation.compression?.compressedMessageIds.orEmpty() +
+                messagesToCompress.map { it.id }.toSet(),
+            compressedCount = (conversation.compression?.compressedCount ?: 0) + messagesToCompress.size,
+        )
         val newConversation = conversation.copy(
-            messageNodes = newMessageNodes,
+            compression = newCompression,
             chatSuggestions = emptyList(),
         )
 
@@ -1262,8 +1476,10 @@ class ChatService(
         conversation: Conversation,
         settings: Settings
     ): AutoCompressResult {
+        // UI 指示：进入"正在压缩历史对话"状态（静默执行，不产生任何用户消息）
+        _compressingConversations.value = _compressingConversations.value + conversationId
         return try {
-            val allMessages = conversation.currentMessages
+            val allMessages = conversation.activeMessages
             if (allMessages.size <= 1) {
                 return AutoCompressResult(
                     compressed = false,
@@ -1322,6 +1538,8 @@ class ChatService(
                 tokensAfter = TokenEstimate.estimateConversationTokens(conversation),
                 keepRecentAtFloor = true,
             )
+        } finally {
+            _compressingConversations.value = _compressingConversations.value - conversationId
         }
     }
 

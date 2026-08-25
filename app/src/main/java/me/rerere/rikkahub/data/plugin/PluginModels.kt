@@ -16,6 +16,12 @@ data class PluginInfo(
     val systemPrompt: String = "",
     /** 聊天输入栏快捷操作 */
     val actions: List<PluginAction> = emptyList(),
+    /**
+     * 动态 Hook 声明。脚本须导出 rikkaHook(ctx) 函数，
+     * 宿主在对应时机链式调用并采用返回值作为新的上下文。
+     * 支持的 name 见 [PluginHook.KNOWN] 白名单
+     */
+    val hooks: List<PluginHook> = emptyList(),
     /** 资源类型：plugin/skill/mcp/json/other */
     val type: String = "plugin",
     /** 自定义标签（用于市场分类与搜索） */
@@ -29,6 +35,41 @@ data class PluginAction(
     val label: String,
     val prompt: String,
 )
+
+/**
+ * 插件动态 Hook 声明。脚本入口（manifest main 或首个 js 文件）须导出：
+ *
+ *   function rikkaHook(ctx) { ctx.text = ctx.text.trim(); return ctx; }
+ *   module.exports = { rikkaHook };
+ *
+ * 宿主在对应时机以 JSON 上下文调用，采用返回值（JSON 对象）作为修改后的上下文；
+ * 返回非对象或抛异常时保持原上下文继续，单个插件失败不影响 Hook 链。
+ */
+@Serializable
+data class PluginHook(
+    /** 钩子名称：见 [PluginHook.KNOWN] 白名单（message/request/title 系列） */
+    val name: String,
+    val description: String = "",
+    /** 单次执行超时（毫秒），超时视为失败并跳过 */
+    val timeoutMs: Long = 3000L,
+) {
+    companion object {
+        const val MESSAGE_BEFORE_SEND = "message:beforeSend"
+        const val MESSAGE_AFTER_GENERATE = "message:afterGenerate"
+        const val REQUEST_BEFORE_SEND = "request:beforeSend"
+        const val TITLE_AFTER_GENERATE = "title:afterGenerate"
+        const val MESSAGE_BEFORE_RENDER = "message:beforeRender"
+
+        /** 宿主支持的钩子白名单 */
+        val KNOWN = setOf(
+            MESSAGE_BEFORE_SEND,
+            MESSAGE_AFTER_GENERATE,
+            REQUEST_BEFORE_SEND,
+            TITLE_AFTER_GENERATE,
+            MESSAGE_BEFORE_RENDER,
+        )
+    }
+}
 
 /**
  * 插件扩展能力声明。消费端按 scope 渲染动态入口，无需修改宿主代码。

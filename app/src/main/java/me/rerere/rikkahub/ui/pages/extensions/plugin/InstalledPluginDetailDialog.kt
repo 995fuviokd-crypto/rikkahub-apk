@@ -36,6 +36,7 @@ fun InstalledPluginDetailDialog(
     val hasCapability = info != null && (
         info.systemPrompt.isNotBlank() ||
             info.actions.isNotEmpty() ||
+            info.hooks.isNotEmpty() ||
             info.extensionPoints.homeActions.isNotEmpty() ||
             info.extensionPoints.settingsActions.isNotEmpty() ||
             info.extensionPoints.sidebarActions.isNotEmpty()
@@ -91,6 +92,20 @@ fun InstalledPluginDetailDialog(
                                     label = { Text(tag, style = MaterialTheme.typography.labelSmall) },
                                 )
                             }
+                        }
+                    }
+                    if (i.hooks.isNotEmpty()) {
+                        Text("动态 Hook", style = MaterialTheme.typography.labelLarge)
+                        i.hooks.forEach { hook ->
+                            Text(
+                                text = buildString {
+                                    append("• ")
+                                    append(hook.name)
+                                    if (hook.description.isNotBlank()) append("：${hook.description}")
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                 }

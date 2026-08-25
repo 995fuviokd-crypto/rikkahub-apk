@@ -112,6 +112,7 @@ val appModule = module {
             workflowRepository = get(),
             workflowRunner = get(),
             pluginManager = get(),
+            genMediaRepository = get(),
         )
     }
 

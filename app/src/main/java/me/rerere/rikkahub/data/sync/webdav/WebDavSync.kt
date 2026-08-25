@@ -12,6 +12,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.WebDavConfig
 import me.rerere.rikkahub.data.datastore.migration.SettingsJsonMigrator
+import me.rerere.rikkahub.data.datastore.migration.SettingsJsonSanitizer
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.DatabaseDowngrade
 import me.rerere.rikkahub.utils.fileSizeToString
@@ -221,7 +222,8 @@ class WebDavSync(
                             Log.i(TAG, "restoreFromBackupFile: Restoring settings")
                             try {
                                 val migratedJson = SettingsJsonMigrator.migrate(settingsJson)
-                                val settings = json.decodeFromString<Settings>(migratedJson)
+                                val sanitizedJson = SettingsJsonSanitizer.sanitize(migratedJson)
+                                val settings = json.decodeFromString<Settings>(sanitizedJson)
                                 settingsStore.update(settings)
                                 Log.i(TAG, "restoreFromBackupFile: Settings restored successfully")
                             } catch (e: Exception) {

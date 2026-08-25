@@ -294,6 +294,10 @@ class DshPluginAdapterTest {
 
         assertTrue(page.contains("__ModuleLoader__"))
         assertTrue(page.contains("""<script src="./plugin.client.js">"""))
+        // React 运行时本地优先 + CDN 兜底
+        assertTrue(page.contains("""<script src="./react.production.min.js""""))
+        assertTrue(page.contains("""<script src="./react-dom.production.min.js""""))
+        assertTrue(page.contains("cdn.jsdelivr.net/npm/react"))
         assertTrue(page.contains("docs-fallback"))
         assertTrue(page.contains("<p>doc body</p>"))
         // 面板壳与状态条

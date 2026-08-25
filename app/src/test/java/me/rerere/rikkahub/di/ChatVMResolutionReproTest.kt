@@ -5,6 +5,7 @@ import me.rerere.rikkahub.data.ai.agent.AcpRuntime
 import me.rerere.rikkahub.service.ChatService
 import org.junit.After
 import org.junit.Before
+import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.koin.android.ext.koin.androidContext
@@ -18,6 +19,13 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
+/**
+ * DI 全图解析冒烟测试。JVM 单测环境缺少 libsqlite3x native 库，
+ * 解析真实 ChatService/ChatVM 会在 AppScope 上启动打开真 Room 的后台协程，
+ * 导致 SQLiteDatabase 静态初始化失败并以未捕获异常污染同 worker 后续测试类（偶发），
+ * 故整体禁用；DI 回归由 KoinMechanismCheckTest（纯 Fake 模块）覆盖。
+ */
+@Ignore("JVM 环境无 sqlite3x native 库，真 Room 协程会污染后续测试")
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class ChatVMResolutionReproTest {

@@ -43,7 +43,7 @@ import java.util.concurrent.TimeUnit
  *  2. 提供 CommonJS 加载器、ToolPkg 注册 API 空实现与全局 complete()（脚本显式完成约定）。
  *  3. 调用导出的工具函数并返回 JSON 结果。
  */
-class ScriptRuntime(
+open class ScriptRuntime(
     private val context: Context,
     private val chatBridge: ScriptChatBridge? = null,
     private val workflowRepository: WorkflowRepository? = null,
@@ -265,6 +265,32 @@ function __scriptLoadEntry(entry) {
     }
 })()
 """
+
+        // 动态 Hook 调用帧：调用入口导出的 rikkaHook(ctx)，返回修改后的上下文。
+        // 未导出 / 抛异常时返回 ok:false，由宿主决定跳过该插件继续 Hook 链
+        private const val HOOK_INVOKE_FRAME = """
+(function () {
+    var mod = __scriptLoadEntry({ENTRY});
+    var fn = null;
+    if (mod && typeof mod.rikkaHook === 'function') fn = mod.rikkaHook;
+    else if (typeof globalThis.rikkaHook === 'function') fn = globalThis.rikkaHook;
+    if (!fn) {
+        return JSON.stringify({ ok: false, error: 'rikkaHook not exported (use module.exports = { rikkaHook })' });
+    }
+    try {
+        var ctx = {PAYLOAD};
+        var result = fn.call(mod, ctx);
+        if (result === undefined || result === null) result = ctx;
+        try {
+            return JSON.stringify({ ok: true, data: result });
+        } catch (e) {
+            return JSON.stringify({ ok: true, data: String(result) });
+        }
+    } catch (e) {
+        return JSON.stringify({ ok: false, error: (e && e.message) ? e.message : String(e) });
+    }
+})()
+"""
     }
 
     data class ToolResult(val ok: Boolean, val message: String, val data: JsonElement?)
@@ -281,14 +307,56 @@ function __scriptLoadEntry(entry) {
     /** 执行插件目录下的 脚本工具，返回 JSON 结果 */
     fun runTool(pluginDir: File, pluginId: String, toolName: String, argsJson: String): ToolResult {
         val scriptDir = scriptDir(pluginDir)
-        val files = scriptDir.walkTopDown()
-            .filter { it.isFile && it.extension == "js" }
-            .sortedBy { it.relativeTo(scriptDir).path }
-            .toList()
+        val files = listScriptFiles(scriptDir)
         if (files.isEmpty()) return ToolResult(false, "插件缺少 脚本（$SCRIPT_DIR/）", null)
         val entry = resolveEntry(scriptDir, files)
         if (entry == null) return ToolResult(false, "无法定位 脚本入口", null)
 
+        val frame = INVOKE_FRAME
+            .replace("{ENTRY}", jsonEscaped(entry))
+            .replace("{TOOL}", jsonEscaped(toolName))
+            .replace("{ARGS}", argsJson.ifBlank { "{}" })
+        return evaluateEntry(pluginDir, pluginId, scriptDir, files, entry, frame, logTag = "runTool")
+    }
+
+    /**
+     * 执行插件动态 Hook：以 payload JSON 为上下文调用入口导出的 rikkaHook(ctx) 函数。
+     * 插件侧约定（CommonJS）：module.exports = { rikkaHook }，或定义全局 rikkaHook；
+     * 返回值作为修改后的上下文（undefined/null 时保持原 ctx 不变）。
+     * 与 [runTool] 共享同一套 shim / 沙箱 / 加载链，插件脚本内可用全部 Tools API。
+     */
+    open fun runHook(pluginDir: File, pluginId: String, hookName: String, payloadJson: String): ToolResult {
+        val scriptDir = scriptDir(pluginDir)
+        val files = listScriptFiles(scriptDir)
+        if (files.isEmpty()) return ToolResult(false, "插件缺少 脚本（$SCRIPT_DIR/）", null)
+        val entry = resolveEntry(scriptDir, files)
+        if (entry == null) return ToolResult(false, "无法定位 脚本入口", null)
+
+        val frame = HOOK_INVOKE_FRAME
+            .replace("{ENTRY}", jsonEscaped(entry))
+            .replace("{PAYLOAD}", payloadJson.ifBlank { "{}" })
+        return evaluateEntry(
+            pluginDir, pluginId, scriptDir, files, entry, frame,
+            logTag = "runHook:$hookName",
+        )
+    }
+
+    private fun listScriptFiles(scriptDir: File): List<File> {
+        return scriptDir.walkTopDown()
+            .filter { it.isFile && it.extension == "js" }
+            .sortedBy { it.relativeTo(scriptDir).path }
+            .toList()
+    }
+
+    private fun evaluateEntry(
+        pluginDir: File,
+        pluginId: String,
+        scriptDir: File,
+        files: List<File>,
+        entry: String,
+        invokeFrame: String,
+        logTag: String,
+    ): ToolResult {
         val contextQ = QuickJSContext.create()
         return try {
             contextQ.setMemoryLimit(64 * 1024 * 1024)
@@ -317,17 +385,12 @@ function __scriptLoadEntry(entry) {
                 append("};\n")
                 append(LOADER)
                 append("\n")
-                append(
-                    INVOKE_FRAME
-                        .replace("{ENTRY}", jsonEscaped(entry))
-                        .replace("{TOOL}", jsonEscaped(toolName))
-                        .replace("{ARGS}", argsJson.ifBlank { "{}" })
-                )
+                append(invokeFrame)
             }
             val raw = contextQ.evaluate(script)?.toString()
             parseResult(raw)
         } catch (e: Throwable) {
-            Log.w(TAG, "runTool failed: $pluginId/$toolName", e)
+            Log.w(TAG, "$logTag failed: $pluginId", e)
             ToolResult(false, e.message ?: "脚本执行异常", null)
         } finally {
             runCatching { contextQ.destroy() }

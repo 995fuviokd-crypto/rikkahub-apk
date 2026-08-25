@@ -28,7 +28,10 @@ class PluginManagerInstallTest {
     @Before
     fun setUp() {
         val context = RuntimeEnvironment.getApplication()
-        manager = PluginManager(context)
+        manager = PluginManager(
+            context,
+            me.rerere.rikkahub.data.script.ScriptRuntime(context),
+        )
         pluginsDir = manager.getPluginsDir()
     }
 

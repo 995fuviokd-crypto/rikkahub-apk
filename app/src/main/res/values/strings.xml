@@ -1504,4 +1504,3 @@
   <string name="setting_provider_page_proxy_subtitle">Leave disabled to fall back to the global proxy</string>
   <string name="backup_page_import_overwrite_confirm">Importing a backup will overwrite app data. Continue?</string>
 </resources>
-

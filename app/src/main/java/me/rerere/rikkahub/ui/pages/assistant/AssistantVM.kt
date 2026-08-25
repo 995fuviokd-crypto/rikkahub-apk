@@ -12,6 +12,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Avatar
+import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
 
@@ -36,6 +37,28 @@ class AssistantVM(
             settingsStore.update(
                 settings.copy(
                     assistants = settings.assistants.plus(assistant)
+                )
+            )
+        }
+    }
+
+    /**
+     * 角色卡导入：助手与世界书在同一次 settings 更新中落库，
+     * 避免两次异步 update 基于过期快照互相覆盖。
+     */
+    fun importCharacterCard(assistant: Assistant, lorebook: Lorebook?) {
+        viewModelScope.launch {
+            val current = settings.value
+            var newAssistant = assistant
+            var newLorebooks = current.lorebooks
+            if (lorebook != null) {
+                newAssistant = assistant.copy(lorebookIds = setOf(lorebook.id))
+                newLorebooks = current.lorebooks + lorebook
+            }
+            settingsStore.update(
+                current.copy(
+                    assistants = current.assistants.plus(newAssistant),
+                    lorebooks = newLorebooks,
                 )
             )
         }

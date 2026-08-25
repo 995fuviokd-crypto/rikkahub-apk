@@ -71,7 +71,7 @@ val dataSourceModule = module {
     }
 
     single {
-        me.rerere.rikkahub.data.plugin.DshPluginAdapter(httpClient = get())
+        me.rerere.rikkahub.data.plugin.DshPluginAdapter(httpClient = get(), context = get())
     }
 
     single {

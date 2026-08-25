@@ -34,9 +34,21 @@ data class Conversation(
     val workspaceCwd: String? = null,
     // 所属文件夹（助手内分组），null 表示未归入任何文件夹
     val folderId: Uuid? = null,
+    // 历史压缩状态：记录滚动摘要与已压缩消息 id；历史消息本体保留在 messageNodes 中不删除
+    val compression: ConversationCompression? = null,
     @Transient
     val newConversation: Boolean = false
 ) {
+    /**
+     * 参与上下文的当前消息：已压缩的历史被排除（其内容以 compression.summary 代表）。
+     */
+    val activeMessages: List<UIMessage>
+        get() {
+            val compressed = compression?.compressedMessageIds ?: return currentMessages
+            if (compressed.isEmpty()) return currentMessages
+            return currentMessages.filter { it.id !in compressed }
+        }
+
     val files: List<Uri>
         get() = messageNodes
             .flatMap { node -> node.messages.flatMap { it.parts } }
@@ -72,9 +84,12 @@ data class Conversation(
 
             if (nodeExists) {
                 // 快速短路：消息已存在且内容未变化时直接跳过。流式 emit 携带完整历史，
-                // 只有末条消息在变化，避免为每条历史消息重复创建列表并复制节点导致卡顿
+                // 只有末条消息在变化，避免为每条历史消息重复创建列表并复制节点导致卡顿。
+                // 先做引用相等短路 (O(1))：流式期间未变化的历史消息是同一对象，
+                // 避免 data class 深比较递归扫描全部 parts 全文字符串 (长对话下开销巨大)
                 val existingIndex = node.messages.indexOfFirst { it.id == message.id }
-                if (existingIndex >= 0 && node.messages[existingIndex] == message) {
+                val existing = if (existingIndex >= 0) node.messages[existingIndex] else null
+                if (existing != null && (existing === message || existing == message)) {
                     return@forEachIndexed
                 }
             }
@@ -126,6 +141,18 @@ data class Conversation(
         )
     }
 }
+
+@Serializable
+@Immutable
+data class ConversationCompression(
+    // 滚动累积的历史摘要（覆盖全部 compressedMessageIds 对应内容）
+    val summary: String,
+    // 已被压缩、不再直接进入上下文的消息 id；消息本体仍保留在 messageNodes 中供 UI 查看
+    val compressedMessageIds: Set<Uuid> = emptySet(),
+    val compressedCount: Int = 0,
+    @Serializable(with = InstantSerializer::class)
+    val createdAt: Instant = Instant.now(),
+)
 
 @Serializable
 @Immutable

@@ -34,6 +34,7 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.ApiEndpointResolver
 import me.rerere.ai.provider.BuiltInTools
+import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
@@ -49,6 +50,7 @@ import me.rerere.ai.provider.providers.groupPartsByToolBoundary
 import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.GoogleThoughtMetadata
+import me.rerere.ai.ui.ImageGenerationItem
 import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageAnnotation
@@ -323,6 +325,33 @@ class GoogleProvider(private val client: ProviderHttpClient, context: Context? =
             finishReason = candidate["finishReason"]?.jsonPrimitive?.contentOrNull,
             usage = parseUsageMeta(bodyJson["usageMetadata"] as? JsonObject),
         )
+    }
+
+    override suspend fun generateImage(
+        providerSetting: ProviderSetting,
+        params: ImageGenerationParams,
+    ): Flow<ImageGenerationItem> = flow {
+        require(providerSetting is ProviderSetting.Google) {
+            "Expected Google provider setting"
+        }
+        repeat(params.numOfImages.coerceIn(1, 4)) {
+            val result = generateText(
+                providerSetting = providerSetting,
+                messages = listOf(UIMessage.user(params.prompt)),
+                params = TextGenerationParams(
+                    model = params.model,
+                    customHeaders = params.customHeaders,
+                    customBody = params.customBody,
+                ),
+            )
+            result.message.parts.filterIsInstance<UIMessagePart.Image>().forEach { image ->
+                val mimeType = image.url.substringAfter("data:", "image/png").substringBefore(';')
+                val data = image.url.substringAfter(";base64,", image.url)
+                if (data.isNotBlank()) {
+                    emit(ImageGenerationItem(data = data, mimeType = mimeType))
+                }
+            }
+        }
     }
 
     override suspend fun streamText(

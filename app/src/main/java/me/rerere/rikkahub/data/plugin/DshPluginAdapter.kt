@@ -37,6 +37,7 @@ data class DshRepoRef(
  */
 class DshPluginAdapter(
     private val httpClient: OkHttpClient,
+    private val context: android.content.Context? = null,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -324,13 +325,14 @@ class DshPluginAdapter(
             appendLine("<title>${escapeHtml(ref.repo)}</title>")
             appendLine(DOCS_PAGE_CSS)
             appendLine(PANEL_PAGE_CSS)
-            appendLine("""<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"
-                onerror="this.onerror=null;var s=document.createElement('script');s.src='https://fastly.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js';document.head.appendChild(s)"></script>""")
-            appendLine("""<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"
-                onerror="this.onerror=null;var s=document.createElement('script');s.src='https://fastly.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js';document.head.appendChild(s)"></script>""")
+            // 运行时优先本地随包分发（零网络依赖），加载失败才回退 CDN
+            appendLine("""<script src="./react.production.min.js"
+                onerror="this.onerror=null;var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js';document.head.appendChild(s)"></script>""")
+            appendLine("""<script src="./react-dom.production.min.js"
+                onerror="this.onerror=null;var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js';document.head.appendChild(s)"></script>""")
             appendLine("<script>$PANEL_HOST_SHIM</script>")
             appendLine("</head><body>")
-            appendLine("""<div id="status" class="meta">正在启动插件面板…（依赖 CDN，首次加载稍慢）</div>""")
+            appendLine("""<div id="status" class="meta">正在启动插件面板…</div>""")
             appendLine("""<div id="panel-root"></div>""")
             appendLine(docsFolded)
             appendLine("""<script src="./plugin.client.js"></script>""")
@@ -345,8 +347,11 @@ class DshPluginAdapter(
      */
     internal val PANEL_HOST_SHIM = """
 window.__ModuleLoader__ = (function () {
-    var pending = [];   // 待实例化的模块定义
-    var applied = false;
+    var pending = [];
+    var mountedOnce = false;
+    var slotStore = {};
+    var pluginCount = 0;
+
     function makeRequire() {
         return function (name) {
             var key = String(name || '').toLowerCase();
@@ -370,7 +375,6 @@ window.__ModuleLoader__ = (function () {
                 jsx.Fragment = R.Fragment;
                 return { jsx: jsx, jsxs: jsx, jsxDEV: jsx, Fragment: R.Fragment };
             }
-            // 未知模块：宽松 stub，属性取值返回 noop 函数
             console.warn('[dsh-shim] stub module:', name);
             return new Proxy(function () {}, {
                 get: function (t, p) {
@@ -380,40 +384,99 @@ window.__ModuleLoader__ = (function () {
             });
         };
     }
-    var ctx = {
-        effect: function (fn) { try { return fn(ctx); } catch (e) { console.error(e); } }
-    };
-    function setStatus(text, showDocs) {
-        var el = document.getElementById('status');
-        if (showDocs) {
-            var docs = document.getElementById('docs-fallback');
-            if (docs) docs.style.display = '';
-            if (el && !el.querySelector('a')) {
-                var link = document.createElement('a');
-                link.href = '#docs-fallback';
-                link.textContent = ' 查看文档';
-                link.onclick = function (ev) { ev.preventDefault(); docs.scrollIntoView(); };
-                el.appendChild(link);
-            }
+
+    var slotsApi = {
+        register: function (config, render) {
+            var entry = { config: config || {}, render: render };
+            var slotName = (config && config.name) || 'unnamed';
+            if (!slotStore[slotName]) slotStore[slotName] = [];
+            slotStore[slotName].push(entry);
+            return entry;
+        },
+        inject: function (slotName, factory) {
+            try { factory(); } catch (e) { console.error('[dsh-shim] inject failed', slotName, e); }
         }
+    };
+
+    var timerApi = {
+        setInterval: function (fn, ms) {
+            return setInterval(function () { try { fn(); } catch (e) {} }, ms || 1000);
+        },
+        setTimeout: function (fn, ms) {
+            return setTimeout(function () { try { fn(); } catch (e) {} }, ms || 0);
+        },
+        clearInterval: function (id) { clearInterval(id); },
+        clearTimeout: function (id) { clearTimeout(id); },
+        every: function (ms, fn) { return this.setInterval(fn, ms); }
+    };
+
+    function makeCtx() {
+        return {
+            effect: function (fn) { try { return fn(this); } catch (e) { console.error(e); } },
+            get: function (name) {
+                var key = (name || '').toLowerCase();
+                if (key === 'slots') return slotsApi;
+                if (key === 'timer') return timerApi;
+                return new Proxy(function(){}, {
+                    get: function(t, p) {
+                        if (p === Symbol.toStringTag || p === 'default') return t;
+                        return function(){};
+                    }
+                });
+            },
+            set: function(){},
+            on: function(){},
+            emit: function(){}
+        };
+    }
+
+    function setStatus(text) {
+        var el = document.getElementById('status');
         if (el) el.textContent = text;
     }
-    var mountedOnce = false;
+
+    function renderSlots() {
+        var root = document.getElementById('panel-root');
+        if (!root) return;
+        var names = Object.keys(slotStore);
+        if (!names.length) return;
+        var R = window.React, D = window.ReactDOM;
+        if (!R || !D) return;
+        var all = R.createElement('div', { className: 'dsh-slot-container' },
+            names.map(function (name) {
+                var entries = slotStore[name];
+                return R.createElement('div', { key: name, className: 'dsh-slot-section' },
+                    R.createElement('div', { className: 'dsh-slot-title' }, name),
+                    entries.map(function (entry, i) {
+                        return R.createElement('div', { key: i, className: 'dsh-slot-content' },
+                            entry.render()
+                        );
+                    })
+                );
+            })
+        );
+        if (D.createRoot) {
+            D.createRoot(root).render(all);
+        } else {
+            D.render(all, root);
+        }
+    }
+
     function mountAll() {
         if (mountedOnce) return;
-        if (!window.React || !window.ReactDOM) return; // 运行时未就绪，等待外部轮询
-        var mounted = false;
-        // 先实例化所有 pending 定义（factory 可能 return apply 对象或写 module.exports）
+        if (!window.React || !window.ReactDOM) return;
+        pluginCount = 0;
         pending.forEach(function (def) {
             try {
                 var module = { exports: {} };
+                var ctx = makeCtx();
                 var result = def.factory(makeRequire(), module, module.exports);
                 var target =
                     (module.exports && typeof module.exports.apply === 'function') ? module.exports :
                     (result && typeof result.apply === 'function') ? result : null;
                 if (target) {
                     target.apply(ctx);
-                    mounted = true;
+                    pluginCount++;
                 } else {
                     console.warn('[dsh-shim] no apply export in', def.id);
                 }
@@ -422,22 +485,29 @@ window.__ModuleLoader__ = (function () {
             }
         });
         pending = [];
-        if (mounted) {
+        var hasContent = Object.keys(slotStore).length > 0;
+        if (hasContent) {
             mountedOnce = true;
-            setTimeout(function () { setStatus('面板已加载'); }, 300);
+            renderSlots();
+            setTimeout(function () { setStatus('面板已加载 (' + Object.keys(slotStore).length + ' 个插槽)'); }, 200);
+        } else if (pluginCount > 0) {
+            mountedOnce = true;
+            setStatus('插件已加载但未注册界面插槽，已显示文档');
+            var docs = document.getElementById('docs-fallback');
+            if (docs) docs.style.display = '';
         } else {
-            setStatus('该插件的界面无法在本环境运行（依赖 DSH 宿主专有能力）', true);
+            setStatus('该插件的界面无法在本环境运行（依赖 DSH 宿主专有能力）');
+            var docs = document.getElementById('docs-fallback');
+            if (docs) docs.style.display = '';
         }
     }
     return {
-        load: function (def) {
-            pending.push(def);
-        },
+        load: function (def) { pending.push(def); },
         _mountAll: mountAll,
         _runtimeFailed: function () {
             var docs = document.getElementById('docs-fallback');
             if (docs) docs.style.display = '';
-            setStatus('UI 运行时加载失败（网络受限），已显示文档', true);
+            setStatus('UI 运行时加载失败（网络受限），已显示文档');
         }
     };
 })();
@@ -448,7 +518,6 @@ window.__dshPanelMountAll__ = function () {
         window.__ModuleLoader__._mountAll();
         if (window.React && window.ReactDOM) {
             clearInterval(timer);
-            // readyState complete 时 mountAll 已在上方 tick 执行过；否则等 load 后补一次
             if (document.readyState !== 'complete') {
                 window.addEventListener('load', function () { window.__ModuleLoader__._mountAll(); });
             }
@@ -643,9 +712,27 @@ window.__dshPanelMountAll__ = function () {
                 zip.putNextEntry(ZipEntry("web/plugin.client.js"))
                 zip.write(clientJs.toByteArray(Charsets.UTF_8))
                 zip.closeEntry()
+                // React 运行时随包分发：面板加载零 CDN 依赖（网络受限环境也能真实运行 UI）
+                bundledReactAssets().forEach { (name, bytes) ->
+                    if (bytes != null) {
+                        zip.putNextEntry(ZipEntry("web/$name"))
+                        zip.write(bytes)
+                        zip.closeEntry()
+                    }
+                }
             }
         }
         return baos.toByteArray()
+    }
+
+    /** App 内置的 React UMD 运行时；assets 缺失时返回 null 项，由页面回退 CDN */
+    private fun bundledReactAssets(): List<Pair<String, ByteArray?>> {
+        fun read(name: String): ByteArray? =
+            context?.assets?.open("dsh/$name")?.use { it.readBytes() }
+        return listOf(
+            "react.production.min.js" to read("react.production.min.js"),
+            "react-dom.production.min.js" to read("react-dom.production.min.js"),
+        )
     }
 
     /**
@@ -696,6 +783,10 @@ window.__dshPanelMountAll__ = function () {
     private val PANEL_PAGE_CSS = """<style>
         #panel-root { min-height: 60vh; }
         #status a { color: #0061a4; }
+        .dsh-slot-container { display: flex; flex-direction: column; gap: 16px; padding: 12px; }
+        .dsh-slot-section { border: 1px solid var(--dsw-alias-border-l1, #e0e0e0); border-radius: 8px; overflow: hidden; }
+        .dsh-slot-title { padding: 8px 12px; font-size: 12px; font-weight: 600; color: #666; background: #f5f5f5; border-bottom: 1px solid var(--dsw-alias-border-l1, #e0e0e0); text-transform: uppercase; letter-spacing: 0.5px; }
+        .dsh-slot-content { padding: 8px; }
     </style>"""
 
     private companion object {

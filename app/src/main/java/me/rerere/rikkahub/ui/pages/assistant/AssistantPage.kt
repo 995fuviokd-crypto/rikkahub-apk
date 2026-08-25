@@ -64,6 +64,7 @@ import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANTS_IDS
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.Tag
@@ -237,7 +238,10 @@ fun AssistantPage(vm: AssistantVM = koinViewModel()) {
         }
     }
 
-    AssistantCreationSheet(createState)
+    AssistantCreationSheet(
+        state = createState,
+        onImportCard = vm::importCharacterCard,
+    )
 
     // 操作菜单 Bottom Sheet
     actionSheetAssistant?.let { assistant ->
@@ -322,6 +326,7 @@ private fun AssistantTagsFilterRow(
 @Composable
 private fun AssistantCreationSheet(
     state: EditState<Assistant>,
+    onImportCard: (Assistant, Lorebook?) -> Unit,
 ) {
     state.EditStateContent { assistant, update ->
         ModalBottomSheet(
@@ -360,8 +365,8 @@ private fun AssistantCreationSheet(
                     }
 
                     AssistantImporter(
-                        onUpdate = {
-                            update(it)
+                        onImport = { imported, lorebook ->
+                            onImportCard(imported, lorebook)
                             state.confirm()
                         },
                         modifier = Modifier.fillMaxWidth(),

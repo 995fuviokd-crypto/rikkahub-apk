@@ -66,13 +66,20 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
 import androidx.core.graphics.toColorInt
 import android.util.Base64
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.mapLatest
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
+import me.rerere.rikkahub.data.plugin.PluginHook
+import me.rerere.rikkahub.data.plugin.PluginManager
 import me.rerere.rikkahub.ui.components.table.DataTable
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
@@ -81,6 +88,7 @@ import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.html.HtmlGenerator
 import org.intellij.markdown.parser.MarkdownParser
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import org.jsoup.nodes.Node
 import org.jsoup.nodes.TextNode
@@ -150,26 +158,45 @@ fun MarkdownNew(
     style: TextStyle = LocalTextStyle.current,
     onClickCitation: (String) -> Unit = {},
 ) {
-    // 初始为 null，首次解析放到后台线程完成，避免主线程同步解析大段 HTML markdown 导致掉帧
-    var html by remember { mutableStateOf<String?>(null) }
+    // 初始为 null，解析链（Hook改写→Markdown→HTML→Jsoup DOM）整体放在后台线程完成，
+    // 避免主线程同步执行大段内容的 AST 解析 + HTML 生成 + DOM 解析导致掉帧
+    var document by remember { mutableStateOf<Document?>(null) }
+
+    // message:beforeRender 渲染钩子：无插件管理器（预览/测试环境）时安全降级
+    val pluginManager = remember {
+        runCatching { org.koin.core.context.GlobalContext.get().get<PluginManager>() }.getOrNull()
+    }
 
     val updatedContent by rememberUpdatedState(content)
     LaunchedEffect(Unit) {
         snapshotFlow { updatedContent }
             .distinctUntilChanged()
-            .mapLatest { generateMarkdownHtml(it) }
+            .mapLatest { content ->
+                val transformed = if (pluginManager != null) {
+                    runCatching {
+                        pluginManager
+                            .dispatchHookToEnabled(
+                                hook = PluginHook.MESSAGE_BEFORE_RENDER,
+                                payload = buildJsonObject { put("text", content) },
+                            )["text"]?.jsonPrimitive?.contentOrNull ?: content
+                    }.getOrElse { e ->
+                        Log.w("MarkdownNew", "message:beforeRender dispatch failed", e)
+                        content
+                    }
+                } else {
+                    content
+                }
+                val html = generateMarkdownHtml(transformed)
+                runCatching { Jsoup.parse(html) }.getOrElse { Jsoup.parse("") }
+            }
             .catch { it.printStackTrace() }
             .flowOn(Dispatchers.Default)
-            .collect { html = it }
-    }
-
-    val document = remember(html) {
-        runCatching { Jsoup.parse(html ?: "") }.getOrElse { Jsoup.parse("") }
+            .collect { document = it }
     }
 
     ProvideTextStyle(style) {
         Column(modifier = modifier.padding(start = 4.dp)) {
-            document.body().childNodes().fastForEach { node ->
+            document?.body()?.childNodes()?.fastForEach { node ->
                 HtmlBodyNode(node = node, onClickCitation = onClickCitation)
             }
         }

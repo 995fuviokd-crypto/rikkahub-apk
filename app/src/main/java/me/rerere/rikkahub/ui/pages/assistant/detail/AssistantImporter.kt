@@ -37,6 +37,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.Lorebook
+import me.rerere.rikkahub.data.st.CharacterCardParser
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -48,22 +50,21 @@ import org.koin.compose.koinInject
 @Composable
 fun AssistantImporter(
     modifier: Modifier = Modifier,
-    onUpdate: (Assistant) -> Unit,
+    onImport: (Assistant, Lorebook?) -> Unit,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = modifier,
     ) {
-        SillyTavernImporter(onImport = onUpdate)
+        SillyTavernImporter(onImport = onImport)
     }
 }
 
 @Composable
 private fun SillyTavernImporter(
-    onImport: (Assistant) -> Unit
-) {
-    val context = LocalContext.current
+    onImport: (Assistant, Lorebook?) -> Unit
+) {    val context = LocalContext.current
     val filesManager: FilesManager = koinInject()
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
@@ -146,112 +147,11 @@ private fun SillyTavernImporter(
     }
 }
 
-// region Parsing Strategy
-
-private interface TavernCardParser {
-    val specName: String
-    fun parse(context: Context, json: JsonObject, background: String?): Assistant
-}
-
-private class CharaCardV2Parser : TavernCardParser {
-    override val specName: String = "chara_card_v2"
-
-    override fun parse(context: Context, json: JsonObject, background: String?): Assistant {
-        val data = json["data"]?.jsonObject ?: error(context.getString(R.string.assistant_importer_missing_data_field))
-        val name = data["name"]?.jsonPrimitiveOrNull?.contentOrNull
-            ?: error(context.getString(R.string.assistant_importer_missing_name_field))
-        val firstMessage = data["first_mes"]?.jsonPrimitiveOrNull?.contentOrNull
-        val system = data["system_prompt"]?.jsonPrimitiveOrNull?.contentOrNull
-        val description = data["description"]?.jsonPrimitiveOrNull?.contentOrNull
-        val personality = data["personality"]?.jsonPrimitiveOrNull?.contentOrNull
-        val scenario = data["scenario"]?.jsonPrimitiveOrNull?.contentOrNull
-
-        val prompt = buildString {
-            appendLine("You are roleplaying as $name.")
-            appendLine()
-            if (!system.isNullOrBlank()) {
-                appendLine(system)
-                appendLine()
-            }
-            appendLine("## Description of the character")
-            appendLine(description ?: "Empty")
-            appendLine()
-            appendLine("## Personality of the character")
-            appendLine(personality ?: "Empty")
-            appendLine()
-            appendLine("## Scenario")
-            append(scenario ?: "Empty")
-        }
-
-        return Assistant(
-            name = name,
-            presetMessages = if (firstMessage != null) listOf(UIMessage.assistant(firstMessage)) else emptyList(),
-            systemPrompt = prompt,
-            background = background
-        )
-    }
-}
-
-private class CharaCardV3Parser : TavernCardParser {
-    override val specName: String = "chara_card_v3"
-
-    override fun parse(context: Context, json: JsonObject, background: String?): Assistant {
-        val data = json["data"]?.jsonObject ?: error(context.getString(R.string.assistant_importer_missing_data_field))
-        val name = data["name"]?.jsonPrimitiveOrNull?.contentOrNull ?: error(context.getString(R.string.assistant_importer_missing_name_field))
-        val description = data["description"]?.jsonPrimitiveOrNull?.contentOrNull
-        val firstMessage = data["first_mes"]?.jsonPrimitiveOrNull?.contentOrNull
-        val system = data["system_prompt"]?.jsonPrimitiveOrNull?.contentOrNull
-        val personality = data["personality"]?.jsonPrimitiveOrNull?.contentOrNull
-        val scenario = data["scenario"]?.jsonPrimitiveOrNull?.contentOrNull
-
-        val prompt = buildString {
-            appendLine("You are roleplaying as $name.")
-            appendLine()
-            if (!system.isNullOrBlank()) {
-                appendLine(system)
-                appendLine()
-            }
-            appendLine("## Description of the character")
-            appendLine(description ?: "Empty")
-            appendLine()
-            appendLine("## Personality of the character")
-            appendLine(personality ?: "Empty")
-            appendLine()
-            appendLine("## Scenario")
-            append(scenario ?: "Empty")
-        }
-
-        return Assistant(
-            name = name,
-            presetMessages = if (firstMessage != null) listOf(UIMessage.assistant(firstMessage)) else emptyList(),
-            systemPrompt = prompt,
-            background = background
-        )
-    }
-}
-
-private val TAVERN_PARSERS: Map<String, TavernCardParser> = listOf(
-    CharaCardV2Parser(),
-    CharaCardV3Parser()
-).associateBy { it.specName }
-
-private fun parseAssistantFromJson(
-    context: Context,
-    json: JsonObject,
-    background: String?,
-): Assistant {
-    val spec = json["spec"]?.jsonPrimitive?.contentOrNull
-        ?: error(context.getString(R.string.assistant_importer_missing_spec_field))
-    val parser = TAVERN_PARSERS[spec] ?: error(context.getString(R.string.assistant_importer_unsupported_spec, spec))
-    return parser.parse(context = context, json = json, background = background)
-}
-
-// endregion
 
 private suspend fun importAssistantFromUri(
     context: Context,
     uri: Uri,
-    onImport: (Assistant) -> Unit,
+    onImport: (Assistant, Lorebook?) -> Unit,
     toaster: ToasterState,
     filesManager: FilesManager,
 ) {
@@ -279,8 +179,13 @@ private suspend fun importAssistantFromUri(
             }
         }
         val json = Json.parseToJsonElement(jsonString).jsonObject
-        val assistant = parseAssistantFromJson(context = context, json = json, background = backgroundStr)
-        onImport(assistant)
+        val parsed = CharacterCardParser.parse(json)
+        val assistant = if (!backgroundStr.isNullOrBlank()) {
+            parsed.assistant.copy(background = backgroundStr)
+        } else {
+            parsed.assistant
+        }
+        onImport(assistant, parsed.lorebook)
     } catch (exception: Exception) {
         exception.printStackTrace()
         toaster.show(

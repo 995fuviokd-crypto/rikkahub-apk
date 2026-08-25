@@ -4,8 +4,10 @@ import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
@@ -24,10 +26,11 @@ import java.util.zip.ZipInputStream
  * 插件包管理器：插件以 zip 包形式安装，包内根目录必须有 plugin.json。
  * 安装目录为 filesDir/plugins/<pluginId>/，与技能目录（filesDir/skills）隔离。
  */
-class PluginManager(
+open class PluginManager(
     private val context: Context,
+    private val scriptRuntime: ScriptRuntime,
 ) {
-    fun getPluginsDir(): File {
+    open fun getPluginsDir(): File {
         val dir = context.filesDir.resolve(PLUGIN_DIR_NAME)
         if (!dir.exists()) dir.mkdirs()
         return dir
@@ -92,9 +95,74 @@ class PluginManager(
         return runCatching { PluginJson.fromJson(infoFile.readText()) }.getOrNull()
     }
 
+    /**
+     * 动态 Hook 链式分发：按插件 id 稳定顺序执行所有声明了 [hook] 的已启用插件。
+     * 前一插件的返回作为下一插件的输入；任一插件失败/超时仅跳过自身，不中断 Hook 链。
+     *
+     * @param payload 钩子上下文（JSON 对象），如 { text, conversationId }
+     * @return 处理后的 payload；无插件声明该 hook 时原样返回
+     */
+    suspend fun dispatchHook(
+        enabledPlugins: Set<String>,
+        hook: String,
+        payload: JsonObject,
+    ): JsonObject {
+        if (enabledPlugins.isEmpty()) return payload
+        val handlers = enabledPlugins.sorted().mapNotNull { id ->
+            val info = loadInfo(id) ?: return@mapNotNull null
+            info.hooks.firstOrNull { it.name == hook }?.let { id to it }
+        }
+        if (handlers.isEmpty()) return payload
+
+        var current: JsonObject = payload
+        for ((id, pluginHook) in handlers) {
+            val timeoutMs = pluginHook.timeoutMs.coerceIn(100L, 15_000L)
+            val result = withTimeoutOrNull(timeoutMs) {
+                withContext(Dispatchers.Default) {
+                    runCatching {
+                        scriptRuntime.runHook(
+                            pluginDir = getPluginDir(id),
+                            pluginId = id,
+                            hookName = hook,
+                            payloadJson = current.toString(),
+                        )
+                    }.onFailure { e ->
+                        Log.w(TAG, "dispatchHook $hook/$id failed", e)
+                    }.getOrNull()
+                }
+            }
+            if (result == null) {
+                Log.w(TAG, "dispatchHook $hook/$id timed out after ${timeoutMs}ms")
+                continue
+            }
+            if (!result.ok) {
+                Log.w(TAG, "dispatchHook $hook/$id skipped: ${result.message}")
+                continue
+            }
+            val data = result.data as? JsonObject
+            if (data == null) {
+                Log.w(TAG, "dispatchHook $hook/$id returned non-object result, keep previous context")
+                continue
+            }
+            current = data
+        }
+        return current
+    }
+
+    /**
+     * 渲染层便捷分发：对全部已启用插件执行 [hook]，payload 仅含 { text }。
+     * 供 MarkdownNew 等无会话上下文的通用组件使用；无已启用插件时原样返回。
+     */
+    suspend fun dispatchHookToEnabled(hook: String, payload: JsonObject): JsonObject {
+        if (enabledPluginIds.isEmpty()) return payload
+        return dispatchHook(enabledPlugins = enabledPluginIds, hook = hook, payload = payload)
+    }
+
+    private val enabledPluginIds: Set<String>
+        get() = listPlugins().filter { it.status == PluginStatus.ENABLED }.map { it.id }.toSet()
+
     /** 已启用插件的系统提示文本列表（顺序按插件 id 稳定） */
-    fun enabledSystemPrompts(enabledPlugins: Set<String>): List<String> {
-        if (enabledPlugins.isEmpty()) return emptyList()
+    fun enabledSystemPrompts(enabledPlugins: Set<String>): List<String> {        if (enabledPlugins.isEmpty()) return emptyList()
         return enabledPlugins
             .sorted()
             .mapNotNull { loadInfo(it) }

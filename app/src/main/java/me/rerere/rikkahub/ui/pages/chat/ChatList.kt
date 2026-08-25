@@ -42,6 +42,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledIconButton
@@ -88,11 +89,15 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.provider.Model
+import me.rerere.hugeicons.stroke.Archive02
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.data.model.ConversationCompression
+import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
@@ -120,6 +125,7 @@ fun ChatList(
     settings: Settings,
     hazeState: HazeState,
     errors: List<ChatError> = emptyList(),
+    isCompressing: Boolean = false,
     onDismissError: (Uuid) -> Unit = {},
     onClearAllErrors: () -> Unit = {},
     onRegenerate: (UIMessage) -> Unit = {},
@@ -162,6 +168,7 @@ fun ChatList(
                 settings = settings,
                 hazeState = hazeState,
                 errors = errors,
+                isCompressing = isCompressing,
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
                 onRegenerate = onRegenerate,
@@ -192,6 +199,7 @@ private fun ChatListNormal(
     settings: Settings,
     hazeState: HazeState,
     errors: List<ChatError>,
+    isCompressing: Boolean = false,
     onDismissError: (Uuid) -> Unit,
     onClearAllErrors: () -> Unit,
     onRegenerate: (UIMessage) -> Unit,
@@ -270,6 +278,24 @@ private fun ChatListNormal(
     }
     val lastMessageIndex = conversation.messageNodes.lastIndex
 
+    // 压缩状态与展示列表计算（必须在 composable 上下文；LazyListScope 内不能调 remember）
+    val compressionState = conversation.compression
+    val isCompressedNode: (MessageNode) -> Boolean = { n ->
+        compressionState != null && n.messages.isNotEmpty() &&
+            n.messages.all { it.id in compressionState.compressedMessageIds }
+    }
+    // 连续压缩段只保留「组首」节点渲染折叠卡片，组内其余节点由组首统一展示
+    val displayNodes = remember(conversation.messageNodes, compressionState) {
+        if (compressionState == null || compressionState.compressedMessageIds.isEmpty()) {
+            conversation.messageNodes
+        } else {
+            conversation.messageNodes.filterIndexed { idx, n ->
+                !isCompressedNode(n) ||
+                    (idx > 0 && !isCompressedNode(conversation.messageNodes[idx - 1]))
+            }
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize(),
@@ -312,9 +338,28 @@ private fun ChatListNormal(
                     .padding(top = innerPadding.calculateTopPadding()),
             ) {
             itemsIndexed(
-                items = conversation.messageNodes,
-                key = { index, item -> item.id },
+                items = displayNodes,
+                key = { _, item -> item.id },
             ) { index, node ->
+                val nodeCompressed = isCompressedNode(node)
+                if (nodeCompressed && compressionState != null) {
+                    // 组首：折叠展示整段已压缩历史（默认收起，点击展开摘要与原文）
+                    val groupStartIdx = conversation.messageNodes.indexOf(node)
+                    val groupNodes = buildList {
+                        var i = groupStartIdx
+                        while (i < conversation.messageNodes.size && isCompressedNode(conversation.messageNodes[i])) {
+                            add(conversation.messageNodes[i])
+                            i++
+                        }
+                    }
+                    CompressedHistoryGroup(
+                        groupNodes = groupNodes,
+                        summary = compressionState.summary,
+                        compressedCount = compressionState.compressedCount,
+                        assistant = assistant,
+                        modelById = modelById,
+                    )
+                } else {
                 Column {
                     // 流式性能：把 ChatMessage 的回调参数稳定为「只随 node.id 变化」的引用，
                     // 配合 MessageNode 的 @Immutable，让历史消息（node 引用不变）在每 delta
@@ -378,6 +423,7 @@ private fun ChatListNormal(
                         )
                     }
                 }
+                }
             }
 
             if (!loading && assistant?.allowConversationSystemPrompt == true && onConversationSystemPromptChange != null) {
@@ -408,6 +454,28 @@ private fun ChatListNormal(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                    }
+                }
+            }
+
+            // 静默自动压缩进行中：列表尾部轻量提示（不产生任何消息气泡）
+            if (isCompressing) {
+                item(key = "AutoCompressingIndicator") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        RabbitLoadingIndicator(
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "正在压缩历史对话…",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
@@ -854,6 +922,100 @@ private fun BoxScope.MessageJumper(
                     modifier = Modifier
                         .padding(4.dp)
                 )
+            }
+        }
+    }
+}
+
+/**
+ * 已压缩历史组：默认收起为一行卡片（自动收缩），展开后可见滚动摘要全文与原始消息本体。
+ * 历史消息始终保留在会话中，仅发送上下文以摘要代替。
+ */
+@Composable
+private fun CompressedHistoryGroup(
+    groupNodes: List<MessageNode>,
+    summary: String,
+    compressedCount: Int,
+    assistant: Assistant?,
+    modelById: Map<Uuid, Model>,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Surface(
+        onClick = { expanded = !expanded },
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp).copy(alpha = 0.6f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    imageVector = HugeIcons.Archive02,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "已压缩 ${compressedCount.coerceAtLeast(groupNodes.size)} 条历史对话",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.weight(1f))
+                Icon(
+                    imageVector = HugeIcons.ArrowDown01,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            AnimatedVisibility(visible = expanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // 滚动摘要全文
+                    if (summary.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    text = "历史摘要",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                SelectionContainer {
+                                    Text(
+                                        text = summary,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    // 原始消息本体（只读展示，操作回调置空）
+                    groupNodes.forEach { node ->
+                        ChatMessage(
+                            node = node,
+                            model = node.currentMessage.modelId?.let(modelById::get),
+                            assistant = assistant,
+                            loading = false,
+                            onFork = {},
+                            onRegenerate = {},
+                            onEdit = {},
+                            onShare = {},
+                            onDelete = {},
+                            onUpdate = {},
+                        )
+                    }
+                }
             }
         }
     }

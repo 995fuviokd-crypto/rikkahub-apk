@@ -152,6 +152,9 @@ class ChatVM(
     // 错误状态
     val errors: StateFlow<List<ChatError>> = chatService.errors
 
+    // 正在执行自动压缩的会话集合：UI 据此显示"正在压缩历史对话"指示
+    val compressingConversations: StateFlow<Set<Uuid>> = chatService.compressingConversations
+
     fun dismissError(id: Uuid) = chatService.dismissError(id)
 
     fun clearAllErrors() = chatService.clearAllErrors()
