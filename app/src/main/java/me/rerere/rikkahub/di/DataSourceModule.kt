@@ -19,6 +19,7 @@ import me.rerere.rikkahub.data.ai.AIRequestInterceptor
 import me.rerere.rikkahub.data.ai.RequestLoggingInterceptor
 import me.rerere.rikkahub.data.ai.transformers.AssistantTemplateLoader
 import me.rerere.rikkahub.data.ai.GenerationHandler
+import me.rerere.rikkahub.data.ai.TranslationHandler
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
 import me.rerere.rikkahub.data.api.RikkaHubAPI
 import me.rerere.rikkahub.data.api.SponsorAPI
@@ -222,6 +223,14 @@ val dataSourceModule = module {
             providerManager = get(),
             json = get(),
             memoryRepo = get(),
+            acpRuntime = get<me.rerere.rikkahub.data.ai.agent.AcpRuntime>(),
+            workspaceRepository = get<me.rerere.rikkahub.data.repository.WorkspaceRepository>(),
+        )
+    }
+
+    single {
+        TranslationHandler(
+            providerManager = get(),
             acpRuntime = get<me.rerere.rikkahub.data.ai.agent.AcpRuntime>(),
             workspaceRepository = get<me.rerere.rikkahub.data.repository.WorkspaceRepository>(),
         )

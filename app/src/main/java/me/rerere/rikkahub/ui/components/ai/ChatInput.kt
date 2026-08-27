@@ -1,12 +1,10 @@
 package me.rerere.rikkahub.ui.components.ai
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -26,6 +24,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imeAnimationSource
 import androidx.compose.foundation.layout.imeAnimationTarget
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -42,6 +42,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -62,9 +63,11 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -77,6 +80,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.PopupProperties
 import com.dokar.sonner.ToastType
 import dev.chrisbanes.haze.HazeInput
 import dev.chrisbanes.haze.HazeState
@@ -92,8 +96,13 @@ import me.rerere.asr.ASRStatus
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.ArrowUp02
+import me.rerere.hugeicons.stroke.Camera01
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.Fullscreen
+import me.rerere.hugeicons.stroke.Image02
+import me.rerere.hugeicons.stroke.MusicNote03
+import me.rerere.hugeicons.stroke.Video01
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.agent.AcpRuntime
@@ -120,6 +129,7 @@ import me.rerere.rikkahub.ui.pages.chat.StewardModeController
 import me.rerere.rikkahub.ui.pages.chat.StewardModeState
 import me.rerere.rikkahub.utils.SoundEffectPlayer
 import org.koin.compose.koinInject
+import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.seconds
 
 @Composable
@@ -148,6 +158,12 @@ fun ChatInput(
     onStewardUnlimitedLoopsChange: (Boolean) -> Unit = {},
     agentSessionModes: AcpRuntime.AgentSessionModes = AcpRuntime.AgentSessionModes(),
     onSelectSessionMode: (String) -> Unit = {},
+    allowAudioVideoAttachments: Boolean,
+    onTakePicture: () -> Unit,
+    onPickImage: () -> Unit,
+    onPickVideo: () -> Unit,
+    onPickAudio: () -> Unit,
+    onPickFile: () -> Unit,
 ) {
     val toaster = LocalToaster.current
     val assistant = settings.getCurrentAssistant()
@@ -161,8 +177,11 @@ fun ChatInput(
 
     val containerShape = MaterialTheme.shapes.largeIncreased
     val density = LocalDensity.current
+    val imeInsets = WindowInsets.ime
+    val imeAnimationSource = WindowInsets.imeAnimationSource
+    val imeAnimationTarget = WindowInsets.imeAnimationTarget
     // Unlike isImeVisible, the target changes as soon as the IME animation starts.
-    val imeTargetVisible = WindowInsets.imeAnimationTarget.getBottom(density) > 0
+    val imeTargetVisible = imeAnimationTarget.getBottom(density) > 0
     val modelListState = rememberModelListState(
         modelId = assistant.chatModelId ?: settings.chatModelId,
         providers = settings.providers,
@@ -277,6 +296,18 @@ fun ChatInput(
                         state = state,
                         completionProviders = completionProviders,
                         onSendMessage = { sendMessage() },
+                        showFullScreenButton = !imeTargetVisible,
+                        showLeadingContent = imeTargetVisible,
+                        leadingContent = {
+                            CompactAttachmentMenuButton(
+                                allowAudioVideo = allowAudioVideoAttachments,
+                                onTakePicture = onTakePicture,
+                                onPickImage = onPickImage,
+                                onPickVideo = onPickVideo,
+                                onPickAudio = onPickAudio,
+                                onPickFile = onPickFile,
+                            )
+                        },
                         trailingContent = {
                             if (imeTargetVisible && !asrState.isRecording) {
                                 SendButton(
@@ -289,100 +320,101 @@ fun ChatInput(
                         },
                     )
 
-                    AnimatedVisibility(
-                        visible = !imeTargetVisible,
-                        enter = EnterTransition.None,
-                        exit = shrinkVertically() + fadeOut(),
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .imeProgressiveCollapse(
+                                ime = imeInsets,
+                                source = imeAnimationSource,
+                                target = imeAnimationTarget,
+                            )
+                            .padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         Row(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                .weight(1f)
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                // Agent Mode（平台 Agent 预设切换，仅有模式的 agent 才显示）
-                                val chatModel = settings.getCurrentChatModel()
-                                if (chatModel?.platformAgent?.supportedModes?.isNotEmpty() == true) {
-                                    AgentModeButton(
-                                        model = chatModel,
-                                        onUpdateModel = onUpdateModel,
-                                        onlyIcon = true,
-                                    )
-                                }
-
-                                // ACP 会话模式切换（agent 运行时上报的 modes，如 plan/acceptEdits）
-                                if (agentSessionModes.modes.isNotEmpty()) {
-                                    AgentSessionModeButton(
-                                        modes = agentSessionModes.modes,
-                                        currentModeId = agentSessionModes.currentModeId,
-                                        onSelect = onSelectSessionMode,
-                                        onlyIcon = true,
-                                    )
-                                }
-
-                                // Model Picker
-                                ModelSelectorButton(
-                                    state = modelListState,
-                                    onlyIcon = true,
-                                    modifier = Modifier,
-                                )
-
-                                // Search
-                                val enableSearchMsg = stringResource(R.string.web_search_enabled)
-                                val disableSearchMsg = stringResource(R.string.web_search_disabled)
-                                SearchPickerButton(
-                                    enableSearch = enableSearch,
-                                    settings = settings,
-                                    onUpdateSearchMode = { mode ->
-                                        onUpdateSearchMode(mode)
-                                        val enabled = mode != SearchMode.OFF
-                                        toaster.show(
-                                            message = if (enabled) enableSearchMsg else disableSearchMsg,
-                                            duration = 1.seconds,
-                                            type = if (enabled) {
-                                                ToastType.Success
-                                            } else {
-                                                ToastType.Normal
-                                            }
-                                        )
-                                    },
-                                    onUpdateSearchService = onUpdateSearchService,
+                            // Agent Mode（平台 Agent 预设切换，仅有模式的 agent 才显示）
+                            val chatModel = settings.getCurrentChatModel()
+                            if (chatModel?.platformAgent?.supportedModes?.isNotEmpty() == true) {
+                                AgentModeButton(
                                     model = chatModel,
+                                    onUpdateModel = onUpdateModel,
+                                    onlyIcon = true,
                                 )
-
-                                // Reasoning
-                                if (chatModel?.abilities?.contains(ModelAbility.REASONING) == true) {
-                                    ReasoningButton(
-                                        reasoningLevel = assistant.reasoningLevel,
-                                        onUpdateReasoningLevel = {
-                                            onUpdateAssistant(assistant.copy(reasoningLevel = it))
-                                        },
-                                        onlyIcon = true,
-                                    )
-                                }
-
-                                // Steward Mode（智能托管）
-                                if (stewardModeState != null) {
-                                    StewardModeButton(
-                                        enabled = stewardModeState.enabled,
-                                        status = stewardModeState.status,
-                                        maxLoops = stewardMaxLoops,
-                                        unlimitedLoops = stewardUnlimitedLoops,
-                                        onMaxLoopsChange = onStewardMaxLoopsChange,
-                                        onUnlimitedLoopsChange = onStewardUnlimitedLoopsChange,
-                                        onToggle = onToggleStewardMode,
-                                    )
-                                }
-
                             }
 
+                            // ACP 会话模式切换（agent 运行时上报的 modes，如 plan/acceptEdits）
+                            if (agentSessionModes.modes.isNotEmpty()) {
+                                AgentSessionModeButton(
+                                    modes = agentSessionModes.modes,
+                                    currentModeId = agentSessionModes.currentModeId,
+                                    onSelect = onSelectSessionMode,
+                                    onlyIcon = true,
+                                )
+                            }
+
+                            // Model Picker
+                            ModelSelectorButton(
+                                state = modelListState,
+                                onlyIcon = true,
+                                modifier = Modifier,
+                            )
+
+                            // Search
+                            val enableSearchMsg = stringResource(R.string.web_search_enabled)
+                            val disableSearchMsg = stringResource(R.string.web_search_disabled)
+                            SearchPickerButton(
+                                enableSearch = enableSearch,
+                                settings = settings,
+                                onUpdateSearchMode = { mode ->
+                                    onUpdateSearchMode(mode)
+                                    val enabled = mode != SearchMode.OFF
+                                    toaster.show(
+                                        message = if (enabled) enableSearchMsg else disableSearchMsg,
+                                        duration = 1.seconds,
+                                        type = if (enabled) {
+                                            ToastType.Success
+                                        } else {
+                                            ToastType.Normal
+                                        }
+                                    )
+                                },
+                                onUpdateSearchService = onUpdateSearchService,
+                                model = chatModel,
+                            )
+
+                            // Reasoning
+                            if (chatModel?.abilities?.contains(ModelAbility.REASONING) == true) {
+                                ReasoningButton(
+                                    reasoningLevel = assistant.reasoningLevel,
+                                    onUpdateReasoningLevel = {
+                                        onUpdateAssistant(assistant.copy(reasoningLevel = it))
+                                    },
+                                    onlyIcon = true,
+                                )
+                            }
+
+                            // Steward Mode（智能托管）
+                            if (stewardModeState != null) {
+                                StewardModeButton(
+                                    enabled = stewardModeState.enabled,
+                                    status = stewardModeState.status,
+                                    maxLoops = stewardMaxLoops,
+                                    unlimitedLoops = stewardUnlimitedLoops,
+                                    onMaxLoopsChange = onStewardMaxLoopsChange,
+                                    onUnlimitedLoopsChange = onStewardUnlimitedLoopsChange,
+                                    onToggle = onToggleStewardMode,
+                                )
+                            }
+
+                        }
+
+                        if (!imeTargetVisible) {
                             ActionIconButton(
                                 onClick = onMoreClick
                             ) {
@@ -391,45 +423,45 @@ fun ChatInput(
                                     contentDescription = stringResource(R.string.more_options)
                                 )
                             }
+                        }
 
-                            if (asrState.isAvailable || asrState.isRecording) {
-                                AsrButton(
-                                    state = asrState,
-                                    onClick = {
-                                        when (asrState.status) {
-                                            ASRStatus.Listening -> asr.stop()
-                                            ASRStatus.Idle, ASRStatus.Error -> {
-                                                if (!asrPermission.allRequiredPermissionsGranted) {
-                                                    asrPermission.requestPermissions()
-                                                } else {
-                                                    asrBaseText = state.textContent.text.toString()
-                                                    asr.start { transcript ->
-                                                        val spacer =
-                                                            if (asrBaseText.isBlank() || transcript.isBlank()) "" else " "
-                                                        state.setMessageText(asrBaseText + spacer + transcript)
-                                                    }
+                        if (asrState.isAvailable || asrState.isRecording) {
+                            AsrButton(
+                                state = asrState,
+                                onClick = {
+                                    when (asrState.status) {
+                                        ASRStatus.Listening -> asr.stop()
+                                        ASRStatus.Idle, ASRStatus.Error -> {
+                                            if (!asrPermission.allRequiredPermissionsGranted) {
+                                                asrPermission.requestPermissions()
+                                            } else {
+                                                asrBaseText = state.textContent.text.toString()
+                                                asr.start { transcript ->
+                                                    val spacer =
+                                                        if (asrBaseText.isBlank() || transcript.isBlank()) "" else " "
+                                                    state.setMessageText(asrBaseText + spacer + transcript)
                                                 }
                                             }
-
-                                            ASRStatus.Connecting, ASRStatus.Stopping -> {}
                                         }
-                                    }
-                                )
-                            }
 
-                            if (!imeTargetVisible) {
-                                AnimatedVisibility(
-                                    visible = !asrState.isRecording,
-                                    enter = fadeIn() + scaleIn(),
-                                    exit = fadeOut() + scaleOut(),
-                                ) {
-                                    SendButton(
-                                        loading = loading,
-                                        empty = state.isEmpty(),
-                                        onClick = { sendMessage() },
-                                        onLongClick = { sendMessageWithoutAnswer() },
-                                    )
+                                        ASRStatus.Connecting, ASRStatus.Stopping -> {}
+                                    }
                                 }
+                            )
+                        }
+
+                        if (!imeTargetVisible) {
+                            AnimatedVisibility(
+                                visible = !asrState.isRecording,
+                                enter = fadeIn() + scaleIn(),
+                                exit = fadeOut() + scaleOut(),
+                            ) {
+                                SendButton(
+                                    loading = loading,
+                                    empty = state.isEmpty(),
+                                    onClick = { sendMessage() },
+                                    onLongClick = { sendMessageWithoutAnswer() },
+                                )
                             }
                         }
                     }
@@ -443,6 +475,33 @@ fun ChatInput(
         state = modelListState,
         onSelect = onUpdateChatModel,
     )
+}
+
+private fun Modifier.imeProgressiveCollapse(
+    ime: WindowInsets,
+    source: WindowInsets,
+    target: WindowInsets,
+): Modifier = clipToBounds().layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    val imeBottom = ime.getBottom(this)
+    val sourceBottom = source.getBottom(this)
+    val targetBottom = target.getBottom(this)
+    val expandedFraction = when {
+        sourceBottom == 0 && targetBottom == 0 -> 1f
+        sourceBottom > 0 && targetBottom > 0 -> 0f
+        targetBottom > 0 -> 1f - imeBottom.toFloat() / targetBottom
+        else -> 1f - imeBottom.toFloat() / sourceBottom
+    }.coerceIn(0f, 1f)
+    val visibleHeight = (placeable.height * expandedFraction).roundToInt()
+
+    layout(placeable.width, visibleHeight) {
+        placeable.placeRelativeWithLayer(
+            x = 0,
+            y = visibleHeight - placeable.height,
+        ) {
+            alpha = expandedFraction
+        }
+    }
 }
 
 @Composable
@@ -521,10 +580,72 @@ private fun ActionIconButton(
 }
 
 @Composable
+private fun CompactAttachmentMenuButton(
+    allowAudioVideo: Boolean,
+    onTakePicture: () -> Unit,
+    onPickImage: () -> Unit,
+    onPickVideo: () -> Unit,
+    onPickAudio: () -> Unit,
+    onPickFile: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    fun select(action: () -> Unit) {
+        expanded = false
+        action()
+    }
+
+    Box {
+        ActionIconButton(onClick = { expanded = true }) {
+            Icon(
+                imageVector = HugeIcons.Add01,
+                contentDescription = stringResource(R.string.more_options),
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            properties = PopupProperties(focusable = false),
+        ) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.take_picture)) },
+                leadingIcon = { Icon(HugeIcons.Camera01, null) },
+                onClick = { select(onTakePicture) },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.photo)) },
+                leadingIcon = { Icon(HugeIcons.Image02, null) },
+                onClick = { select(onPickImage) },
+            )
+            if (allowAudioVideo) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.video)) },
+                    leadingIcon = { Icon(HugeIcons.Video01, null) },
+                    onClick = { select(onPickVideo) },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.audio)) },
+                    leadingIcon = { Icon(HugeIcons.MusicNote03, null) },
+                    onClick = { select(onPickAudio) },
+                )
+            }
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.upload_file)) },
+                leadingIcon = { Icon(HugeIcons.Files02, null) },
+                onClick = { select(onPickFile) },
+            )
+        }
+    }
+}
+
+@Composable
 private fun TextInputRow(
     state: ChatInputState,
     completionProviders: List<ChatCompletionProvider>,
     onSendMessage: () -> Unit,
+    showFullScreenButton: Boolean,
+    showLeadingContent: Boolean,
+    leadingContent: @Composable () -> Unit,
     trailingContent: @Composable () -> Unit = {},
 ) {
     val settings = LocalSettings.current
@@ -683,7 +804,7 @@ private fun TextInputRow(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    if (isFocused) {
+                    if (showFullScreenButton) {
                         IconButton(
                             onClick = {
                                 isFullScreen = !isFullScreen
@@ -694,9 +815,19 @@ private fun TextInputRow(
                     trailingContent()
                 }
             },
-            leadingIcon = if (quickMessages.isNotEmpty()) {
+            leadingIcon = if (showLeadingContent || quickMessages.isNotEmpty()) {
                 {
-                    QuickMessageButton(quickMessages = quickMessages, state = state)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        if (showLeadingContent) {
+                            leadingContent()
+                        }
+                        if (quickMessages.isNotEmpty()) {
+                            QuickMessageButton(quickMessages = quickMessages, state = state)
+                        }
+                    }
                 }
             } else null,
         )
