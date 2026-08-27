@@ -1,0 +1,162 @@
+[
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/fragment_open_exit.xml",
+        "source": "me.rerere.androidvm-fragment-1.5.4-46:/animator/fragment_open_exit.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/design_appbar_state_list_animator.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/design_appbar_state_list_animator.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/mtrl_btn_state_list_anim.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/mtrl_btn_state_list_anim.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/m3_btn_elevated_btn_state_list_anim.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/m3_btn_elevated_btn_state_list_anim.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/mtrl_extended_fab_show_motion_spec.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/mtrl_extended_fab_show_motion_spec.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/mtrl_extended_fab_change_size_expand_motion_spec.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/mtrl_extended_fab_change_size_expand_motion_spec.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/m3_fab_state_list_animator.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/m3_fab_state_list_animator.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/fragment_close_enter.xml",
+        "source": "me.rerere.androidvm-fragment-1.5.4-46:/animator/fragment_close_enter.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/mtrl_extended_fab_change_size_collapse_motion_spec.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/mtrl_extended_fab_change_size_collapse_motion_spec.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/m3_extended_fab_hide_motion_spec.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/m3_extended_fab_hide_motion_spec.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/m3_appbar_state_list_animator.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/m3_appbar_state_list_animator.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/m3_split_button_chevron_rotation.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/m3_split_button_chevron_rotation.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/m3_split_button_chevron_overshoot_interpolator.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/m3_split_button_chevron_overshoot_interpolator.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/fragment_open_enter.xml",
+        "source": "me.rerere.androidvm-fragment-1.5.4-46:/animator/fragment_open_enter.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/fragment_fade_exit.xml",
+        "source": "me.rerere.androidvm-fragment-1.5.4-46:/animator/fragment_fade_exit.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/mtrl_card_state_list_anim.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/mtrl_card_state_list_anim.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/m3_extended_fab_change_size_expand_motion_spec.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/m3_extended_fab_change_size_expand_motion_spec.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/mtrl_fab_transformation_sheet_collapse_spec.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/mtrl_fab_transformation_sheet_collapse_spec.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/mtrl_extended_fab_state_list_animator.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/mtrl_extended_fab_state_list_animator.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/fragment_close_exit.xml",
+        "source": "me.rerere.androidvm-fragment-1.5.4-46:/animator/fragment_close_exit.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/fragment_fade_enter.xml",
+        "source": "me.rerere.androidvm-fragment-1.5.4-46:/animator/fragment_fade_enter.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/design_fab_hide_motion_spec.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/design_fab_hide_motion_spec.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/m3_chip_state_list_anim.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/m3_chip_state_list_anim.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/chevron_checked_unchecked.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/chevron_checked_unchecked.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/m3_elevated_chip_state_list_anim.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/m3_elevated_chip_state_list_anim.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/mtrl_fab_hide_motion_spec.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/mtrl_fab_hide_motion_spec.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/m3_extended_fab_change_size_collapse_motion_spec.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/m3_extended_fab_change_size_collapse_motion_spec.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/m3_card_state_list_anim.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/m3_card_state_list_anim.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/m3_extended_fab_state_list_animator.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/m3_extended_fab_state_list_animator.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/mtrl_extended_fab_hide_motion_spec.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/mtrl_extended_fab_hide_motion_spec.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/m3_extended_fab_show_motion_spec.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/m3_extended_fab_show_motion_spec.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/m3_split_button_chevron_reverse_rotation.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/m3_split_button_chevron_reverse_rotation.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/design_fab_show_motion_spec.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/design_fab_show_motion_spec.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/mtrl_btn_unelevated_state_list_anim.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/mtrl_btn_unelevated_state_list_anim.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/mtrl_chip_state_list_anim.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/mtrl_chip_state_list_anim.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/m3_card_elevated_state_list_anim.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/m3_card_elevated_state_list_anim.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/mtrl_fab_show_motion_spec.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/mtrl_fab_show_motion_spec.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/chevron_unchecked_checked.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/chevron_unchecked_checked.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/m3_btn_state_list_anim.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/m3_btn_state_list_anim.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/animator/mtrl_fab_transformation_sheet_expand_spec.xml",
+        "source": "me.rerere.androidvm-material-1.14.0-25:/animator/mtrl_fab_transformation_sheet_expand_spec.xml"
+    }
+]

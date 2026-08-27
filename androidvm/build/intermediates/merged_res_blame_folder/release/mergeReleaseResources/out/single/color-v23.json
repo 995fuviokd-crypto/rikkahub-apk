@@ -1,0 +1,38 @@
+[
+    {
+        "merged": "me.rerere.androidvm-release-49:/color-v23/abc_tint_spinner.xml",
+        "source": "me.rerere.androidvm-appcompat-1.8.0-14:/color-v23/abc_tint_spinner.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/color-v23/abc_tint_edittext.xml",
+        "source": "me.rerere.androidvm-appcompat-1.8.0-14:/color-v23/abc_tint_edittext.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/color-v23/abc_btn_colored_borderless_text_material.xml",
+        "source": "me.rerere.androidvm-appcompat-1.8.0-14:/color-v23/abc_btn_colored_borderless_text_material.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/color-v23/abc_tint_switch_track.xml",
+        "source": "me.rerere.androidvm-appcompat-1.8.0-14:/color-v23/abc_tint_switch_track.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/color-v23/abc_color_highlight_material.xml",
+        "source": "me.rerere.androidvm-appcompat-1.8.0-14:/color-v23/abc_color_highlight_material.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/color-v23/abc_tint_seek_thumb.xml",
+        "source": "me.rerere.androidvm-appcompat-1.8.0-14:/color-v23/abc_tint_seek_thumb.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/color-v23/abc_tint_btn_checkable.xml",
+        "source": "me.rerere.androidvm-appcompat-1.8.0-14:/color-v23/abc_tint_btn_checkable.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/color-v23/abc_btn_colored_text_material.xml",
+        "source": "me.rerere.androidvm-appcompat-1.8.0-14:/color-v23/abc_btn_colored_text_material.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/color-v23/abc_tint_default.xml",
+        "source": "me.rerere.androidvm-appcompat-1.8.0-14:/color-v23/abc_tint_default.xml"
+    }
+]

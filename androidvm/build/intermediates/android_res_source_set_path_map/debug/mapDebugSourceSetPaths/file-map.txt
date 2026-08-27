@@ -1,0 +1,9 @@
+me.rerere.androidvm-pngs-0 /workspace/rikkahub/androidvm/build/generated/res/pngs/debug
+me.rerere.androidvm-updated_navigation_xml-1 /workspace/rikkahub/androidvm/build/generated/updated_navigation_xml/debug
+me.rerere.androidvm-mergeDebugResources-2 /workspace/rikkahub/androidvm/build/intermediates/incremental/debug/mergeDebugResources/merged.dir
+me.rerere.androidvm-mergeDebugResources-3 /workspace/rikkahub/androidvm/build/intermediates/incremental/debug/mergeDebugResources/stripped.dir
+me.rerere.androidvm-debug-4 /workspace/rikkahub/androidvm/build/intermediates/merged_res/debug/mergeDebugResources
+me.rerere.androidvm-debug-5 /workspace/rikkahub/androidvm/build/intermediates/packaged_res/debug/packageDebugResources
+me.rerere.androidvm-debug-6 /workspace/rikkahub/androidvm/src/debug/res
+me.rerere.androidvm-main-7 /workspace/rikkahub/androidvm/src/main/res
+gradleHome-0 /root/.gradle

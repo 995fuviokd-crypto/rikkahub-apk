@@ -1,0 +1,20 @@
+<lint-module
+    format="1"
+    dir="/workspace/rikkahub/androidvm"
+    name=":androidvm"
+    type="LIBRARY"
+    maven="rikkahub:androidvm:unspecified"
+    agpVersion="9.3.1"
+    buildFolder="build"
+    bootClassPath="/root/android-sdk/platforms/android-37.0/android.jar:/root/android-sdk/build-tools/36.0.0/core-lambda-stubs.jar"
+    javaSourceLevel="17"
+    compileTarget="android-37.0"
+    neverShrinking="true"
+    highlightGradualR8Api="false">
+  <lintOptions
+      abortOnError="true"
+      absolutePaths="true"
+      checkReleaseBuilds="true"
+      explainIssues="true"/>
+  <variant name="release"/>
+</lint-module>

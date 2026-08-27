@@ -1,0 +1,34 @@
+{
+    "logs": [
+        {
+            "outputFile": "me.rerere.androidvm-release-49:/values-v33/values-v33.xml",
+            "map": [
+                {
+                    "source": "/root/.gradle/caches/9.5.0/transforms/a1e3c42b67aa6e9b91b5105108b32170/transformed/material-1.14.0/res/values-v33/values-v33.xml",
+                    "from": {
+                        "startLines": "2,3,4,5",
+                        "startColumns": "4,4,4,4",
+                        "startOffsets": "55,159,263,366",
+                        "endColumns": "103,103,102,103",
+                        "endOffsets": "154,258,361,465"
+                    }
+                }
+            ]
+        },
+        {
+            "outputFile": "me.rerere.androidvm-mergeReleaseResources-47:/values-v33/values-v33.xml",
+            "map": [
+                {
+                    "source": "/root/.gradle/caches/9.5.0/transforms/a1e3c42b67aa6e9b91b5105108b32170/transformed/material-1.14.0/res/values-v33/values-v33.xml",
+                    "from": {
+                        "startLines": "2,3,4,5",
+                        "startColumns": "4,4,4,4",
+                        "startOffsets": "55,159,263,366",
+                        "endColumns": "103,103,102,103",
+                        "endOffsets": "154,258,361,465"
+                    }
+                }
+            ]
+        }
+    ]
+}

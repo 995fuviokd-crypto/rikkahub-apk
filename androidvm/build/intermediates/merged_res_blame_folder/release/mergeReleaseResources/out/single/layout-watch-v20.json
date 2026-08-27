@@ -1,0 +1,10 @@
+[
+    {
+        "merged": "me.rerere.androidvm-release-49:/layout-watch-v20/abc_alert_dialog_button_bar_material.xml",
+        "source": "me.rerere.androidvm-appcompat-1.8.0-14:/layout-watch-v20/abc_alert_dialog_button_bar_material.xml"
+    },
+    {
+        "merged": "me.rerere.androidvm-release-49:/layout-watch-v20/abc_alert_dialog_title_material.xml",
+        "source": "me.rerere.androidvm-appcompat-1.8.0-14:/layout-watch-v20/abc_alert_dialog_title_material.xml"
+    }
+]

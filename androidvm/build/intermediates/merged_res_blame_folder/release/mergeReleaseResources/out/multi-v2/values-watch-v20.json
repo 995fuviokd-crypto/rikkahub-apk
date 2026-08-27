@@ -1,0 +1,36 @@
+{
+    "logs": [
+        {
+            "outputFile": "me.rerere.androidvm-release-49:/values-watch-v20/values-watch-v20.xml",
+            "map": [
+                {
+                    "source": "/root/.gradle/caches/9.5.0/transforms/6023d1fc776d502eab9a60fdf723206a/transformed/appcompat-1.8.0/res/values-watch-v20/values-watch-v20.xml",
+                    "from": {
+                        "startLines": "2,5,8",
+                        "startColumns": "4,4,4",
+                        "startOffsets": "55,214,385",
+                        "endLines": "4,7,10",
+                        "endColumns": "12,12,12",
+                        "endOffsets": "209,380,553"
+                    }
+                }
+            ]
+        },
+        {
+            "outputFile": "me.rerere.androidvm-mergeReleaseResources-47:/values-watch-v20/values-watch-v20.xml",
+            "map": [
+                {
+                    "source": "/root/.gradle/caches/9.5.0/transforms/6023d1fc776d502eab9a60fdf723206a/transformed/appcompat-1.8.0/res/values-watch-v20/values-watch-v20.xml",
+                    "from": {
+                        "startLines": "2,5,8",
+                        "startColumns": "4,4,4",
+                        "startOffsets": "55,214,385",
+                        "endLines": "4,7,10",
+                        "endColumns": "12,12,12",
+                        "endOffsets": "209,380,553"
+                    }
+                }
+            ]
+        }
+    ]
+}
