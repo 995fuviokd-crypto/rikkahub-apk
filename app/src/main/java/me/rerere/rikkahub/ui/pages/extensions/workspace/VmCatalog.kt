@@ -36,7 +36,7 @@ object VmCatalog {
             id = "alpine-3.22",
             labelRes = R.string.vm_image_alpine,
             descRes = R.string.vm_image_alpine_desc,
-            url = "https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.0-aarch64.tar.gz",
+            url = "https://mirrors.aliyun.com/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.0-aarch64.tar.gz",
             sizeHintMb = 3,
         ),
     )

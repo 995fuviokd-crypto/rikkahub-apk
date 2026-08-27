@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.AiMagic
+import me.rerere.hugeicons.stroke.Bash
 import me.rerere.hugeicons.stroke.Alert01
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowUp01
@@ -184,6 +185,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         leadingContent = { Icon(HugeIcons.Package, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_extensions_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_extensions)) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.AndroidVms) },
+                        leadingContent = { Icon(HugeIcons.Bash, null) },
+                        supportingContent = { Text(stringResource(R.string.vm_page_entry_desc)) },
+                        headlineContent = { Text(stringResource(R.string.vm_page_title)) },
                     )
                 }
             }
