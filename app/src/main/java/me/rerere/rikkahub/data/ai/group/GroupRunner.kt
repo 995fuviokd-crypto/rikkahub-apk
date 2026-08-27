@@ -429,5 +429,7 @@ class GroupRunner(
     companion object {
         const val SYSTEM_MEMBER_ID = "__system__"
         const val USER_MEMBER_ID = "__user__"
+
+        fun newRunId(): String = Uuid.random().toString()
     }
 }

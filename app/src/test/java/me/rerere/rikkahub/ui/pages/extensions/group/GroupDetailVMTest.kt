@@ -13,6 +13,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import me.rerere.rikkahub.data.ai.group.GroupMemberCaller
+import me.rerere.rikkahub.data.ai.group.GroupRunController
 import me.rerere.rikkahub.data.ai.group.GroupRunner
 import me.rerere.rikkahub.data.db.dao.GroupDAO
 import me.rerere.rikkahub.data.db.entity.GroupEntity
@@ -139,6 +140,18 @@ class GroupDetailVMTest {
         Dispatchers.resetMain()
     }
 
+    private fun newController(
+        repository: GroupRepository,
+        runner: GroupRunner,
+        testScope: kotlinx.coroutines.test.TestScope,
+    ): GroupRunController = GroupRunController(
+        scope = kotlinx.coroutines.CoroutineScope(
+            testScope.coroutineContext + UnconfinedTestDispatcher(testScope.testScheduler)
+        ),
+        runner = runner,
+        repository = repository,
+    )
+
     @Test
     fun `launchRun persists run and messages and auto-selects the new run`() =
         runTest(scheduler) {
@@ -156,7 +169,8 @@ class GroupDetailVMTest {
                 )
             )
             val runner = GroupRunner(FakeCaller(), repository)
-            val vm = GroupDetailVM("g1", repository, runner)
+            val controller = newController(repository, runner, this)
+            val vm = GroupDetailVM("g1", repository, runner, controller)
 
             val groupJob = launch(UnconfinedTestDispatcher(testScheduler)) { vm.group.collect {} }
             val collected = mutableListOf<List<GroupMessage>>()
@@ -225,7 +239,12 @@ class GroupDetailVMTest {
             )
             repository.addMessage("run-2", "m1", "第二条消息", MessageKind.REPLY, "A", "model-A", "", "")
 
-            val vm = GroupDetailVM("g1", repository, GroupRunner(FakeCaller(), repository))
+            val vm = GroupDetailVM(
+                "g1",
+                repository,
+                GroupRunner(FakeCaller(), repository),
+                newController(repository, GroupRunner(FakeCaller(), repository), this),
+            )
             val collected = mutableListOf<List<GroupMessage>>()
             val messageJob = launch(UnconfinedTestDispatcher(testScheduler)) {
                 vm.messages.collect { collected += it }
@@ -250,34 +269,51 @@ class GroupDetailVMTest {
         runTest(scheduler) {
             val dao = FakeGroupDAO()
             val repository = GroupRepository(dao)
+            val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
             repository.save(
                 Group(
                     id = "g1",
                     name = "测试群组",
-                    members = listOf(GroupMember(id = "m1", modelId = Uuid.random(), role = "A")),
+                    members = listOf(
+                        GroupMember(id = "o", modelId = Uuid.random(), role = "主编"),
+                        GroupMember(id = "m1", modelId = Uuid.random(), role = "A"),
+                    ),
+                    orchestratorId = "o",
                 )
             )
-            repository.upsertRun(
-                me.rerere.rikkahub.data.model.GroupRun(
-                    id = "run-1",
-                    groupId = "g1",
-                    mission = "任务",
-                    status = RunStatus.RUNNING,
-                    createdAt = 1000,
-                    startedAt = 1000,
-                )
-            )
+            // 挂起式 Caller：让运行保持 RUNNING 直到测试放行
+            val hangingCaller = object : GroupMemberCaller {
+                override suspend fun call(
+                    group: Group,
+                    member: GroupMember,
+                    prompt: String,
+                    onProgress: suspend (String) -> Unit,
+                ): me.rerere.rikkahub.data.ai.group.MemberCallResult {
+                    gate.await()
+                    return me.rerere.rikkahub.data.ai.group.MemberCallResult(text = "挂起回复")
+                }
 
-            val vm = GroupDetailVM("g1", repository, GroupRunner(FakeCaller(), repository))
+                override suspend fun modelName(member: GroupMember): String = "model"
+            }
+            val runner = GroupRunner(hangingCaller, repository)
+            val controller = newController(repository, runner, this)
+            val vm = GroupDetailVM("g1", repository, runner, controller)
             advanceUntilIdle()
-            vm.selectRun("run-1")
+
+            vm.launchRun("初始任务")
             advanceUntilIdle()
+            assertTrue(controller.isRunning("g1"))
 
             vm.appendInstruction("请补充说明")
             advanceUntilIdle()
 
-            val messages = repository.getMessages("run-1")
+            val runningRunId = controller.runningRuns.value["g1"]!!
+            val messages = repository.getMessages(runningRunId)
             assertTrue(messages.any { it.content == "请补充说明" && it.kind == MessageKind.USER })
+
+            // 收尾：放行并结束运行
+            gate.complete(kotlin.Unit)
+            advanceUntilIdle()
         }
 
     @Test
@@ -293,7 +329,8 @@ class GroupDetailVMTest {
                 )
             )
 
-            val vm = GroupDetailVM("g1", repository, GroupRunner(FakeCaller(), repository))
+            val runner = GroupRunner(FakeCaller(), repository)
+            val vm = GroupDetailVM("g1", repository, runner, newController(repository, runner, this))
             advanceUntilIdle()
 
             vm.appendInstruction("没有运行中")

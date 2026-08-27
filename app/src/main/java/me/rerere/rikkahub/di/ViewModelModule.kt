@@ -21,6 +21,7 @@ import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceVM
 import me.rerere.rikkahub.ui.pages.extensions.workflow.WorkflowEditorVM
 import me.rerere.rikkahub.ui.pages.extensions.workflow.WorkflowListVM
 import me.rerere.rikkahub.ui.pages.extensions.group.GroupDetailVM
+import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.ui.pages.extensions.group.GroupEditorVM
 import me.rerere.rikkahub.ui.pages.extensions.group.GroupListVM
 import me.rerere.rikkahub.ui.pages.extensions.permission.PermissionVM
@@ -100,6 +101,7 @@ val viewModelModule = module {
             id = it.get(),
             repository = get(),
             runner = get(),
+            runController = get(),
         )
     }
     viewModel<PluginMarketVM> {

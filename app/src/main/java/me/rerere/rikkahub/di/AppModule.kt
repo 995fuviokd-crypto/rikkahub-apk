@@ -11,6 +11,7 @@ import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.service.ChatNotificationManager
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.data.ai.workflow.WorkflowRunner
+import me.rerere.rikkahub.data.ai.group.GroupRunController
 import me.rerere.rikkahub.data.ai.group.GroupRunner
 import me.rerere.rikkahub.data.ai.group.ProviderGroupMemberCaller
 import me.rerere.rikkahub.data.permission.HeadlessController
@@ -137,6 +138,14 @@ val appModule = module {
                 generationHandler = get(),
                 localTools = get(),
             ),
+            repository = get(),
+        )
+    }
+
+    single {
+        GroupRunController(
+            scope = get(),
+            runner = get(),
             repository = get(),
         )
     }

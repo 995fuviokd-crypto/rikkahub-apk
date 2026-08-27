@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.extensions.group
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,12 +16,19 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowDown01
+import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Chat01
 import me.rerere.hugeicons.stroke.CheckmarkSquare01
 import me.rerere.hugeicons.stroke.ListView
@@ -33,6 +42,9 @@ import me.rerere.rikkahub.ui.theme.CustomColors
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+/** 超过该字符数的成员正文在初始渲染时默认折叠，点击标题行展开 */
+private const val COLLAPSE_THRESHOLD = 600
 
 @Composable
 fun GroupMessageTimeline(
@@ -73,6 +85,14 @@ fun GroupMessageTimeline(
 @Composable
 fun GroupMessageItem(message: GroupMessage) {
     val isSystem = message.memberId == GroupRunner.SYSTEM_MEMBER_ID
+    val isUser = message.memberId == GroupRunner.USER_MEMBER_ID
+    // 长内容（含思考过程）默认折叠；系统/用户提示通常较短则直接展示
+    val longContent = message.content.length > COLLAPSE_THRESHOLD ||
+        message.reasoning.length > COLLAPSE_THRESHOLD
+    var expanded by rememberSaveable(message.id) {
+        mutableStateOf(!longContent)
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CustomColors.cardColorsOnSurfaceContainer,
@@ -86,6 +106,15 @@ fun GroupMessageItem(message: GroupMessage) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (longContent || message.reasoning.isNotBlank()) {
+                            Modifier.clickable { expanded = !expanded }
+                        } else {
+                            Modifier
+                        }
+                    ),
             ) {
                 Icon(
                     imageVector = message.kind.icon(),
@@ -94,9 +123,13 @@ fun GroupMessageItem(message: GroupMessage) {
                     tint = message.kind.color(),
                 )
                 Text(
-                    text = if (isSystem) "系统" else message.memberRole.ifBlank { "成员" },
+                    text = when {
+                        isSystem -> "系统"
+                        isUser -> "用户"
+                        else -> message.memberRole.ifBlank { "成员" }
+                    },
                     style = MaterialTheme.typography.labelLarge,
-                    color = if (isSystem) {
+                    color = if (isSystem || isUser) {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     } else {
                         MaterialTheme.colorScheme.primary
@@ -110,12 +143,42 @@ fun GroupMessageItem(message: GroupMessage) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (longContent || message.reasoning.isNotBlank()) {
+                    Icon(
+                        imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                        contentDescription = if (expanded) "收起" else "展开",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-            Text(
-                text = message.content,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
+
+            AnimatedVisibility(visible = expanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (message.reasoning.isNotBlank()) {
+                        Text(
+                            text = message.reasoning,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        text = message.content,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+
+            if (!expanded && longContent) {
+                Text(
+                    text = message.content.replace("\n", " "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -128,7 +191,6 @@ fun MessageKind.icon(): ImageVector = when (this) {
     MessageKind.REPLY -> HugeIcons.Chat01
     MessageKind.SYSTEM -> HugeIcons.MoreVertical
 }
-
 fun MessageKind.color(): androidx.compose.ui.graphics.Color = when (this) {
     MessageKind.USER -> androidx.compose.ui.graphics.Color(0xFF2962FF)
     MessageKind.PLAN -> androidx.compose.ui.graphics.Color(0xFF7C4DFF)
