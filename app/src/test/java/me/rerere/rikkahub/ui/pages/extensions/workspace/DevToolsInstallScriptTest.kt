@@ -21,7 +21,14 @@ class DevToolsInstallScriptTest {
             val rendered = render(script)
             assertTrue("missing dl() helper", rendered.contains("dl() {"))
             assertTrue("missing fallback return", rendered.contains("return 1"))
-            assertTrue("missing bootstrap for curl/wget", rendered.contains("apt-get install -y -qq curl"))
+            // bootstrap 既支持 apt 也支持 apk: ensure() 内嵌 apt-get, 缺失时调用 ensure curl
+            val hasEnsureFn = rendered.contains("ensure() {") &&
+                rendered.contains("apt-get install -y -qq \"\$@\"")
+            val hasDirectBootstrap = rendered.contains("apt-get install -y -qq curl")
+            assertTrue(
+                "missing bootstrap for curl/wget",
+                hasDirectBootstrap || (hasEnsureFn && rendered.contains("ensure curl")),
+            )
         }
     }
 
