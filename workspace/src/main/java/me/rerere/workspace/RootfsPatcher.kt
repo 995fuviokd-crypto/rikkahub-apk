@@ -27,6 +27,7 @@ class RootfsPatcher {
         ensureDoctorScript(linuxDir)
         ensureTimezone(linuxDir)
         ensureAptMirror(linuxDir)
+        ensureApkMirror(linuxDir)
     }
 
     private fun ensureRootfsDns(
@@ -507,6 +508,21 @@ class RootfsPatcher {
         }
     }
 
+    private fun ensureApkMirror(linuxDir: File) {
+        val reposFile = File(linuxDir, "etc/apk/repositories")
+        if (!reposFile.isFile) return
+        val text = reposFile.readText()
+        if (text.contains("mirrors")) return
+        val patched = text.replace(APK_REPO_REGEX) { m ->
+            val distroPath = m.groupValues[1]
+            "https://mirrors.aliyun.com/alpine/$distroPath"
+        }
+        if (patched != text) {
+            reposFile.writeText(patched)
+            Log.i(TAG, "Patched apk repositories: ${reposFile.name}")
+        }
+    }
+
     private fun patchOneLineSource(file: File) {
         if (!file.isFile) return
         val text = file.readText()
@@ -580,6 +596,9 @@ class RootfsPatcher {
         )
         private val UBUNTU_ARCHIVE_REGEX = Regex(
             """https?://[^\s]*ubuntu[^\s]*"""
+        )
+        private val APK_REPO_REGEX = Regex(
+            """https?://[^\s]*alpinelinux\.org/alpine/([^\s]*)"""
         )
     }
 }

@@ -84,7 +84,7 @@ val repositoryModule = module {
     }
 
     single {
-        AcpEnvironmentManager(get(), get())
+        AcpEnvironmentManager(get(), get(), get())
     }
 
     single {

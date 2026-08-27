@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.ai.agent
 
+import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -8,7 +9,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.ai.provider.AgentPlatform
 import me.rerere.workspace.WorkspaceManager
+import java.io.BufferedInputStream
+import java.io.File
+import java.io.FileOutputStream
 import java.util.concurrent.ConcurrentHashMap
+import java.util.zip.GZIPInputStream
 
 /** 平台 Agent 在指定工作区内的安装/就绪状态 */
 enum class AgentEnvStatus {
@@ -78,6 +83,7 @@ data class AgentInstallProgress(
  */
 class AcpEnvironmentManager(
     private val workspaceManager: WorkspaceManager,
+    private val context: Context,
     private val logBus: AgentInstallLogBus = AgentInstallLogBus(),
 ) {
     private val readyRoots = ConcurrentHashMap.newKeySet<String>()
@@ -156,30 +162,36 @@ class AcpEnvironmentManager(
             }
 
             if (!hasNode(root)) {
-                val detail = "正在安装 Node.js 与 npm（国内镜像加速）…"
+                val detail = "正在安装 Node.js 与 npm（内置离线包）…"
                 onProgress(AgentInstallProgress(AgentInstallPhase.INSTALLING_NODE, detail, 5))
-                var stage = -1
-                val result = runWithRetry("node/npm") {
-                    workspaceManager.executeCommand(
-                        root = root,
-                        command = NODE_INSTALL_SCRIPT,
-                        timeoutMillis = INSTALL_TIMEOUT_MS,
-                        onOutput = { chunk ->
-                            Regex("__P__(\\d+)").findAll(chunk).forEach { match ->
-                                val marker = match.groupValues[1].toIntOrNull() ?: return@forEach
-                                if (marker > stage) {
-                                    stage = marker
-                                    onProgress(
-                                        AgentInstallProgress(AgentInstallPhase.INSTALLING_NODE, detail, 5 + marker * 40 / 100)
-                                    )
+                // 优先使用 APK 内置的离线 Node 运行时, 避免联网下载失败; 离线解压失败再回退网络安装
+                val offlineOk = installNodeOffline(root, onProgress)
+                if (!offlineOk) {
+                    val detailNet = "正在联网安装 Node.js 与 npm（国内镜像加速）…"
+                    onProgress(AgentInstallProgress(AgentInstallPhase.INSTALLING_NODE, detailNet, 5))
+                    var stage = -1
+                    val result = runWithRetry("node/npm") {
+                        workspaceManager.executeCommand(
+                            root = root,
+                            command = NODE_INSTALL_SCRIPT,
+                            timeoutMillis = INSTALL_TIMEOUT_MS,
+                            onOutput = { chunk ->
+                                Regex("__P__(\\d+)").findAll(chunk).forEach { match ->
+                                    val marker = match.groupValues[1].toIntOrNull() ?: return@forEach
+                                    if (marker > stage) {
+                                        stage = marker
+                                        onProgress(
+                                            AgentInstallProgress(AgentInstallPhase.INSTALLING_NODE, detailNet, 5 + marker * 40 / 100)
+                                        )
+                                    }
                                 }
-                            }
-                        },
-                    )
+                            },
+                        )
+                    }
+                    result.getOrElse { error("Node.js 安装失败：${it.message}，请重试") }
+                        .takeIf { it.exitCode == 0 && it.stdout.contains("__OK__") }
+                        ?: error("Node.js 安装失败，请检查网络后重试")
                 }
-                result.getOrElse { error("Node.js 安装失败：${it.message}，请重试") }
-                    .takeIf { it.exitCode == 0 && it.stdout.contains("__OK__") }
-                    ?: error("Node.js 安装失败，请检查网络后重试")
                 check(hasNode(root)) { "Node.js 安装后校验失败" }
                 onProgress(AgentInstallProgress(AgentInstallPhase.INSTALLING_NODE, detail, 50))
             }
@@ -210,6 +222,242 @@ class AcpEnvironmentManager(
                 error.message?.take(ERROR_DETAIL_MAX_CHARS) ?: "环境安装失败",
             ),
         )
+    }
+
+    /**
+     * 优先使用 APK 内置的离线 Node.js 运行时, 从 assets 解压进 rootfs 的 /opt/nodejs,
+     * 并配置 npm 国内镜像与 PATH。完全离线, 不依赖网络。返回是否成功。
+     */
+    private suspend fun installNodeOffline(
+        root: String,
+        onProgress: (AgentInstallProgress) -> Unit,
+    ): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            val arch = detectArch()
+            if (arch == null) {
+                Log.i(TAG, "offline node: unsupported arch, fallback to network")
+                return@runCatching false
+            }
+            val assetPath = "offline/node/$arch/node.tar.gz"
+            val input = runCatching { context.assets.open(assetPath) }.getOrNull()
+            if (input == null) {
+                Log.i(TAG, "offline node: asset missing $assetPath, fallback to network")
+                return@runCatching false
+            }
+            onProgress(AgentInstallProgress(AgentInstallPhase.INSTALLING_NODE, "正在解压内置 Node.js 运行时…", 12))
+            val nodeDir = File(workspaceManager.linuxDir(root), "opt/nodejs")
+            nodeDir.mkdirs()
+            input.use { stream ->
+                extractTarGz(BufferedInputStream(stream), nodeDir)
+            }
+            // 建立 node/npm/npx 到 /usr/local/bin 的软链
+            val usrLocalBin = File(workspaceManager.linuxDir(root), "usr/local/bin")
+            usrLocalBin.mkdirs()
+            listOf("node", "npm", "npx").forEach { name ->
+                val link = File(usrLocalBin, name)
+                if (!link.exists()) {
+                    val target = "/opt/nodejs/bin/$name"
+                    try {
+                        java.nio.file.Files.createSymbolicLink(
+                            link.toPath(),
+                            java.nio.file.Paths.get(target),
+                        )
+                    } catch (e: Exception) {
+                        Log.w(TAG, "create symlink failed for $name", e)
+                        // 回退: 写一个 wrapper 脚本, 兼容不支持软链的文件系统
+                        link.writeText("#!/bin/sh\nexec /opt/nodejs/bin/$name \"\$@\"\n")
+                        link.setExecutable(true)
+                    }
+                }
+            }
+            // 预创建 npm 缓存目录, 避免 PRoot 下 rename ENOENT
+            val npmCache = File(workspaceManager.linuxDir(root), "root/.npm/_cacache/content-v2/sha512")
+            npmCache.mkdirs()
+            File(workspaceManager.linuxDir(root), "root/.npm/_cacache/tmp").mkdirs()
+            // 配置 npm 全局 prefix 与国内镜像
+            runCommandOk(
+                root,
+                "npm config -g set prefix /usr/local 2>/dev/null; " +
+                    "npm config -g set registry https://registry.npmmirror.com 2>/dev/null; " +
+                    "npm config -g set fund false 2>/dev/null; " +
+                    "npm config -g set audit false 2>/dev/null; echo done",
+            )
+            // PATH 持久化
+            val profileDir = File(workspaceManager.linuxDir(root), "etc/profile.d")
+            profileDir.mkdirs()
+            File(profileDir, "rikkahub-path.sh").writeText("export PATH=\"/opt/nodejs/bin:/usr/local/bin:\$PATH\"\n")
+            onProgress(AgentInstallProgress(AgentInstallPhase.INSTALLING_NODE, "内置 Node.js 已就绪", 45))
+            true
+        }.getOrElse { e ->
+            Log.w(TAG, "offline node install failed", e)
+            false
+        }
+    }
+
+    /** 检测容器架构, 返回 assets 子目录名(arm64/x64); 未知返回 null */
+    private fun detectArch(): String? {
+        val arch = runCatching { System.getProperty("os.arch")?.lowercase() }.getOrNull()
+        return when {
+            arch != null && (arch.contains("aarch64") || arch.contains("arm64")) -> "arm64"
+            arch != null && (arch.contains("amd64") || arch.contains("x86_64") || arch.contains("x64")) -> "x64"
+            else -> null
+        }
+    }
+
+    /**
+     * 轻量自包含的 tar.gz 解压器(Android 无内置 tar 读取), 处理普通文件/目录/软链,
+     * 以及 GNU 长文件名('L') 头, 并保留可执行位。tar 头为 512 字节, 数据按 512 对齐。
+     */
+    private fun extractTarGz(input: java.io.InputStream, destDir: File) {
+        GZIPInputStream(input).use { gz ->
+            val tar = BufferedInputStream(gz)
+            val header = ByteArray(512)
+            var pendingLongName: String? = null
+            while (true) {
+                val read = readFully(tar, header)
+                if (read == -1 || read == 0) break
+                if (header.all { it == 0.toByte() }) break
+                val type = header[156].toInt().toChar()
+                val size = parseOctal(header, 124, 12) ?: 0
+                // GNU 长文件名头: 数据段为完整路径, 供紧随其后的条目使用
+                if (type == 'L') {
+                    pendingLongName = readDataString(tar, size)
+                    continue
+                }
+                var name = parseTarString(header, 0, 100)
+                pendingLongName?.let { long ->
+                    name = long
+                    pendingLongName = null
+                }
+                val mode = parseOctal(header, 100, 8) ?: 0
+                if (name.isEmpty()) {
+                    skipAligned(tar, size)
+                    continue
+                }
+                // 去掉开头的 ./ 或 /
+                val cleanName = name.removePrefix("./")
+                val prefix = parseTarString(header, 345, 155)
+                val rawName = if (prefix.isNotEmpty() && !cleanName.startsWith(prefix)) "$prefix/$cleanName" else cleanName
+                // 剥掉顶层目录(node tarball 顶层为 node-v22.14.0-linux-<arch>, 等效 --strip-components=1)
+                val stripped = rawName.split('/').drop(1).joinToString("/")
+                if (stripped.isEmpty()) {
+                    skipAligned(tar, size)
+                    continue
+                }
+                val fullTarget = File(destDir, stripped).normalize()
+                val parent = fullTarget.parentFile
+                if (parent != null) parent.mkdirs()
+                when (type) {
+                    '5' -> fullTarget.mkdirs()
+                    '2' -> {
+                        val linkTarget = parseTarString(header, 157, 100)
+                        try {
+                            java.nio.file.Files.createSymbolicLink(
+                                fullTarget.toPath(),
+                                java.nio.file.Paths.get(linkTarget),
+                            )
+                        } catch (e: Exception) {
+                            Log.w(TAG, "skip symlink $stripped -> $linkTarget", e)
+                        }
+                    }
+                    '0', '\u0000' -> {
+                        FileOutputStream(fullTarget).use { out ->
+                            val buf = ByteArray(64 * 1024)
+                            var remaining = size
+                            while (remaining > 0) {
+                                val toRead = minOf(buf.size.toLong(), remaining).toInt()
+                                val n = tar.read(buf, 0, toRead)
+                                if (n <= 0) break
+                                out.write(buf, 0, n)
+                                remaining -= n
+                            }
+                        }
+                        if (mode and 0x40L != 0L) fullTarget.setExecutable(true, false)
+                        skipPad(tar, size)
+                    }
+                    else -> skipAligned(tar, size)
+                }
+            }
+        }
+    }
+
+    /** 读取一个条目数据段(整块)并作为 UTF-8 字符串返回, 同时跳过填充对齐 */
+    private fun readDataString(tar: java.io.InputStream, size: Long): String {
+        val buf = ByteArray(size.toInt().coerceAtLeast(0))
+        var off = 0
+        while (off < buf.size) {
+            val n = tar.read(buf, off, buf.size - off)
+            if (n <= 0) break
+            off += n
+        }
+        val pad = (512 - (size % 512)) % 512
+        if (pad > 0) skipFully(tar, pad)
+        return String(buf, 0, off, Charsets.UTF_8).trimEnd('\u0000')
+    }
+
+    /** 从 tar 头读取一个 NUL 结尾的 ASCII 字符串字段 */
+    private fun parseTarString(h: ByteArray, offset: Int, len: Int): String {
+        val end = (offset until offset + len).firstOrNull { h[it] == 0.toByte() } ?: (offset + len)
+        return String(h, offset, end - offset, Charsets.US_ASCII)
+    }
+
+    /** 解析 tar 头的八进制数字字段(以空格或 NUL 结尾) */
+    private fun parseOctal(h: ByteArray, offset: Int, len: Int): Long? {
+        var v = 0L
+        var started = false
+        for (i in offset until offset + len) {
+            val c = h[i].toInt().toChar()
+            if (c == '\u0000' || c == ' ') {
+                if (started) break else continue
+            }
+            if (c !in '0'..'7') return null
+            started = true
+            v = v * 8 + (c - '0')
+        }
+        return if (started) v else null
+    }
+
+    /** 读取完整字节, 返回实际读取数; EOF 返回 -1 */
+    private fun readFully(input: java.io.InputStream, buf: ByteArray): Int {
+        var total = 0
+        var n: Int
+        while (total < buf.size) {
+            n = input.read(buf, total, buf.size - total)
+            if (n == -1) break
+            total += n
+        }
+        return if (total == 0) -1 else total
+    }
+
+    /** 跳过 [size] 字节并按 512 对齐 */
+    private fun skipAligned(input: java.io.InputStream, size: Long) {
+        var remaining = size
+        val buf = ByteArray(64 * 1024)
+        while (remaining > 0) {
+            val n = input.read(buf, 0, minOf(buf.size.toLong(), remaining).toInt())
+            if (n <= 0) break
+            remaining -= n
+        }
+        val pad = (512 - (size % 512)) % 512
+        if (pad > 0) skipFully(input, pad)
+    }
+
+    /** 数据已消费后, 仅跳过 [size] 字节对应的 512 对齐填充 */
+    private fun skipPad(input: java.io.InputStream, size: Long) {
+        val pad = (512 - (size % 512)) % 512
+        if (pad > 0) skipFully(input, pad)
+    }
+
+    /** 可靠地跳过恰好 [n] 字节(InputStream.skip 可能少跳, 此处循环补足) */
+    private fun skipFully(input: java.io.InputStream, n: Long) {
+        var remaining = n
+        val buf = ByteArray(64 * 1024)
+        while (remaining > 0) {
+            val toRead = minOf(buf.size.toLong(), remaining).toInt()
+            val read = input.read(buf, 0, toRead)
+            if (read <= 0) break
+            remaining -= read
+        }
     }
 
     /**

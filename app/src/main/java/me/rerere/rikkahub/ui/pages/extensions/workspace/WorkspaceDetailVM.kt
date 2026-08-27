@@ -368,7 +368,8 @@ class WorkspaceDetailVM(
         } else {
             tool.packageName
         }
-        return executePackageWithRetry(workspaceId, tool, resolvedPackage)
+        val apkPackage = ALPINE_PACKAGE_MAP[tool.id] ?: resolvedPackage
+        return executePackageWithRetry(workspaceId, tool, resolvedPackage, apkPackage)
     }
 
     private suspend fun executeScriptWithRetry(
@@ -401,6 +402,7 @@ class WorkspaceDetailVM(
         workspaceId: String,
         tool: DevToolDef,
         packageName: String,
+        apkPackage: String,
     ): Pair<Boolean, String?> {
         var lastError: String? = null
         repeat(3) { attempt ->
@@ -413,7 +415,7 @@ class WorkspaceDetailVM(
                         append("(apt-get update -qq >/dev/null 2>&1 || true); ")
                         append("apt-get install -y -qq $packageName >/dev/null 2>&1 && echo __OK__; ")
                         append("elif command -v apk >/dev/null 2>&1; then ")
-                        append("apk add --no-cache -q $packageName >/dev/null 2>&1 && echo __OK__; ")
+                        append("apk add --no-cache -q $apkPackage >/dev/null 2>&1 && echo __OK__; ")
                         append("else echo __NO_PKG_MANAGER__; fi")
                     },
                     timeoutMillis = TOOL_INSTALL_TIMEOUT_MS,
@@ -545,9 +547,9 @@ dl() {
   shift
   for url in "${'$'}@"; do
     if command -v curl >/dev/null 2>&1; then
-      curl -fsSL --connect-timeout 15 --max-time 900 -o "${'$'}out" "${'$'}url" && return 0
+      curl -fsSL --connect-timeout 5 --max-time 900 -o "${'$'}out" "${'$'}url" && return 0
     else
-      wget -q -T 15 --tries=1 -O "${'$'}out" "${'$'}url" && return 0
+      wget -q -T 5 --tries=1 -O "${'$'}out" "${'$'}url" && return 0
     fi
     rm -f "${'$'}out"
   done
@@ -562,29 +564,36 @@ BT_DIR=/opt/android/build-tools
 BT_VERSION=34
 mkdir -p "${'$'}BT_DIR"
 ${DOWNLOAD_HELPER_SCRIPT.trimIndent()}
-# 自举下载与解压工具: Rootfs 默认无 curl/wget/unzip, 缺失时先经 apt 补装
+# 自举下载与解压工具: Rootfs 默认无 curl/wget/unzip, 缺失时先经 apt/apk 补装
+ensure() {
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${'$'}@" >/dev/null 2>&1 || true
+  elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache -q "${'$'}@" >/dev/null 2>&1 || true
+  fi
+}
 if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq >/dev/null 2>&1 || true
-  apt-get install -y -qq curl unzip >/dev/null 2>&1 || true
+  ensure curl wget
 fi
 if ! command -v unzip >/dev/null 2>&1; then
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq >/dev/null 2>&1 || true
-  apt-get install -y -qq unzip >/dev/null 2>&1 || true
+  ensure unzip
 fi
 command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || { echo "no curl/wget available"; exit 1; }
 command -v unzip >/dev/null 2>&1 || { echo "unzip missing"; exit 1; }
 if ! command -v java >/dev/null 2>&1; then
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq >/dev/null 2>&1 || true
-  apt-get install -y -qq openjdk-17-jre-headless >/dev/null 2>&1 || true
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openjdk-17-jre-headless >/dev/null 2>&1 || true
+  elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache -q openjdk17-jre >/dev/null 2>&1 || true
+  fi
 fi
 if [ ! -x "${'$'}BT_DIR/aapt2" ]; then
   ZIP=/tmp/build-tools-${'$'}BT_VERSION.zip
   dl "${'$'}ZIP" \
-    "https://dl.google.com/android/repository/build-tools_r${'$'}BT_VERSION-linux.zip" \
     "https://mirrors.cloud.tencent.com/AndroidSDK/build-tools_r${'$'}BT_VERSION-linux.zip" \
+    "https://dl.google.com/android/repository/build-tools_r${'$'}BT_VERSION-linux.zip" \
     || { echo "all download sources failed for build-tools_r${'$'}BT_VERSION-linux.zip"; exit 1; }
   unzip -qo "${'$'}ZIP" -d "${'$'}BT_DIR" >/dev/null 2>&1 || { echo "unzip failed"; exit 1; }
   rm -f "${'$'}ZIP"
@@ -607,16 +616,20 @@ PLAT_DIR=/opt/android/platforms
 V={{VERSION}}
 mkdir -p "${'$'}PLAT_DIR"
 ${DOWNLOAD_HELPER_SCRIPT.trimIndent()}
-# 自举下载与解压工具: Rootfs 默认无 curl/wget/unzip, 缺失时先经 apt 补装
+# 自举下载与解压工具: Rootfs 默认无 curl/wget/unzip, 缺失时先经 apt/apk 补装
+ensure() {
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${'$'}@" >/dev/null 2>&1 || true
+  elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache -q "${'$'}@" >/dev/null 2>&1 || true
+  fi
+}
 if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq >/dev/null 2>&1 || true
-  apt-get install -y -qq curl unzip >/dev/null 2>&1 || true
+  ensure curl wget
 fi
 if ! command -v unzip >/dev/null 2>&1; then
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq >/dev/null 2>&1 || true
-  apt-get install -y -qq unzip >/dev/null 2>&1 || true
+  ensure unzip
 fi
 command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || { echo "no curl/wget available"; exit 1; }
 command -v unzip >/dev/null 2>&1 || { echo "unzip missing"; exit 1; }
@@ -629,8 +642,8 @@ if [ ! -f "${'$'}PLAT_DIR/android.jar" ]; then
   esac
   ZIP=/tmp/platform-${'$'}V.zip
   dl "${'$'}ZIP" \
-    "https://dl.google.com/android/repository/${'$'}NAME" \
     "https://mirrors.cloud.tencent.com/AndroidSDK/${'$'}NAME" \
+    "https://dl.google.com/android/repository/${'$'}NAME" \
     || { echo "all download sources failed for ${'$'}NAME"; exit 1; }
   unzip -qo "${'$'}ZIP" -d "${'$'}PLAT_DIR" >/dev/null 2>&1 || { echo "unzip failed"; exit 1; }
   rm -f "${'$'}ZIP"
@@ -648,22 +661,28 @@ R8_DIR=/opt/r8
 V={{VERSION}}
 mkdir -p "${'$'}R8_DIR"
 ${DOWNLOAD_HELPER_SCRIPT.trimIndent()}
-# 自举下载工具: Rootfs 默认无 curl/wget, 缺失时先经 apt 补装
+# 自举下载工具: Rootfs 默认无 curl/wget, 缺失时先经 apt/apk 补装
 if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq >/dev/null 2>&1 || true
-  apt-get install -y -qq curl >/dev/null 2>&1 || true
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl >/dev/null 2>&1 || true
+  elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache -q curl >/dev/null 2>&1 || true
+  fi
 fi
 command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || { echo "no curl/wget available"; exit 1; }
 if ! command -v java >/dev/null 2>&1; then
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq >/dev/null 2>&1 || true
-  apt-get install -y -qq openjdk-17-jre-headless >/dev/null 2>&1 || true
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openjdk-17-jre-headless >/dev/null 2>&1 || true
+  elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache -q openjdk17-jre >/dev/null 2>&1 || true
+  fi
 fi
 if [ ! -f "${'$'}R8_DIR/r8.jar" ]; then
   dl "${'$'}R8_DIR/r8.jar" \
-    "https://maven.google.com/com/android/tools/r8/${'$'}V/r8-${'$'}V.jar" \
     "https://maven.aliyun.com/repository/google/com/android/tools/r8/${'$'}V/r8-${'$'}V.jar" \
+    "https://maven.google.com/com/android/tools/r8/${'$'}V/r8-${'$'}V.jar" \
     || { echo "all download sources failed for r8-${'$'}V.jar"; exit 1; }
 fi
 printf '#!/bin/sh\nexec java -jar /opt/r8/r8.jar "${'$'}@"\n' > /usr/local/bin/r8
@@ -672,9 +691,17 @@ command -v java >/dev/null 2>&1 || { echo "java missing"; exit 1; }
 echo __OK__
 """.trimIndent()
 
+/** Alpine(apk) 与 Debian/Ubuntu(apt) 包名差异映射；key 为 DevToolDef.id */
+private val ALPINE_PACKAGE_MAP = mapOf(
+    "nodejs" to "nodejs npm",
+    "build-essential" to "build-base",
+    "openssh-client" to "openssh",
+    "ripgrep" to "ripgrep",
+    "openjdk" to "openjdk17",
+)
+
 /** 工作区一键安装的常用开发工具（检测命令为 command -v <command>） */
-val DEV_TOOLS = listOf(
-    DevToolDef("python3", "Python 3", "Python 解释器与脚本运行环境", "python3", "python3"),
+val DEV_TOOLS = listOf(    DevToolDef("python3", "Python 3", "Python 解释器与脚本运行环境", "python3", "python3"),
     DevToolDef("nodejs", "Node.js", "JavaScript 运行时（含 npm）", "nodejs npm", "node"),
     DevToolDef("git", "Git", "分布式版本控制", "git", "git"),
     DevToolDef("curl", "curl", "HTTP 请求工具", "curl", "curl"),
