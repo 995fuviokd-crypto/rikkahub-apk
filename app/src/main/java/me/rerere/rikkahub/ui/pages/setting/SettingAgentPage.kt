@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import android.net.Uri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.ai.provider.AgentPlatform
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.CheckmarkCircle02
@@ -61,6 +62,7 @@ import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.pages.setting.components.SubagentConfigEditor
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
@@ -105,14 +107,31 @@ private val agentDescriptors: List<AgentDescriptor> = listOf(
 )
 
 @Composable
-fun SettingAgentPage(vm: SettingAgentVM = koinViewModel()) {
+fun SettingAgentPage(vm: SettingAgentVM = koinViewModel(), settingVm: SettingVM = koinViewModel()) {
     val workspaces by vm.workspaces.collectAsStateWithLifecycle()
     val selectedWorkspaceId by vm.selectedWorkspaceId.collectAsStateWithLifecycle()
     val statuses by vm.statuses.collectAsStateWithLifecycle()
     val progress by vm.progress.collectAsStateWithLifecycle()
     val installing by vm.installing.collectAsStateWithLifecycle()
     val importState by vm.importState.collectAsStateWithLifecycle()
+    val settings by settingVm.settings.collectAsStateWithLifecycle()
     val navController = LocalNavController.current
+
+    // 所有绑定了平台 Agent 的模型，供子代理配置区段展示/编辑
+    val agentModels = remember(settings.providers) {
+        settings.providers.flatMap { provider ->
+            provider.models.filter { it.platformAgent != null }.map { provider to it }
+        }
+    }
+    val onEditProvider = { newProvider: ProviderSetting ->
+        settingVm.updateSettings(
+            settings.copy(
+                providers = settings.providers.map {
+                    if (it.id == newProvider.id) newProvider else it
+                }
+            )
+        )
+    }
 
     val selectedWorkspace = workspaces.firstOrNull { it.id == selectedWorkspaceId }
     var showWorkspacePicker by remember { mutableStateOf(false) }
@@ -183,6 +202,77 @@ fun SettingAgentPage(vm: SettingAgentVM = koinViewModel()) {
                     },
                     onCancelInstall = { vm.cancelInstall() },
                 )
+            }
+
+            item {
+                Text(
+                    text = "子代理配置",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                )
+                Text(
+                    text = "为已绑定平台 Agent 的模型启用子代理委派（运行时委托独立子任务）。设置会同步到对应「供应商」模型。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+            }
+
+            if (agentModels.isEmpty()) {
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = CustomColors.listItemColors.containerColor
+                        ),
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    ) {
+                        Text(
+                            text = "尚未配置任何 Agent 模式模型。请先在「供应商」中为某个模型绑定平台 Agent，即可在此配置其子代理委派。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                        )
+                    }
+                }
+            } else {
+                items(agentModels, key = { it.second.id }) { (provider, model) ->
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = CustomColors.listItemColors.containerColor
+                        ),
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    text = provider.name,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                model.platformAgent?.let {
+                                    Tag(type = TagType.INFO) { Text(it.label()) }
+                                }
+                            }
+                            SubagentConfigEditor(
+                                provider = provider,
+                                providers = settings.providers,
+                                agentModel = model,
+                                onEdit = { newProvider -> onEditProvider(newProvider) },
+                            )
+                        }
+                    }
+                }
             }
         }
     }
