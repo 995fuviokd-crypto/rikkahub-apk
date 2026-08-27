@@ -191,7 +191,7 @@ fun ChatMessage(
             exit = slideOutVertically { it / 2 } + fadeOut()
         ) {
             Column(
-                modifier = Modifier.animateContentSize()
+                modifier = Modifier
             ) {
                 ChatMessageActionButtons(
                     message = message,
@@ -320,7 +320,7 @@ private fun MessagePartsBlock(
                 if (block.steps.isNotEmpty()) {
                     val isReasoningOnlyBlock = block.steps.fastAll { it is ThinkingStep.ReasoningStep }
                     ChainOfThought(
-                        modifier = Modifier.animateContentSize(),
+                        modifier = Modifier,
                         steps = block.steps,
                         collapsedAdaptiveWidth = isReasoningOnlyBlock,
                         cardColors = CardDefaults.cardColors(
@@ -366,7 +366,7 @@ private fun MessagePartsBlock(
                         val textContent = @Composable {
                             if (role == MessageRole.USER) {
                                 Surface(
-                                    modifier = Modifier.animateContentSize(),
+                                    modifier = Modifier,
                                     shape = RoundedCornerShape(16.dp),
                                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = settings.displaySetting.bubbleOpacity),
                                     onClick = { onUserMessageClick?.invoke() },
@@ -386,7 +386,7 @@ private fun MessagePartsBlock(
                             } else {
                                 if (settings.displaySetting.showAssistantBubble) {
                                     Surface(
-                                        modifier = if (loading) Modifier else Modifier.animateContentSize(),
+                                        modifier = if (loading) Modifier.animateContentSize() else Modifier,
                                         shape = RoundedCornerShape(16.dp),
                                         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
                                     ) {
@@ -411,7 +411,7 @@ private fun MessagePartsBlock(
                                         ),
                                         onClickCitation = handleClickCitation,
                                         streaming = loading,
-                                        modifier = if (loading) Modifier else Modifier.animateContentSize()
+                                        modifier = if (loading) Modifier.animateContentSize() else Modifier
                                     )
                                 }
                             }
@@ -581,7 +581,7 @@ private fun MessagePartsBlock(
     // Annotations (always rendered at the end)
     if (annotations.isNotEmpty()) {
         Column(
-            modifier = Modifier.animateContentSize(),
+            modifier = Modifier,
         ) {
             var expand by remember { mutableStateOf(false) }
             if (expand) {
@@ -603,7 +603,7 @@ private fun MessagePartsBlock(
                             .padding(4.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        annotations.fastForEachIndexed { index, annotation ->
+                        annotations.fastForEachIndexed { index, annotation: UIMessageAnnotation ->
                             when (annotation) {
                                 is UIMessageAnnotation.UrlCitation -> {
                                     Row(

@@ -8,6 +8,7 @@ import me.rerere.rikkahub.data.files.WorkspaceMounts
 import me.rerere.rikkahub.data.ai.agent.AcpEnvironmentManager
 import me.rerere.rikkahub.data.ai.agent.AcpMcpServersBuilder
 import me.rerere.rikkahub.data.ai.agent.AcpRuntime
+import me.rerere.rikkahub.data.ai.agent.AcpSessionStore
 import me.rerere.rikkahub.data.ai.agent.AgentInstallLogBus
 import me.rerere.rikkahub.data.ai.agent.ScriptMcpBridge
 import me.rerere.rikkahub.data.repository.ConversationRepository
@@ -93,6 +94,7 @@ val repositoryModule = module {
             json = get(),
             scope = get(),
             mcpServersBuilder = get(),
+            sessionStore = AcpSessionStore(),
         )
     }
 

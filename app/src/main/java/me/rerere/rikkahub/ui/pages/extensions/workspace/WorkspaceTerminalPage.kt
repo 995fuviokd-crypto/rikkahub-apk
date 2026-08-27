@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -27,6 +28,7 @@ import androidx.compose.material3.SecondaryScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -76,6 +78,7 @@ fun WorkspaceTerminalPage(id: String) {
     val terminalState by terminalStateFlow.collectAsStateWithLifecycle(
         initialValue = WorkspaceTerminalTabsState(),
     )
+    var pendingCloseTabId by remember(root) { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(root, state.workspace?.localDirectoryUri, state.workspace?.androidLocalAccess) {
         root?.let {
@@ -130,7 +133,40 @@ fun WorkspaceTerminalPage(id: String) {
                     root?.let { sessionManager.selectTab(it, tabId) }
                 },
                 onCloseTab = { tabId ->
-                    root?.let { sessionManager.closeTab(it, tabId) }
+                    pendingCloseTabId = tabId
+                },
+            )
+        }
+
+        val pendingCloseTab = terminalState.tabs.firstOrNull { it.id == pendingCloseTabId }
+        if (pendingCloseTab != null) {
+            AlertDialog(
+                onDismissRequest = { pendingCloseTabId = null },
+                title = {
+                    Text(
+                        stringResource(
+                            R.string.workspace_terminal_close_confirm_title,
+                            pendingCloseTab.number,
+                        ),
+                    )
+                },
+                text = {
+                    Text(stringResource(R.string.workspace_terminal_close_confirm_message))
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            root?.let { sessionManager.closeTab(it, pendingCloseTab.id) }
+                            pendingCloseTabId = null
+                        },
+                    ) {
+                        Text(stringResource(R.string.workspace_terminal_close))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingCloseTabId = null }) {
+                        Text(stringResource(R.string.common_cancel))
+                    }
                 },
             )
         }

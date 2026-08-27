@@ -116,6 +116,10 @@ android {
     }
     sourceSets {
         getByName("androidTest").assets.srcDirs("$projectDir/schemas")
+        // 黑盒接入开关：开启 blackbox.enable 时纳入宿主 ClientConfiguration 实现（依赖 :Bcore 的 ClientConfiguration）。
+        if (providers.gradleProperty("blackbox.enable").getOrElse("false").toBoolean()) {
+            getByName("main").java.srcDir("src/blackbox")
+        }
     }
     androidResources {
         generateLocaleConfig = true
@@ -313,6 +317,11 @@ dependencies {
     implementation(project(":common"))
     implementation(project(":material3"))
     implementation(project(":workspace"))
+    implementation(project(":androidvm"))
+    // 仿光速虚拟机：黑盒 BlackBox 引擎。单开关 blackbox.enable=true 时自动接入（见 settings.gradle.kts）。
+    if (providers.gradleProperty("blackbox.enable").getOrElse("false").toBoolean()) {
+        implementation(project(":Bcore"))
+    }
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
     implementation(kotlin("reflect"))
 

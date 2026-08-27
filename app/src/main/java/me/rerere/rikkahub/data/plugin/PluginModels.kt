@@ -28,6 +28,12 @@ data class PluginInfo(
     val tags: List<String> = emptyList(),
     /** 扩展能力：主界面/设置页等处的新增功能与图标入口 */
     val extensionPoints: PluginExtensionPoints = PluginExtensionPoints(),
+    /**
+     * 插件提供的工作区 CLI 命令所依赖的 npm 包（如 DSH 插件的 bin 包）。
+     * 非空表示该插件需要工作区 Node.js 运行环境；用于插件列表的环境提醒与一键补全，
+     * 也支持"安装到工作区"预装（全局安装后 npx 直接命中本地, 无需每次联网解析）。
+     */
+    val npmPackages: List<String> = emptyList(),
 )
 
 @Serializable

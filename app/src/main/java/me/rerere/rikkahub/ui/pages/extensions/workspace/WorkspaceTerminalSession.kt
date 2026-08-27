@@ -73,6 +73,14 @@ internal fun createWorkspaceTerminalSession(
             args += path
         }
     }
+
+    // 根据 rootfs 中可用的 shell 选择启动命令
+    val shell = when {
+        File(linuxDir, "bin/bash").exists() -> "/bin/bash"
+        File(linuxDir, "bin/sh").exists() -> "/bin/sh"
+        else -> "/bin/sh"  // 默认使用 sh
+    }
+
     args += listOf(
         "/usr/bin/env",
         "-i",
@@ -82,8 +90,8 @@ internal fun createWorkspaceTerminalSession(
         "LANG=C.UTF-8",
         "LC_ALL=C.UTF-8",
         "USER=root",
-        "SHELL=/bin/bash",
-        "/bin/bash",
+        "SHELL=$shell",
+        shell,
     )
 
     val env = arrayOf(

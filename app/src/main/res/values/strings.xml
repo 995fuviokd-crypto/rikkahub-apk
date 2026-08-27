@@ -288,6 +288,11 @@
   <string name="chat_page_edit_nickname">Edit Nickname</string>
   <string name="chat_page_edit_title">Edit title</string>
   <string name="chat_page_edit_title_warning">Please chat first before editing the title</string>
+  <string name="chat_page_permission_title">Agent requests permission</string>
+  <string name="chat_page_permission_unknown_tool">The agent wants to run a tool. Review and choose an option.</string>
+  <string name="chat_page_permission_no_options">No options provided by the agent.</string>
+  <string name="chat_page_session_mode_title">Session Mode</string>
+  <string name="chat_page_session_mode_hint">Switch the runtime mode reported by the agent (e.g. plan, accept edits)</string>
   <string name="chat_page_export_format">Export Format</string>
   <string name="chat_page_export_image">Export as Image</string>
   <string name="chat_page_export_image_desc">Export conversation as PNG image</string>
@@ -1330,6 +1335,9 @@
   <string name="workspace_terminal_tab">Terminal %1$d</string>
   <string name="workspace_terminal_new_tab">New terminal tab</string>
   <string name="workspace_terminal_close_tab">Close terminal %1$d</string>
+  <string name="workspace_terminal_close_confirm_title">Close terminal %1$d?</string>
+  <string name="workspace_terminal_close_confirm_message">Closing this tab will terminate any process still running in it.</string>
+  <string name="workspace_terminal_close">Close</string>
   <string name="workspace_terminal_no_tabs">No open terminal tabs</string>
   <string name="extensions_page_workspace">Workspace</string>
   <string name="extensions_page_workspace_desc">Manage local working directories accessible by Agent</string>
@@ -1476,6 +1484,14 @@
   <string name="setting_provider_page_platform_agent_args_label">Agent arguments (space separated)</string>
   <string name="setting_provider_page_platform_agent_env_label">Agent environment (KEY=VALUE per line)</string>
   <string name="setting_provider_page_platform_agent_hint">The CLI runs inside the workspace. Node.js and the CLI package are installed on first use when missing.</string>
+  <string name="setting_provider_page_subagent_title">Subagent</string>
+  <string name="setting_provider_page_subagent_desc">Let the agent delegate subtasks to isolated child agents</string>
+  <string name="setting_provider_page_subagent_engine_auto">Auto</string>
+  <string name="setting_provider_page_subagent_engine_built_in">Built-in</string>
+  <string name="setting_provider_page_subagent_engine_dsh">DSH</string>
+  <string name="setting_provider_page_subagent_max_depth">Max delegation depth</string>
+  <string name="setting_provider_page_subagent_model">Subagent model</string>
+  <string name="setting_provider_page_subagent_dsh_hint">Delegation config is passed to the DSH process via environment variables (DSH_SUBAGENT_*)</string>
   <string name="setting_provider_page_platform_agent_gemini_cli_desc">Google official coding agent. CLI package: @google/gemini-cli</string>
   <string name="setting_provider_page_platform_agent_codex_desc">OpenAI coding agent. CLI package: @zed-industries/codex-acp</string>
   <string name="setting_provider_page_platform_agent_claude_code_desc">Claude Code ACP adapter. CLI package: @agentclientprotocol/claude-agent-acp</string>
@@ -1512,4 +1528,25 @@
   <string name="setting_provider_page_test_tool_call">Tool Call</string>
   <string name="setting_provider_page_test_tool_called">Called: %1$s  Args: %2$s</string>
   <string name="setting_provider_page_test_tool_not_called">Tool not called, response: %s</string>
+  <string name="chat_generation_network_retrying">%1$s. Retrying (%2$d/%3$d)…</string>
+  <string name="chat_generation_network_unknown_host">Unable to resolve server address</string>
+  <string name="chat_generation_network_timeout">Connection timed out</string>
+  <string name="chat_generation_network_unreachable">Unable to connect to server</string>
+  <string name="chat_generation_network_disconnected">Network connection lost</string>
+  <!-- Virtual Machine -->
+  <string name="vm_page_title">Virtual Machine</string>
+  <string name="vm_page_desc">User-space container environment powered by proot</string>
+  <string name="vm_page_system_version">System Version</string>
+  <string name="vm_page_create_hint">System rootfs will be installed automatically after creation</string>
+  <string name="vm_page_entry_desc">Proot container, multi-system image selection</string>
+  <string name="vm_image_ubuntu_2404">Ubuntu 24.04 LTS</string>
+  <string name="vm_image_ubuntu_2404_desc">Stable LTS, 5-year support</string>
+  <string name="vm_image_ubuntu_2510">Ubuntu 25.10</string>
+  <string name="vm_image_ubuntu_2510_desc">Latest release, most up-to-date packages</string>
+  <string name="vm_image_alpine">Alpine Linux 3.22</string>
+  <string name="vm_image_alpine_desc">Ultra-lightweight, only ~3MB</string>
+  <!-- VM Installation Progress -->
+  <string name="vm_install_downloading">Downloading system rootfs</string>
+  <string name="vm_install_extracting">Extracting files (%1$d entries)</string>
+  <string name="vm_install_installed">System installed successfully</string>
 </resources>

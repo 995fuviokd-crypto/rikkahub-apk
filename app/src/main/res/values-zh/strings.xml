@@ -1459,6 +1459,14 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_provider_page_platform_agent_args_label">Agent 启动参数（空格分隔）</string>
   <string name="setting_provider_page_platform_agent_env_label">Agent 环境变量（每行 KEY=VALUE）</string>
   <string name="setting_provider_page_platform_agent_hint">CLI 在工作区内运行。首次使用若缺少 Node.js 或对应 CLI 包会自动安装。</string>
+  <string name="setting_provider_page_subagent_title">子代理</string>
+  <string name="setting_provider_page_subagent_desc">允许 Agent 将子任务委派给隔离的子代理执行</string>
+  <string name="setting_provider_page_subagent_engine_auto">自动</string>
+  <string name="setting_provider_page_subagent_engine_built_in">内置</string>
+  <string name="setting_provider_page_subagent_engine_dsh">DSH</string>
+  <string name="setting_provider_page_subagent_max_depth">最大委派深度</string>
+  <string name="setting_provider_page_subagent_model">子代理模型</string>
+  <string name="setting_provider_page_subagent_dsh_hint">委派配置经环境变量（DSH_SUBAGENT_*）下发给 DSH 进程</string>
   <string name="setting_provider_page_platform_agent_gemini_cli_desc">Google 官方编码 Agent。CLI 包：@google/gemini-cli</string>
   <string name="setting_provider_page_platform_agent_codex_desc">OpenAI 编码 Agent。CLI 包：@zed-industries/codex-acp</string>
   <string name="setting_provider_page_platform_agent_claude_code_desc">Claude Code ACP 适配。CLI 包：@agentclientprotocol/claude-agent-acp</string>
@@ -1502,4 +1510,28 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_provider_page_test_tool_call">工具调用</string>
   <string name="setting_provider_page_test_tool_called">已调用: %1$s  参数: %2$s</string>
   <string name="setting_provider_page_test_tool_not_called">未调用工具，响应：%s</string>
+  <string name="workspace_terminal_close_confirm_title">关闭终端 %1$d？</string>
+  <string name="workspace_terminal_close_confirm_message">关闭此标签页将终止其中仍在运行的任何进程。</string>
+  <string name="workspace_terminal_close">关闭</string>
+  <string name="chat_generation_network_retrying">%1$s，正在重试（%2$d/%3$d）…</string>
+  <string name="chat_generation_network_unknown_host">无法解析服务器地址</string>
+  <string name="chat_generation_network_timeout">连接超时</string>
+  <string name="chat_generation_network_unreachable">无法连接到服务器</string>
+  <string name="chat_generation_network_disconnected">网络连接已断开</string>
+  <!-- Virtual Machine -->
+  <string name="vm_page_title">虚拟机</string>
+  <string name="vm_page_desc">用户态容器环境，基于 proot</string>
+  <string name="vm_page_system_version">系统版本</string>
+  <string name="vm_page_create_hint">创建后将自动安装系统 rootfs</string>
+  <string name="vm_page_entry_desc">proot 容器，多系统镜像可选</string>
+  <string name="vm_image_ubuntu_2404">Ubuntu 24.04 LTS</string>
+  <string name="vm_image_ubuntu_2404_desc">稳定长期支持版，5 年维护</string>
+  <string name="vm_image_ubuntu_2510">Ubuntu 25.10</string>
+  <string name="vm_image_ubuntu_2510_desc">最新版本，软件包最新</string>
+  <string name="vm_image_alpine">Alpine Linux 3.22</string>
+  <string name="vm_image_alpine_desc">极轻量，仅约 3MB</string>
+  <!-- VM Installation Progress -->
+  <string name="vm_install_downloading">正在下载系统 rootfs</string>
+  <string name="vm_install_extracting">正在解压文件（%1$d 个条目）</string>
+  <string name="vm_install_installed">系统安装成功</string>
 </resources>

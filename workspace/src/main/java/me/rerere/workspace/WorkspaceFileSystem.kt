@@ -45,7 +45,7 @@ class WorkspaceFileSystem(
         require(bytes.size <= config.maxWriteBytes) {
             "Content is too large to write: ${bytes.size} bytes"
         }
-        val file = resolvePath(root, path)
+        val file = resolvePath(root, path, ensureDirExists = true)
         require(!file.exists() || overwrite) { "File already exists: $path" }
         require(!file.exists() || file.isFile) { "Path is not a file: $path" }
         file.parentFile?.mkdirs()
@@ -54,7 +54,7 @@ class WorkspaceFileSystem(
     }
 
     fun importBytes(root: File, path: String, inputStream: InputStream): WorkspaceFileEntry {
-        val file = resolvePath(root, path)
+        val file = resolvePath(root, path, ensureDirExists = true)
         file.parentFile?.mkdirs()
         val target = if (!file.exists()) file else resolveConflict(file)
         inputStream.use { input -> target.outputStream().use { input.copyTo(it) } }
@@ -96,8 +96,12 @@ class WorkspaceFileSystem(
             }
         }
         targetFile.parentFile?.mkdirs()
-        require(sourceFile.renameTo(targetFile)) {
-            "Failed to move $source to $target"
+        if (!sourceFile.renameTo(targetFile)) {
+            // renameTo 在跨挂载点时可能失败, 回退为复制+删除
+            sourceFile.copyRecursively(targetFile, overwrite = true)
+            check(sourceFile.deleteRecursively()) {
+                "Failed to move $source to $target: copy succeeded but source cleanup failed"
+            }
         }
         return targetFile.toEntry(root)
     }
@@ -171,8 +175,8 @@ class WorkspaceFileSystem(
             block(stream.iterator().asSequence())
         }
 
-    private fun resolvePath(root: File, path: String): File {
-        root.mkdirs()
+    private fun resolvePath(root: File, path: String, ensureDirExists: Boolean = false): File {
+        if (ensureDirExists) root.mkdirs()
         val normalized = path
             .replace('\\', '/')
             .trim()

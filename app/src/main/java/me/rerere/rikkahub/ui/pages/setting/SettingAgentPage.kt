@@ -436,6 +436,7 @@ private fun AgentStatusTag(status: AgentEnvStatus) {
     val (text, type) = when (status) {
         AgentEnvStatus.READY -> "已安装" to TagType.SUCCESS
         AgentEnvStatus.NODE_MISSING -> "缺运行环境" to TagType.WARNING
+        AgentEnvStatus.TOOLS_MISSING -> "缺系统工具" to TagType.WARNING
         AgentEnvStatus.CLI_MISSING -> "未安装" to TagType.WARNING
         AgentEnvStatus.NO_ROOTFS -> "工作区未就绪" to TagType.ERROR
         AgentEnvStatus.UNKNOWN -> "检测中…" to TagType.INFO
@@ -510,7 +511,7 @@ private fun WorkspacePickerSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberBottomSheetState(
-            initialValue = SheetValue.Hidden,
+            initialValue = SheetValue.Expanded,
             enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)
         )
     ) {

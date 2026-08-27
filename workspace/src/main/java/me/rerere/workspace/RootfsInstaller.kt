@@ -44,9 +44,11 @@ class RootfsInstaller(
                 download(proxied, archive, onProgress)
             }
             extractTar(archive, stagingDir, format, onProgress)
-            linuxDir.deleteRecursively()
-            require(stagingDir.renameTo(linuxDir)) {
-                "Failed to move rootfs into workspace"
+            check(linuxDir.deleteRecursively()) { "Failed to clean up old rootfs: ${linuxDir.absolutePath}" }
+            if (!stagingDir.renameTo(linuxDir)) {
+                // renameTo 在跨挂载点/部分锁定场景可能失败, 回退为复制移动
+                stagingDir.copyRecursively(linuxDir, overwrite = true)
+                check(stagingDir.deleteRecursively()) { "Failed to clean up staging dir after fallback move" }
             }
             patcher.patch(linuxDir)
             onProgress(RootfsInstallProgress(stage = RootfsInstallStage.INSTALLED))
@@ -151,7 +153,10 @@ class RootfsInstaller(
                 val target = targetDir.safeResolve(header.name)
                 target.parentFile?.mkdirs()
                 when (header.type) {
-                    TarEntryType.DIRECTORY -> target.mkdirs()
+                    TarEntryType.DIRECTORY -> {
+                        target.mkdirs()
+                        target.applyMode(header.mode)
+                    }
                     TarEntryType.SYMLINK -> createSymlink(targetDir, target, header.linkName)
                     TarEntryType.HARDLINK -> createHardLink(targetDir, target, header.linkName)
                     TarEntryType.FILE -> {
@@ -190,6 +195,10 @@ class RootfsInstaller(
     private fun createSymlink(root: File, target: File, linkName: String) {
         if (linkName.isBlank()) return
         val linkTarget = if (File(linkName).isAbsolute) {
+            val resolved = root.canonicalFile.toPath().resolve(linkName.trimStart('/')).normalize()
+            require(resolved.startsWith(root.canonicalFile.toPath())) {
+                "Absolute symlink escapes rootfs: $linkName"
+            }
             File(linkName)
         } else {
             val resolved = File(target.parentFile ?: root, linkName).canonicalFile
@@ -217,10 +226,15 @@ class RootfsInstaller(
             ) {
                 throw error
             }
+            // 内容复制必须成功; 权限设置失败仅告警, 避免半成品文件被误判为安装失败
             source.copyTo(target, overwrite = true)
-            target.setReadable(source.canRead(), false)
-            target.setWritable(source.canWrite(), true)
-            target.setExecutable(source.canExecute(), false)
+            runCatching {
+                target.setReadable(source.canRead(), false)
+                target.setWritable(source.canWrite(), true)
+                target.setExecutable(source.canExecute(), false)
+            }.onFailure { e ->
+                println("Warning: failed to set permissions on hardlink copy $target: ${e.message}")
+            }
         }.getOrThrow()
     }
 

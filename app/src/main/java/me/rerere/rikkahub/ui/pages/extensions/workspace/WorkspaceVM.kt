@@ -20,9 +20,30 @@ class WorkspaceVM(
     val workspaces = repository.listFlow()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    fun create(name: String) {
+    private val _installProgress = MutableStateFlow<RootfsInstallProgress?>(null)
+    val installProgress = _installProgress.asStateFlow()
+
+    private val _installError = MutableStateFlow<String?>(null)
+    val installError = _installError.asStateFlow()
+
+    fun create(name: String, imageUrl: String? = null) {
         viewModelScope.launch {
-            runCatching { repository.create(name) }
+            _installProgress.value = null
+            _installError.value = null
+            runCatching {
+                val workspace = repository.create(name)
+                if (!imageUrl.isNullOrBlank()) {
+                    repository.installRootfs(workspace.id, imageUrl) { progress ->
+                        _installProgress.value = progress
+                    }
+                }
+            }.onFailure { e ->
+                if (e !is CancellationException) {
+                    _installError.value = e.message ?: "Installation failed"
+                }
+            }.onSuccess {
+                _installProgress.value = null
+            }
         }
     }
 

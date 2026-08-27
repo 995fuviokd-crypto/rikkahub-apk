@@ -342,7 +342,7 @@ private fun CodeBlockDefault(
             CodeHighlightText(
                 code = displayCode,
                 language = language,
-                modifier = Modifier.animateContentSize(),
+                modifier = Modifier,
                 fontSize = textStyle.fontSize,
                 lineHeight = textStyle.lineHeight,
                 colors = colorPalette,

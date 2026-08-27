@@ -12,6 +12,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import me.rerere.rikkahub.data.ai.agent.AcpEnvironmentManager
+import me.rerere.rikkahub.data.ai.agent.AgentEnvStatus
+import me.rerere.rikkahub.data.ai.agent.AgentInstallPhase
+import me.rerere.rikkahub.data.ai.agent.AgentInstallProgress
 import me.rerere.rikkahub.data.api.CommunityListItem
 import me.rerere.rikkahub.data.api.CommunityMarketDataSource
 import me.rerere.rikkahub.data.api.DshMarketDataSource
@@ -28,6 +32,7 @@ import me.rerere.rikkahub.data.plugin.PluginInfo
 import me.rerere.rikkahub.data.plugin.PluginManager
 import me.rerere.rikkahub.data.plugin.PluginMarketEntry
 import me.rerere.rikkahub.data.plugin.PluginStatus
+import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.data.api.TavernListing
 import me.rerere.rikkahub.data.api.TavernMarketDataSource
 import me.rerere.rikkahub.data.api.communityPluginIdFor
@@ -46,11 +51,31 @@ class PluginMarketVM(
     private val dshPluginAdapter: DshPluginAdapter,
     private val dshMarketDataSource: DshMarketDataSource,
     private val tavernMarketDataSource: TavernMarketDataSource,
+    private val environmentManager: AcpEnvironmentManager,
+    private val workspaceRepository: WorkspaceRepository,
 ) : ViewModel() {
     private val installMutex = Mutex()
 
     private val _installed = MutableStateFlow<List<InstalledPlugin>>(emptyList())
     val installed = _installed.asStateFlow()
+
+    /** 工作区插件运行环境(Node.js + 常用工具)的就绪状态, 供 DSH npm 类插件的环境提醒 */
+    private val _envStatus = MutableStateFlow(AgentEnvStatus.UNKNOWN)
+    val envStatus = _envStatus.asStateFlow()
+
+    /** 一键补全环境的进度; null 表示空闲 */
+    private val _envProgress = MutableStateFlow<AgentInstallProgress?>(null)
+    val envProgress = _envProgress.asStateFlow()
+
+    private val _envInstalling = MutableStateFlow(false)
+    val envInstalling = _envInstalling.asStateFlow()
+
+    /** 正在预装到工作区的 npm 包(取 PluginInfo.id), null 表示空闲 */
+    private val _pkgInstallingId = MutableStateFlow<String?>(null)
+    val pkgInstallingId = _pkgInstallingId.asStateFlow()
+
+    private val _pkgNotice = MutableStateFlow<String?>(null)
+    val pkgNotice = _pkgNotice.asStateFlow()
 
     private val _marketEntries = MutableStateFlow<List<PluginMarketEntry>>(emptyList())
     val marketEntries = _marketEntries.asStateFlow()
@@ -97,6 +122,7 @@ class PluginMarketVM(
             }
             refreshInstalled()
             loadMarket()
+            refreshEnvStatus()
         }
         // 持续同步启用集合：助手详情/技能页/AI 工具等其他入口修改后，市场页状态保持一致
         viewModelScope.launch {
@@ -121,6 +147,68 @@ class PluginMarketVM(
                 plugin
             }
         }
+    }
+
+    private suspend fun firstWorkspaceRoot(): String? =
+        workspaceRepository.listFlow().first().firstOrNull()?.root
+
+    /** 重新检测工作区运行环境状态 */
+    fun refreshEnvStatus() {
+        viewModelScope.launch {
+            val root = firstWorkspaceRoot() ?: return@launch
+            _envStatus.value = environmentManager.checkRuntime(root)
+        }
+    }
+
+    /**
+     * 一键补全工作区环境(Node.js + 常用工具), 完成后刷新状态。
+     * 进行中重复调用被忽略; 失败详情保留在 envProgress(FAILED 阶段)中展示。
+     */
+    fun installWorkspaceEnv() {
+        if (_envInstalling.value) return
+        viewModelScope.launch {
+            val root = firstWorkspaceRoot() ?: return@launch
+            _envInstalling.value = true
+            _envProgress.value = AgentInstallProgress(AgentInstallPhase.CHECKING, "准备中…")
+            environmentManager.ensureRuntimeWithProgress(root) { progress ->
+                _envProgress.value = progress
+            }.onSuccess {
+                _envStatus.value = AgentEnvStatus.READY
+            }.onFailure {
+                // 失败时重查真实状态: 可能 node 已装好只差 tools
+                _envStatus.value = environmentManager.checkRuntime(root)
+            }
+            _envInstalling.value = false
+        }
+    }
+
+    /**
+     * 将插件的 npm CLI 包预装到工作区(全局安装)。装完后 AI 在终端用 npx 调用时
+     * 直接命中本地包, 免联网解析。结果经 pkgNotice 一次性反馈给 UI。
+     */
+    fun installPkgToWorkspace(plugin: InstalledPlugin) {
+        val pkgs = plugin.info?.npmPackages.orEmpty()
+        if (pkgs.isEmpty()) return
+        if (_pkgInstallingId.value != null) return
+        viewModelScope.launch {
+            val root = firstWorkspaceRoot() ?: return@launch
+            _pkgInstallingId.value = plugin.id
+            runCatching {
+                pkgs.forEach { pkg ->
+                    environmentManager.installGlobalPackage(root, pkg).getOrThrow()
+                }
+            }.onSuccess {
+                _pkgNotice.value = "已安装到工作区：${pkgs.joinToString()}（终端中可直接使用）"
+            }.onFailure {
+                _pkgNotice.value = "工作区安装失败：${it.message}"
+            }
+            _pkgInstallingId.value = null
+        }
+    }
+
+    /** 消费一次性提示(Snackbar 等) */
+    fun consumePkgNotice() {
+        _pkgNotice.value = null
     }
 
     /**

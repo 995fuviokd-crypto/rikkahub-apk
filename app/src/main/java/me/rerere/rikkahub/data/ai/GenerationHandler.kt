@@ -6,6 +6,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.channelFlow
@@ -41,11 +44,11 @@ import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.handleTextGenerationResult
 import me.rerere.ai.ui.limitContext
+import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
 import me.rerere.rikkahub.data.files.FileFolders
-import java.io.File
 import me.rerere.rikkahub.data.ai.transformers.onGenerationFinish
 import me.rerere.rikkahub.data.ai.transformers.transforms
 import me.rerere.rikkahub.data.ai.transformers.visualTransforms
@@ -61,6 +64,12 @@ import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.recall.SideEffectRecorder
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.utils.applyPlaceholders
+import java.io.File
+import java.io.IOException
+import java.net.ConnectException
+import java.net.NoRouteToHostException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.Locale
 import kotlin.time.Clock
 import kotlin.uuid.Uuid
@@ -68,6 +77,10 @@ import kotlin.uuid.Uuid
 private const val TAG = "GenerationHandler"
 private const val MAX_TOOL_OUTPUT_CHARS = 32 * 1024
 private const val TOOL_OUTPUT_PREVIEW_CHARS = 4 * 1024
+private const val MAX_PROVIDER_NETWORK_RETRIES = 3
+private const val INITIAL_PROVIDER_RETRY_DELAY_MS = 1_000L
+
+private class StreamChunkHandlingException(cause: Throwable) : RuntimeException(cause)
 
 // 流式 SSE delta 合并发射的时间窗口（毫秒）：高频 token 按此节流，
 // 只把最新状态发射给 UI，减少每 token 一次的全量 transform 与重组
@@ -549,7 +562,9 @@ class GenerationHandler(
                     append(AUTONOMOUS_EXECUTION_PROMPT.trimIndent())
                 }
             }
-            if (system.isNotBlank()) add(UIMessage.system(prompt = system))
+            if (system.isNotBlank()) {
+                add(UIMessage.system(prompt = system).copy(isSynthetic = true))
+            }
             addAll(messages.limitContext(assistant.contextMessageLimit))
         }.transforms(
             transformers = transformers,
@@ -607,63 +622,100 @@ class GenerationHandler(
             },
             sessionId = conversationId?.toString(),
         )
-        if (stream) {
-            if (backupRoutes.isEmpty()) {
-                // 单线路：直接流式
-                val streamChunkHandler = StreamChunkHandler(model)
-                var latestMessages: List<UIMessage> = messages
-                var lastEmitTime = 0L
-                providerImpl.streamText(
-                    providerSetting = provider,
-                    messages = internalMessages,
-                    params = params
-                ).collect { chunk ->
-                    latestMessages = streamChunkHandler.handle(latestMessages, chunk)
-                    val now = System.currentTimeMillis()
-                    if (now - lastEmitTime >= STREAM_EMIT_INTERVAL_MS) {
-                        lastEmitTime = now
+        try {
+            if (stream) {
+                val responseBaseMessages =
+                    if (messages.lastOrNull()?.role == MessageRole.ASSISTANT) {
+                        messages
+                    } else {
+                        messages + UIMessage(
+                            role = MessageRole.ASSISTANT,
+                            parts = emptyList(),
+                            modelId = model.id,
+                        )
+                    }
+                var retryCount = 0
+
+                if (backupRoutes.isEmpty()) {
+                    // 单线路：带重试的直接流式
+                    while (true) {
+                        val streamChunkHandler = StreamChunkHandler(model)
+                        var attemptMessages = responseBaseMessages
+                        try {
+                            providerImpl.streamText(
+                                providerSetting = provider,
+                                messages = internalMessages,
+                                params = params
+                            ).collect { chunk ->
+                                try {
+                                    if (retryCount > 0) {
+                                        processingStatus.value = null
+                                    }
+                                    attemptMessages = streamChunkHandler.handle(attemptMessages, chunk)
+                                    onUpdateMessages(attemptMessages)
+                                } catch (error: CancellationException) {
+                                    throw error
+                                } catch (error: Throwable) {
+                                    // 下游消息转换或 UI 更新失败不属于网络故障，不能重放模型请求。
+                                    throw StreamChunkHandlingException(error)
+                                }
+                            }
+                            messages = attemptMessages
+                            break
+                        } catch (error: Throwable) {
+                            if (error is StreamChunkHandlingException) {
+                                throw error.cause ?: error
+                            }
+                            retryCount = awaitNetworkRetryOrThrow(
+                                error = error,
+                                retryCount = retryCount,
+                                processingStatus = processingStatus,
+                            )
+                        }
+                    }
+                } else {
+                    // 多线路并发：主线路 + 备用线路各自独立流式（独立 handler 与消息状态），
+                    // 竞速首个产出的线路并接管，缩短首 token 等待时间；输家线路被取消。
+                    // 每条线路先把 chunk 合并进自己的消息状态并节流，raceStreams 竞速"状态流"，
+                    // 竞速胜出的完整消息列表直接交给 UI，无需区分 chunk 来源
+                    val routeStateFlows = buildList {
+                        fun routeStateFlow(routeStream: Flow<StreamChunk>): Flow<List<UIMessage>> = flow {
+                            val handler = StreamChunkHandler(model)
+                            var latest: List<UIMessage> = messages
+                            var lastEmitTime = 0L
+                            routeStream.collect { chunk ->
+                                latest = handler.handle(latest, chunk)
+                                val now = System.currentTimeMillis()
+                                if (now - lastEmitTime >= STREAM_EMIT_INTERVAL_MS) {
+                                    lastEmitTime = now
+                                    emit(latest)
+                                }
+                            }
+                            // 流结束发射最终状态
+                            emit(latest)
+                        }
+                        add(routeStateFlow(providerImpl.streamText(providerSetting = provider, messages = internalMessages, params = params)))
+                        backupRoutes.forEach { (backupImpl, backupSetting) ->
+                            add(routeStateFlow(backupImpl.streamText(providerSetting = backupSetting, messages = internalMessages, params = params)))
+                        }
+                    }
+                    raceStreams(routeStateFlows).collect { latestMessages ->
                         onUpdateMessages(latestMessages)
                     }
                 }
-                onUpdateMessages(latestMessages)
             } else {
-                // 多线路并发：主线路 + 备用线路各自独立流式（独立 handler 与消息状态），
-                // 竞速首个产出的线路并接管，缩短首 token 等待时间；输家线路被取消。
-                // 每条线路先把 chunk 合并进自己的消息状态并节流，raceStreams 竞速"状态流"，
-                // 竞速胜出的完整消息列表直接交给 UI，无需区分 chunk 来源
-                val routeStateFlows = buildList {
-                    fun routeStateFlow(routeStream: Flow<StreamChunk>): Flow<List<UIMessage>> = flow {
-                        val handler = StreamChunkHandler(model)
-                        var latest: List<UIMessage> = messages
-                        var lastEmitTime = 0L
-                        routeStream.collect { chunk ->
-                            latest = handler.handle(latest, chunk)
-                            val now = System.currentTimeMillis()
-                            if (now - lastEmitTime >= STREAM_EMIT_INTERVAL_MS) {
-                                lastEmitTime = now
-                                emit(latest)
-                            }
-                        }
-                        // 流结束发射最终状态
-                        emit(latest)
-                    }
-                    add(routeStateFlow(providerImpl.streamText(providerSetting = provider, messages = internalMessages, params = params)))
-                    backupRoutes.forEach { (backupImpl, backupSetting) ->
-                        add(routeStateFlow(backupImpl.streamText(providerSetting = backupSetting, messages = internalMessages, params = params)))
-                    }
+                val result = executeProviderRequestWithRetry(processingStatus) {
+                    providerImpl.generateText(
+                        providerSetting = provider,
+                        messages = internalMessages,
+                        params = params,
+                    )
                 }
-                raceStreams(routeStateFlows).collect { latestMessages ->
-                    onUpdateMessages(latestMessages)
-                }
+                messages = messages.handleTextGenerationResult(result = result, model = model)
+                onUpdateMessages(messages)
             }
-        } else {
-            val result = providerImpl.generateText(
-                providerSetting = provider,
-                messages = internalMessages,
-                params = params,
-            )
-            messages = messages.handleTextGenerationResult(result = result, model = model)
-            onUpdateMessages(messages)
+        } finally {
+            processingStatus.value = null
         }
     }
 
@@ -672,6 +724,64 @@ class GenerationHandler(
         return repo.listFlow().first()
             .firstOrNull { it.shellStatus == WorkspaceShellStatus.READY.name }
             ?.root
+    }
+
+    private suspend fun <T> executeProviderRequestWithRetry(
+        processingStatus: MutableStateFlow<String?>,
+        block: suspend () -> T,
+    ): T {
+        var retryCount = 0
+        while (true) {
+            try {
+                return block()
+            } catch (error: Throwable) {
+                retryCount = awaitNetworkRetryOrThrow(
+                    error = error,
+                    retryCount = retryCount,
+                    processingStatus = processingStatus,
+                )
+            }
+        }
+    }
+
+    private suspend fun awaitNetworkRetryOrThrow(
+        error: Throwable,
+        retryCount: Int,
+        processingStatus: MutableStateFlow<String?>,
+    ): Int {
+        // 用户主动停止生成时，底层连接也可能以 IOException("canceled") 收尾；
+        // 先检查协程状态，确保取消不会被当作网络波动重新拉起。
+        currentCoroutineContext().ensureActive()
+        if (error !is IOException || retryCount >= MAX_PROVIDER_NETWORK_RETRIES) {
+            throw error
+        }
+
+        val nextRetryCount = retryCount + 1
+        val retryDelay = INITIAL_PROVIDER_RETRY_DELAY_MS shl retryCount
+        processingStatus.value = context.getString(
+            R.string.chat_generation_network_retrying,
+            getNetworkErrorMessage(error),
+            nextRetryCount,
+            MAX_PROVIDER_NETWORK_RETRIES,
+        )
+        Log.w(
+            TAG,
+            "Provider connection failed, retrying in ${retryDelay}ms " +
+                    "($nextRetryCount/$MAX_PROVIDER_NETWORK_RETRIES)",
+            error,
+        )
+        delay(retryDelay)
+        return nextRetryCount
+    }
+
+    private fun getNetworkErrorMessage(error: IOException): String {
+        val messageRes = when (error) {
+            is UnknownHostException -> R.string.chat_generation_network_unknown_host
+            is SocketTimeoutException -> R.string.chat_generation_network_timeout
+            is ConnectException, is NoRouteToHostException -> R.string.chat_generation_network_unreachable
+            else -> R.string.chat_generation_network_disconnected
+        }
+        return context.getString(messageRes)
     }
 
     private fun maybeTruncateToolOutput(

@@ -11,6 +11,7 @@ import me.rerere.rikkahub.data.script.ScriptToolDef
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.nio.file.Files
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -79,8 +80,7 @@ class DshPluginAdapter(
             val bytes = download(
                 "https://codeload.github.com/${ref.owner}/${ref.repo}/zip/${ref.ref}"
             )
-            val tempRoot = File.createTempFile("dsh-", "-convert")
-                .apply { delete(); mkdirs() }
+            val tempRoot = Files.createTempDirectory("dsh-").toFile()
             try {
                 PluginManager.unzipTo(bytes, tempRoot)
                 val root = locateRepoRoot(tempRoot, ref.repo)
@@ -100,7 +100,7 @@ class DshPluginAdapter(
                     clientJs = clientEntry?.let { runCatching { it.readText() }.getOrNull() },
                 )
             } finally {
-                tempRoot.deleteRecursively()
+                runCatching { tempRoot.deleteRecursively() }
             }
         }
     }
@@ -159,6 +159,12 @@ class DshPluginAdapter(
         val npmPackage = (pkg?.get("name") as? JsonPrimitive)?.contentOrNull?.trim()
             ?.takeIf { it.isNotBlank() && !it.startsWith("github:") }
         val workspaceCommandHint = buildWorkspaceCommandHint(npmPackage, root)
+        // 结构化声明工作区 CLI 依赖: 供插件列表环境提醒/一键补全/预装使用
+        val npmPackages = if (workspaceCommandHint.isNotBlank()) {
+            listOfNotNull(npmPackage)
+        } else {
+            emptyList()
+        }
 
         // 1. skills 资源：根级或 skills/** 的 SKILL.md 合并为技能型插件
         val skillFiles = root.walkTopDown()
@@ -180,6 +186,7 @@ class DshPluginAdapter(
                 systemPrompt = (prompt + workspaceCommandHint).take(PluginManager.MAX_SYSTEM_PROMPT_LEN),
                 type = PluginCategories.TYPE_SKILL,
                 tags = listOf("dsh", "skill"),
+                npmPackages = npmPackages,
                 extensionPoints = docsSidebarEntry(
                     PluginInfo(id = "dsh-${ref.slug}", name = name, version = "1.0.0",
                         repository = "https://github.com/${ref.owner}/${ref.repo}")
@@ -212,6 +219,7 @@ class DshPluginAdapter(
                 systemPrompt = (prompt + workspaceCommandHint).take(PluginManager.MAX_SYSTEM_PROMPT_LEN),
                 type = PluginCategories.TYPE_PLUGIN,
                 tags = listOf("dsh"),
+                npmPackages = npmPackages,
                 extensionPoints = docsSidebarEntry(
                     PluginInfo(id = "dsh-${ref.slug}", name = name, version = "1.0.0",
                         repository = "https://github.com/${ref.owner}/${ref.repo}")
@@ -238,6 +246,7 @@ class DshPluginAdapter(
                 systemPrompt = prompt,
                 type = PluginCategories.TYPE_PLUGIN,
                 tags = listOf("dsh", "cli"),
+                npmPackages = npmPackages,
                 extensionPoints = docsSidebarEntry(
                     PluginInfo(id = "dsh-${ref.slug}", name = name, version = "1.0.0",
                         repository = "https://github.com/${ref.owner}/${ref.repo}")
@@ -342,24 +351,56 @@ class DshPluginAdapter(
     }
 
     /**
-     * 宿主 shim 脚本：模块加载器、cordis ctx、react 三件套 require 映射与
-     * 未知模块 stub；mountAll 在 client.js 注册后统一调用 apply 挂载面板 DOM。
+     * 宿主 shim 脚本：模块加载器、cordis ctx、react 三件套 require 映射、DSH 生态
+     * 通用包适配桩与延迟挂载机制。mountAll 在 client.js 注册后统一调用 apply 挂载面板 DOM。
+     *
+     * 兼容策略：
+     * - require() 对 DSH 生态常用包（@deepseek-ai/dsh-client-ui-slots / -components / dsh-base / log 等）
+     *   返回可继续调用的适配桩，而非立即抛错；unknown 模块返回链式 no-op Proxy。
+     * - ctx.get() 覆盖 slots/timer 之外更多宿主服务（logger/config/event/…），全部安全空转。
+     * - slots 注册支持异步：apply 结束后在 0.3s/1s/3s/8s 多次复查插槽表，迟到注册也能挂载。
+     * - 任一步失败都会把真实错误写入 status，而不是只有一句笼统提示。
      */
     internal val PANEL_HOST_SHIM = """
 window.__ModuleLoader__ = (function () {
     var pending = [];
-    var mountedOnce = false;
     var slotStore = {};
-    var pluginCount = 0;
+    var mounted = false;
+    var pluginErrors = [];
+    var missingList = [];
+    var missingSeen = {};
+    var globalModule = { exports: {}, mounted: false };
 
-    function makeRequire() {
-        return function (name) {
+    function recordGlobalMissing(name) {
+        var k = String(name);
+        if (!missingSeen[k]) { missingSeen[k] = true; missingList.push(k); }
+    }
+
+    function noopModule(recordMissing) {
+        var fn = function () { return undefined; };
+        var proxy = new Proxy(fn, {
+            get: function (t, p) {
+                if (p === Symbol.toStringTag) return 'Module';
+                if (p === 'default') return t;
+                if (p === 'then') return undefined;
+                return t;
+            },
+            apply: function (t, self, args) { return t; },
+            construct: function (t, args) { return t; },
+            has: function () { return true; },
+            set: function () { return true; }
+        });
+        return proxy;
+    }
+
+    function makeRequire(recordMissing) {
+        function requireImpl(name) {
             var key = String(name || '').toLowerCase();
             if (key === 'react') {
                 if (!window.React) throw new Error('React not loaded');
                 return window.React;
             }
-            if (key === 'react-dom' || key === 'react-dom/client') {
+            if (key === 'react-dom' || key === 'react-dom/client' || key === 'react-dom/server') {
                 if (!window.ReactDOM) throw new Error('ReactDOM not loaded');
                 return window.ReactDOM;
             }
@@ -375,28 +416,229 @@ window.__ModuleLoader__ = (function () {
                 jsx.Fragment = R.Fragment;
                 return { jsx: jsx, jsxs: jsx, jsxDEV: jsx, Fragment: R.Fragment };
             }
-            console.warn('[dsh-shim] stub module:', name);
-            return new Proxy(function () {}, {
-                get: function (t, p) {
-                    if (p === Symbol.toStringTag || p === 'default') return t;
-                    return function () {};
+            // DSH 生态常用包适配桩：返回可写可调的对象（见 slotsExport / componentsExport）
+            if (key === '@deepseek-ai/dsh-client-ui-slots' || key === '@deepseek-ai/dsh-slots') {
+                return slotsExport;
+            }
+            if (key === '@deepseek-ai/dsh-client-ui-components' || key === '@deepseek-ai/dsh-client-ui' ||
+                key === '@deepseek-ai/dsh-ui' || key === '@deepseek-ai/dsh-client-ui-react') {
+                return componentsExport();
+            }
+            if (key === '@deepseek-ai/dsh-client' || key === '@deepseek-ai/dsh-client-ui-tab') {
+                return dshClientExport();
+            }
+            if (key === '@deepseek-ai/dsh-base' || key === '@deepseek-ai/dsh-utils' ||
+                key === '@deepseek-ai/dsh-command-compact') {
+                return baseExport();
+            }
+            if (key === '@deepseek-ai/log' || key === '@deepseek-ai/dsh-log') {
+                return loggerExport();
+            }
+            if (key.indexOf('./') === 0 || key.indexOf('../') === 0) {
+                if (recordMissing) recordMissing(name);
+                return noopModule();
+            }
+            if (recordMissing) recordMissing(name);
+            return noopModule();
+        }
+        return requireImpl;
+    }
+
+    // ---------- ctx 宿主服务 ----------
+    function loggerService() {
+        var levels = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
+        var svc = { level: 'info', bind: function () { return svc; }, child: function () { return svc; } };
+        levels.forEach(function (l) {
+            svc[l] = function () {
+                var args = Array.prototype.slice.call(arguments);
+                if (l === 'warn' || l === 'error' || l === 'fatal') {
+                    try { console[l == 'fatal' ? 'error' : l].apply(console, ['[dsh-plugin]'].concat(args)); } catch (e) {}
                 }
-            });
+            };
+        });
+        return svc;
+    }
+
+    function configService() {
+        var store = {};
+        return {
+            get: function (key, fallback) { return store[key] !== undefined ? store[key] : fallback; },
+            set: function (key, val) { store[key] = val; },
+            has: function (key) { return store[key] !== undefined; },
+            keys: function () { return Object.keys(store); },
+            getConfig: function () { return store; },
+            setConfig: function (c) { if (c && typeof c === 'object') store = c; }
         };
     }
 
+    function eventService() {
+        var handlers = {};
+        return {
+            on: function (name, fn) { (handlers[name] = handlers[name] || []).push(fn); return function () {}; },
+            once: function (name, fn) {
+                var wrapped = function () { off(name, wrapped); return fn.apply(null, arguments); };
+                function off(n, f) { if (handlers[n]) handlers[n] = handlers[n].filter(function (h) { return h !== f; }); }
+                on(name, wrapped);
+            },
+            off: function (name, fn) {
+                if (handlers[name]) handlers[name] = handlers[name].filter(function (h) { return h !== fn; });
+            },
+            emit: function (name) {
+                var rest = Array.prototype.slice.call(arguments, 1);
+                (handlers[name] || []).slice().forEach(function (h) { try { h.apply(null, rest); } catch (e) {} });
+            }
+        };
+    }
+
+    function httpService() {
+        function req(method) {
+            return function (url, opts) {
+                return Promise.reject(new Error('[dsh-shim] 网络能力不可用(宿主未提供 http 服务): ' + method + ' ' + url));
+            };
+        }
+        return { get: req('GET'), post: req('POST'), put: req('PUT'), delete: req('DELETE'), head: req('HEAD') };
+    }
+
+    function assetService() {
+        return {
+            url: function (name) { return name; },
+            base: function () { return './'; },
+            locale: function () { return 'zh-CN'; },
+            assets: function () { return {}; }
+        };
+    }
+
+    function modelService() {
+        return {
+            runtime: function () { return 'standard'; },
+            request: function (opts) { return { stream: false, content: '' }; },
+            stream: function (opts) { return { then: function () {}, [Symbol.asyncIterator]() { return { next: function () { return Promise.resolve({ done: true }); } }; } }; },
+            start: function (opts) { return Promise.resolve({}); },
+            stop: function () { return Promise.resolve(); }
+        };
+    }
+
+    function callableService(fn) {
+        return fn;
+    }
+
+    function makeCtx() {
+        return {
+            effect: function (fn) { try { return fn(this); } catch (e) { console.error(e); } },
+            get: function (name) {
+                var key = String(name || '').toLowerCase();
+                if (key === 'slots') return slotsApi;
+                if (key === 'timer') return timerApi;
+                if (key === 'logger' || key === 'log') return loggerService();
+                if (key === 'config' || key === 'conf') return configService();
+                if (key === 'event' || key === 'events' || key === 'bus') return eventService();
+                if (key === 'http' || key === 'axios' || key === 'got') return httpService();
+                if (key === 'assets' || key === 'asset') return assetService();
+                if (key === 'model' || key === 'models' || key === 'llm' || key === 'ai') return modelService();
+                return new Proxy(function () {}, {
+                    get: function (t, p) {
+                        if (p === Symbol.toStringTag || p === 'default' || p === 'then') return t;
+                        return function () {};
+                    },
+                    has: function () { return true; }
+                });
+            },
+            set: function () {},
+            on: function () { return this; },
+            emit: function () {},
+            inject: function (slotName, factory) {
+                try { factory(); } catch (e) { console.error('[dsh-shim] ctx.inject failed', slotName, e); }
+            },
+            register: function (config, render) { slotsApi.register(config, render); }
+        };
+    }
+
+    // ---------- 生态包适配桩 ----------
     var slotsApi = {
         register: function (config, render) {
             var entry = { config: config || {}, render: render };
-            var slotName = (config && config.name) || 'unnamed';
+            var slotName = (config && config.name) || (config && config.slot) || 'unnamed';
             if (!slotStore[slotName]) slotStore[slotName] = [];
             slotStore[slotName].push(entry);
+            scheduleRender();
             return entry;
         },
         inject: function (slotName, factory) {
             try { factory(); } catch (e) { console.error('[dsh-shim] inject failed', slotName, e); }
-        }
+        },
+        has: function (slotName) { return !!slotStore[slotName] && slotStore[slotName].length > 0; },
+        list: function () { return Object.keys(slotStore); }
     };
+
+    var slotsExport = Object.assign(function () { return slotsApi; }, slotsApi);
+    slotsExport.default = slotsExport;
+    slotsExport.register = slotsApi.register;
+    slotsExport.inject = slotsApi.inject;
+
+    function componentsExport() {
+        var R = window.React;
+        var base = function (props) { return R ? R.createElement('div', props) : null; };
+        var proxy = new Proxy(base, {
+            get: function (t, p) {
+                if (p === Symbol.toStringTag || p === 'default' || p === 'then') return t;
+                if (p === 'Fragment') return (R && R.Fragment) || 'div';
+                // 对象式导出成员（样式/常量等）
+                return t;
+            },
+            construct: function (t, args) { return R ? R.createElement('div', args[0]) : null; },
+            has: function () { return true; }
+        });
+        proxy.default = proxy;
+        return proxy;
+    }
+
+    function dshClientExport() {
+        var exp = {
+            ready: Promise.resolve(),
+            run: function () { return Promise.resolve(); },
+            version: '0.1.1-rc.2 (RikkaHub shim)',
+            slots: slotsApi,
+            client: { version: '0.1.1-rc.2' }
+        };
+        exp.default = exp;
+        return exp;
+    }
+
+    function baseExport() {
+        var exp = {
+            Json: { parse: function () { return {}; }, stringify: function () { return '{}'; }, deepClone: function (o) { return o; } },
+            deepmerge: function () { return {}; },
+            sleep: function () { return Promise.resolve(); },
+            isBrowser: function () { return true; },
+            isNode: function () { return false; },
+            noop: function () {},
+        };
+        var proxy = new Proxy(function () { return undefined; }, {
+            get: function (t, p) {
+                if (p in exp) return exp[p];
+                if (p === Symbol.toStringTag || p === 'default' || p === 'then') return t;
+                return t;
+            },
+            has: function () { return true; }
+        });
+        proxy.default = proxy;
+        return proxy;
+    }
+
+    function loggerExport() {
+        var svc = loggerService();
+        svc.default = svc;
+        var proxy = new Proxy(function () {}, {
+            get: function (t, p) {
+                if (p in svc) return svc[p];
+                if (p === Symbol.toStringTag || p === 'default' || p === 'then') return t;
+                return function () {};
+            },
+            apply: function () { return svc; },
+            has: function () { return true; }
+        });
+        return proxy;
+    }
 
     var timerApi = {
         setInterval: function (fn, ms) {
@@ -410,29 +652,15 @@ window.__ModuleLoader__ = (function () {
         every: function (ms, fn) { return this.setInterval(fn, ms); }
     };
 
-    function makeCtx() {
-        return {
-            effect: function (fn) { try { return fn(this); } catch (e) { console.error(e); } },
-            get: function (name) {
-                var key = (name || '').toLowerCase();
-                if (key === 'slots') return slotsApi;
-                if (key === 'timer') return timerApi;
-                return new Proxy(function(){}, {
-                    get: function(t, p) {
-                        if (p === Symbol.toStringTag || p === 'default') return t;
-                        return function(){};
-                    }
-                });
-            },
-            set: function(){},
-            on: function(){},
-            emit: function(){}
-        };
-    }
-
+    // ---------- 渲染与状态 ----------
     function setStatus(text) {
         var el = document.getElementById('status');
         if (el) el.textContent = text;
+    }
+
+    function showDocs() {
+        var docs = document.getElementById('docs-fallback');
+        if (docs) docs.style.display = '';
     }
 
     function renderSlots() {
@@ -442,65 +670,160 @@ window.__ModuleLoader__ = (function () {
         if (!names.length) return;
         var R = window.React, D = window.ReactDOM;
         if (!R || !D) return;
-        var all = R.createElement('div', { className: 'dsh-slot-container' },
-            names.map(function (name) {
-                var entries = slotStore[name];
-                return R.createElement('div', { key: name, className: 'dsh-slot-section' },
-                    R.createElement('div', { className: 'dsh-slot-title' }, name),
-                    entries.map(function (entry, i) {
-                        return R.createElement('div', { key: i, className: 'dsh-slot-content' },
-                            entry.render()
-                        );
-                    })
-                );
-            })
-        );
-        if (D.createRoot) {
-            D.createRoot(root).render(all);
-        } else {
-            D.render(all, root);
+        try {
+            var all = R.createElement('div', { className: 'dsh-slot-container' },
+                names.map(function (name) {
+                    var entries = slotStore[name];
+                    return R.createElement('div', { key: name, className: 'dsh-slot-section' },
+                        R.createElement('div', { className: 'dsh-slot-title' }, name),
+                        entries.map(function (entry, i) {
+                            var inner = null;
+                            try { inner = entry.render(); } catch (e) { inner = null; }
+                            return R.createElement('div', { key: i, className: 'dsh-slot-content' }, inner);
+                        })
+                    );
+                })
+            );
+            if (D.createRoot) {
+                D.createRoot(root).render(all);
+            } else {
+                D.render(all, root);
+            }
+        } catch (e) {
+            console.error('[dsh-shim] render failed', e);
+            setStatus('面板渲染失败：' + (e && e.message ? e.message : e) + '（已显示文档）');
+            showDocs();
         }
     }
 
+    var recheckTimer = null;
+    var recheckCount = 0;
+    function scheduleRender() {
+        // 注册在异步 apply 结束后到达：延迟到 React 就绪再渲染
+        setTimeout(function () {
+            if (window.React && window.ReactDOM) { mounted = true; renderSlots(); refreshStatus(); }
+        }, 50);
+    }
+
+    function refreshStatus() {
+        var n = Object.keys(slotStore).length;
+        if (n > 0) {
+            setStatus('面板已加载 (' + n + ' 个插槽)');
+        }
+    }
+
+    function reportResult(applied, errors) {
+        window.__dshShimErrors__ = errors;
+        var hasContent = Object.keys(slotStore).length > 0;
+        if (hasContent) {
+            mounted = true;
+            renderSlots();
+            setTimeout(function () { setStatus('面板已加载 (' + Object.keys(slotStore).length + ' 个插槽)'); }, 200);
+            return;
+        }
+        if (applied > 0) {
+            // 可能异步注册：稍后复查
+            scheduleRecheck();
+            return;
+        }
+        var msg = '该插件未导出可运行的界面（apply 注册失败）';
+        if (errors.length) {
+            msg = '插件界面加载失败（' + errors.length + '）—— 已显示文档';
+            if (window.__dshShimMissing__ && window.__dshShimMissing__.length) {
+                msg += '；缺失宿主模块：' + window.__dshShimMissing__.slice(0, 3).join(', ');
+            }
+        }
+        setStatus(msg);
+        showDocs();
+    }
+
+    function scheduleRecheck() {
+        var delays = [300, 1000, 3000, 8000];
+        if (recheckCount >= delays.length) { mountAll(); return; }
+        setTimeout(function () {
+            recheckCount++;
+            if (Object.keys(slotStore).length > 0) {
+                mounted = true;
+                renderSlots();
+                setTimeout(function () { setStatus('面板已加载 (' + Object.keys(slotStore).length + ' 个插槽)'); }, 200);
+                return;
+            }
+            mountAll();
+        }, delays[Math.min(recheckCount, delays.length - 1)]);
+    }
+
+    function pickApply(m) {
+        if (!m) return null;
+        if (typeof m.apply === 'function') return m;
+        if (m.default && typeof m.default.apply === 'function') return m.default;
+        return null;
+    }
+
     function mountAll() {
-        if (mountedOnce) return;
-        if (!window.React || !window.ReactDOM) return;
-        pluginCount = 0;
+        if (mounted) return;
+        var applied = 0;
+        var errors = [];
+        var missing = [];
+        var missingSeen = {};
+        function recordMissing(name) {
+            if (missingSeen[name]) return;
+            missingSeen[name] = true;
+            missing.push(String(name));
+        }
+        // 经典 script 直载 client.js 的 module.exports 导出路径
+        if (globalModule.exports && !globalModule.mounted) {
+            globalModule.mounted = true;
+            try {
+                var target = pickApply(globalModule.exports);
+                if (target) {
+                    var ret = target.apply(makeCtx());
+                    if (ret && typeof ret.then === 'function') {
+                        ret.then(function () { applied++; finishStep(); }, function (e) { errors.push(String(e && e.message ? e.message : e)); applied++; finishStep(); });
+                    } else { applied++; }
+                } else {
+                    errors.push('client.js 未导出 apply 接口');
+                }
+            } catch (e) {
+                errors.push(String(e && e.message ? e.message : e));
+            }
+        }
         pending.forEach(function (def) {
             try {
                 var module = { exports: {} };
                 var ctx = makeCtx();
-                var result = def.factory(makeRequire(), module, module.exports);
-                var target =
-                    (module.exports && typeof module.exports.apply === 'function') ? module.exports :
-                    (result && typeof result.apply === 'function') ? result : null;
+                var result = def.factory(makeRequire(recordMissing), module, module.exports);
+                var target = pickApply(module.exports) || pickApply(result);
                 if (target) {
-                    target.apply(ctx);
-                    pluginCount++;
+                    var ret = target.apply(ctx);
+                    if (ret && typeof ret.then === 'function') {
+                        // 异步 apply：等待完成后复查插槽表与报错
+                        ret.then(function () { applied++; finishStep(); }, function (e) {
+                            errors.push(String(e && e.message ? e.message : e)); applied++; finishStep();
+                        });
+                    } else {
+                        applied++;
+                    }
                 } else {
-                    console.warn('[dsh-shim] no apply export in', def.id);
+                    errors.push('未导出 apply 接口（' + def.id + '）');
                 }
             } catch (e) {
-                console.error('[dsh-shim] factory/apply failed', e);
+                errors.push(String(e && e.message ? e.message : e));
             }
         });
         pending = [];
-        var hasContent = Object.keys(slotStore).length > 0;
-        if (hasContent) {
-            mountedOnce = true;
-            renderSlots();
-            setTimeout(function () { setStatus('面板已加载 (' + Object.keys(slotStore).length + ' 个插槽)'); }, 200);
-        } else if (pluginCount > 0) {
-            mountedOnce = true;
-            setStatus('插件已加载但未注册界面插槽，已显示文档');
-            var docs = document.getElementById('docs-fallback');
-            if (docs) docs.style.display = '';
-        } else {
-            setStatus('该插件的界面无法在本环境运行（依赖 DSH 宿主专有能力）');
-            var docs = document.getElementById('docs-fallback');
-            if (docs) docs.style.display = '';
+        missing.forEach(function (n) { recordGlobalMissing(n); });
+        window.__dshShimMissing__ = missingList.slice();
+        function finishStep() {
+            var n = Object.keys(slotStore).length;
+            if (n > 0) { mounted = true; renderSlots(); setTimeout(function () { setStatus('面板已加载 (' + n + ' 个插槽)'); }, 200); return; }
+            if (mounted) return;
+            reportResult(applied, errors);
         }
+        finishStep();
     }
+    window.require = makeRequire(recordGlobalMissing);
+    window.module = globalModule;
+    window.exports = globalModule.exports;
     return {
         load: function (def) { pending.push(def); },
         _mountAll: mountAll,

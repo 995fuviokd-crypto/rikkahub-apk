@@ -96,6 +96,7 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Fullscreen
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.ai.agent.AcpRuntime
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
@@ -145,6 +146,8 @@ fun ChatInput(
     onToggleStewardMode: () -> Unit = {},
     onStewardMaxLoopsChange: (Int) -> Unit = {},
     onStewardUnlimitedLoopsChange: (Boolean) -> Unit = {},
+    agentSessionModes: AcpRuntime.AgentSessionModes = AcpRuntime.AgentSessionModes(),
+    onSelectSessionMode: (String) -> Unit = {},
 ) {
     val toaster = LocalToaster.current
     val assistant = settings.getCurrentAssistant()
@@ -160,6 +163,11 @@ fun ChatInput(
     val density = LocalDensity.current
     // Unlike isImeVisible, the target changes as soon as the IME animation starts.
     val imeTargetVisible = WindowInsets.imeAnimationTarget.getBottom(density) > 0
+    val modelListState = rememberModelListState(
+        modelId = assistant.chatModelId ?: settings.chatModelId,
+        providers = settings.providers,
+        type = ModelType.CHAT,
+    )
 
     fun sendMessage() {
         focusManager.clearFocus(force = true)
@@ -309,14 +317,19 @@ fun ChatInput(
                                     )
                                 }
 
+                                // ACP 会话模式切换（agent 运行时上报的 modes，如 plan/acceptEdits）
+                                if (agentSessionModes.modes.isNotEmpty()) {
+                                    AgentSessionModeButton(
+                                        modes = agentSessionModes.modes,
+                                        currentModeId = agentSessionModes.currentModeId,
+                                        onSelect = onSelectSessionMode,
+                                        onlyIcon = true,
+                                    )
+                                }
+
                                 // Model Picker
-                                ModelSelector(
-                                    modelId = assistant.chatModelId ?: settings.chatModelId,
-                                    providers = settings.providers,
-                                    onSelect = {
-                                        onUpdateChatModel(it)
-                                    },
-                                    type = ModelType.CHAT,
+                                ModelSelectorButton(
+                                    state = modelListState,
                                     onlyIcon = true,
                                     modifier = Modifier,
                                 )
@@ -425,6 +438,11 @@ fun ChatInput(
 
         }
     }
+
+    ModelListSheet(
+        state = modelListState,
+        onSelect = onUpdateChatModel,
+    )
 }
 
 @Composable

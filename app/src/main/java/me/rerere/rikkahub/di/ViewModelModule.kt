@@ -44,6 +44,7 @@ val viewModelModule = module {
             analytics = get(),
             filesManager = get(),
             favoriteRepository = get(),
+            acpRuntime = get(),
         )
     }
     viewModelOf(::ChatDrawerVM)
@@ -111,6 +112,8 @@ val viewModelModule = module {
             dshPluginAdapter = get(),
             dshMarketDataSource = get(),
             tavernMarketDataSource = get(),
+            environmentManager = get(),
+            workspaceRepository = get(),
         )
     }
     viewModel<WorkflowEditorVM> {

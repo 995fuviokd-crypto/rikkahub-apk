@@ -205,7 +205,12 @@ class ScriptJsTranspilerTest {
 
     @Test
     fun dumpMissPulseTranspileForNodeCheck() {
-        val src = java.io.File("/tmp/opencode/rh_miss_pulse.js").readText()
+        val srcFile = java.io.File("/tmp/opencode/rh_miss_pulse.js")
+        if (!srcFile.exists()) {
+            println("SKIP: ${srcFile.absolutePath} not found, diagnostic test skipped")
+            return
+        }
+        val src = srcFile.readText()
         val out = ScriptJsTranspiler.transpile(src)
         java.io.File("/tmp/opencode/t_miss_kotlin.js").writeText(ScriptJsTranspiler.RUN_GEN_RUNTIME + "\n" + out)
         java.io.File("/tmp/opencode/t_miss_kotlin_len.txt").writeText(out.length.toString())

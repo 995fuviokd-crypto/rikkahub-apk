@@ -22,6 +22,7 @@
   <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
   <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
   <!-- 悬浮球: 系统级悬浮窗显示在其他应用之上 -->
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -165,6 +166,10 @@
         android:resource="@xml/accessibility_service_config" />
     </service>
 
+    <service
+      android:name=".service.ChatGenerationForegroundService"
+      android:exported="false"
+      android:foregroundServiceType="dataSync" />
     <service
       android:name=".service.WebServerService"
       android:exported="false"

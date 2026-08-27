@@ -29,7 +29,9 @@ import me.rerere.ai.provider.agentMode
 import me.rerere.ai.provider.withAgentMode
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.MagicWand01
+import me.rerere.hugeicons.stroke.SlidersHorizontal
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.ai.agent.AcpRuntime
 import me.rerere.rikkahub.ui.components.ui.ToggleSurface
 
 @Composable
@@ -174,4 +176,135 @@ private fun AgentMode.label(): String = when (this) {
     AgentMode.CODE -> stringResource(R.string.agent_mode_code)
     AgentMode.MINIMAL -> stringResource(R.string.agent_mode_minimal)
     AgentMode.CORDIS -> stringResource(R.string.agent_mode_cordis)
+}
+
+/**
+ * ACP session-mode switcher (desktop-style runtime modes like plan / acceptEdits).
+ * Hidden when the bound agent advertises no session modes.
+ */
+@Composable
+fun AgentSessionModeButton(
+    modifier: Modifier = Modifier,
+    onlyIcon: Boolean = false,
+    modes: List<AcpRuntime.SessionModeInfo>,
+    currentModeId: String?,
+    onSelect: (String) -> Unit,
+) {
+    if (modes.isEmpty()) return
+    var showPicker by remember { mutableStateOf(false) }
+    val currentName = modes.firstOrNull { it.id == currentModeId }?.name
+
+    if (showPicker) {
+        AgentSessionModePicker(
+            modes = modes,
+            currentModeId = currentModeId,
+            onDismissRequest = { showPicker = false },
+            onSelect = { modeId ->
+                showPicker = false
+                onSelect(modeId)
+            },
+        )
+    }
+
+    ToggleSurface(
+        checked = currentModeId != null && currentName != modes.firstOrNull()?.name,
+        onClick = { showPicker = true },
+        modifier = modifier,
+    ) {
+        Row(
+            modifier = Modifier.padding(
+                vertical = if (onlyIcon) 3.dp else 8.dp,
+                horizontal = if (onlyIcon) 3.dp else 8.dp
+            ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier.size(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = HugeIcons.SlidersHorizontal,
+                    contentDescription = null,
+                )
+            }
+            if (!onlyIcon) {
+                Text(currentName ?: modes.firstOrNull()?.name ?: "")
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentSessionModePicker(
+    modes: List<AcpRuntime.SessionModeInfo>,
+    currentModeId: String?,
+    onDismissRequest: () -> Unit = {},
+    onSelect: (String) -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismissRequest,
+        sheetState = rememberBottomSheetState(
+            initialValue = SheetValue.Hidden,
+            enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.chat_page_session_mode_title),
+                    style = MaterialTheme.typography.titleLarge,
+                )
+                Text(
+                    text = stringResource(R.string.chat_page_session_mode_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                modes.forEach { mode ->
+                    ToggleSurface(
+                        checked = mode.id == currentModeId,
+                        onClick = { onSelect(mode.id) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Text(
+                                text = mode.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (mode.id == currentModeId) {
+                                Icon(
+                                    imageVector = HugeIcons.MagicWand01,
+                                    contentDescription = null,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

@@ -1,6 +1,7 @@
 package me.rerere.rikkahub
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -44,6 +45,7 @@ import me.rerere.rikkahub.utils.CrashHandler
 import me.rerere.rikkahub.utils.DatabaseUtil
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.WorkspaceManager
+import me.rerere.androidvm.BlackBoxHost
 import org.koin.android.ext.android.get
 import org.koin.android.ext.koin.androidContext
 import org.koin.android.ext.koin.androidLogger
@@ -60,6 +62,12 @@ const val KEEP_ALIVE_NOTIFICATION_CHANNEL_ID = "keep_alive"
 const val FLOATING_BUBBLE_NOTIFICATION_CHANNEL_ID = "floating_bubble"
 
 class RikkaHubApp : Application() {
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(base)
+        // 仿光速虚拟机 Android 虚拟化引擎初始化（未引入黑盒 BlackBox 模块时为 no-op）
+        BlackBoxHost.attachBaseContext(base)
+    }
+
     override fun onCreate() {
         super.onCreate()
         if (GlobalContext.getOrNull() == null) {
@@ -142,6 +150,9 @@ class RikkaHubApp : Application() {
         incrementLaunchCount()
 
         // Composer.setDiagnosticStackTraceMode(ComposeStackTraceMode.Auto)
+
+        // 仿光速虚拟机 Android 虚拟化引擎初始化（未引入黑盒 BlackBox 模块时为 no-op）
+        BlackBoxHost.onCreate()
     }
 
     private fun incrementLaunchCount() {

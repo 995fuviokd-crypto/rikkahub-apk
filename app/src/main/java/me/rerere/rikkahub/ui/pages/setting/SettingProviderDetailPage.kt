@@ -11,6 +11,8 @@ import me.rerere.hugeicons.stroke.Tools
 import me.rerere.hugeicons.stroke.Share01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.Bash
+import me.rerere.hugeicons.stroke.ArrowRight01
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -42,6 +44,7 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingToolbarDefaults.ScreenOffset
@@ -97,6 +100,7 @@ import kotlinx.coroutines.launch
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.AgentPlatform
+import me.rerere.ai.provider.AgentSubagentConfig
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
@@ -130,6 +134,7 @@ import me.rerere.rikkahub.ui.pages.setting.components.isUsingDefaultBaseUrl
 import me.rerere.rikkahub.ui.pages.setting.components.resetBaseUrlToDefault
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.theme.extendColors
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.utils.UiState
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
@@ -235,6 +240,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                 0 -> {
                     SettingProviderConfigPage(
                         provider = provider,
+                        providers = settings.providers,
                         onEdit = {
                             onEdit(it)
                             toaster.show(
@@ -262,6 +268,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
 @Composable
 private fun SettingProviderConfigPage(
     provider: ProviderSetting,
+    providers: List<ProviderSetting>,
     onEdit: (ProviderSetting) -> Unit,
     onDelete: () -> Unit
 ) {
@@ -285,6 +292,7 @@ private fun SettingProviderConfigPage(
 
         AgentModeConfigSection(
             provider = internalProvider,
+            providers = providers,
             onEdit = { internalProvider = it }
         )
 
@@ -381,6 +389,7 @@ private fun SettingProviderConfigPage(
 @Composable
 private fun AgentModeConfigSection(
     provider: ProviderSetting,
+    providers: List<ProviderSetting>,
     onEdit: (ProviderSetting) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -535,11 +544,192 @@ private fun AgentModeConfigSection(
                         minLines = 3,
                     )
 
+                    // 子代理（Subagent）委派配置
+                    val subagentConfig = agentModel.agentSubagent ?: AgentSubagentConfig()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.setting_provider_page_subagent_title),
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Text(
+                                text = stringResource(R.string.setting_provider_page_subagent_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = subagentConfig.enabled,
+                            onCheckedChange = { enabled ->
+                                val updated = provider.editModel(
+                                    agentModel.copy(
+                                        platformAgent = platformAgent,
+                                        agentArguments = agentArguments,
+                                        agentEnvironment = agentEnvironment,
+                                        agentSubagent = subagentConfig.copy(enabled = enabled),
+                                    )
+                                )
+                                onEdit(updated)
+                            },
+                        )
+                    }
+
+                    AnimatedVisibility(visible = subagentConfig.enabled) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // 引擎选择：自动切换 / RikkaHub 内置 / DSH 自带
+                            val engineOptions = listOf(
+                                AgentSubagentConfig.ENGINE_AUTO,
+                                AgentSubagentConfig.ENGINE_BUILT_IN,
+                                AgentSubagentConfig.ENGINE_DSH,
+                            )
+                            val engineLabels = listOf(
+                                stringResource(R.string.setting_provider_page_subagent_engine_auto),
+                                stringResource(R.string.setting_provider_page_subagent_engine_built_in),
+                                stringResource(R.string.setting_provider_page_subagent_engine_dsh),
+                            )
+                            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                                engineOptions.forEachIndexed { index, engine ->
+                                    SegmentedButton(
+                                        selected = subagentConfig.engine == engine,
+                                        onClick = {
+                                            val updated = provider.editModel(
+                                                agentModel.copy(
+                                                    platformAgent = platformAgent,
+                                                    agentArguments = agentArguments,
+                                                    agentEnvironment = agentEnvironment,
+                                                    agentSubagent = subagentConfig.copy(engine = engine),
+                                                )
+                                            )
+                                            onEdit(updated)
+                                        },
+                                        shape = SegmentedButtonDefaults.itemShape(index = index, count = engineOptions.size),
+                                    ) {
+                                        Text(engineLabels[index], maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
+                            }
+
+                            // 最大委派深度
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.setting_provider_page_subagent_max_depth),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                SingleChoiceSegmentedButtonRow {
+                                    (1..3).forEachIndexed { index, depth ->
+                                        SegmentedButton(
+                                            selected = subagentConfig.maxDepth == depth,
+                                            onClick = {
+                                                val updated = provider.editModel(
+                                                    agentModel.copy(
+                                                        platformAgent = platformAgent,
+                                                        agentArguments = agentArguments,
+                                                        agentEnvironment = agentEnvironment,
+                                                        agentSubagent = subagentConfig.copy(maxDepth = depth),
+                                                    )
+                                                )
+                                                onEdit(updated)
+                                            },
+                                            shape = SegmentedButtonDefaults.itemShape(index = index, count = 3),
+                                            label = { Text(depth.toString()) },
+                                        )
+                                    }
+                                }
+                            }
+                            // 子代理模型：可跨提供商选择；清除后跟随主模型
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.setting_provider_page_subagent_model),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                ModelSelector(
+                                    modelId = subagentConfig.modelId,
+                                    providers = providers,
+                                    type = ModelType.CHAT,
+                                    allowClear = true,
+                                    onSelect = { selected ->
+                                        val updated = provider.editModel(
+                                            agentModel.copy(
+                                                platformAgent = platformAgent,
+                                                agentArguments = agentArguments,
+                                                agentEnvironment = agentEnvironment,
+                                                agentSubagent = subagentConfig.copy(
+                                                    modelId = if (selected.modelId.isBlank()) null else selected.id,
+                                                ),
+                                            )
+                                        )
+                                        onEdit(updated)
+                                    },
+                                )
+                            }
+                            if (subagentConfig.engine == AgentSubagentConfig.ENGINE_DSH) {
+                                Text(
+                                    stringResource(R.string.setting_provider_page_subagent_dsh_hint),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+
                     Text(
                         stringResource(R.string.setting_provider_page_platform_agent_hint),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+
+                    // 虚拟机入口：跳转到虚拟机管理页
+                    val navController = LocalNavController.current
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { navController.navigate(Screen.AndroidVms) },
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        ),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.Bash,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = stringResource(R.string.vm_page_title),
+                                    style = MaterialTheme.typography.titleSmall,
+                                )
+                                Text(
+                                    text = stringResource(R.string.vm_page_entry_desc),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Icon(
+                                imageVector = HugeIcons.ArrowRight01,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
             }
         }

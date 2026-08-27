@@ -236,8 +236,14 @@ class WorkspaceManager(
     ): Boolean =
         fileSystem.delete(areaDir(root, area), path, recursive)
 
-    fun moveFile(root: String, source: String, target: String, overwrite: Boolean = false): WorkspaceFileEntry =
-        fileSystem.move(filesDir(root), source, target, overwrite)
+    fun moveFile(
+        root: String,
+        source: String,
+        target: String,
+        overwrite: Boolean = false,
+        area: WorkspaceStorageArea = WorkspaceStorageArea.FILES,
+    ): WorkspaceFileEntry =
+        fileSystem.move(areaDir(root, area), source, target, overwrite)
 
     fun glob(root: String, pattern: String, path: String = ""): List<WorkspaceFileEntry> =
         fileSystem.glob(filesDir(root), pattern, path)
@@ -326,7 +332,8 @@ class WorkspaceManager(
         /** 由宿主机透传的内核伪文件系统, 只能通过 shell 访问 */
         val KERNEL_FS_MOUNTS = listOf("/dev", "/proc", "/sys")
 
-        private val ROOT_NAME_REGEX = Regex("[A-Za-z0-9._-]+")
+        /** 工作区根目录名称的正则校验（字母、数字、点、下划线、连字符） */
+        val ROOT_NAME_REGEX = Regex("[A-Za-z0-9._-]+")
     }
 }
 

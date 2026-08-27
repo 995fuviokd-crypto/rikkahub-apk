@@ -35,6 +35,8 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import me.rerere.rikkahub.data.ai.agent.AcpRuntime
+import me.rerere.rikkahub.data.ai.agent.AgentPrompt
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Avatar
@@ -65,9 +67,36 @@ class ChatVM(
     private val analytics: FirebaseAnalytics,
     private val filesManager: FilesManager,
     private val favoriteRepository: FavoriteRepository,
+    private val acpRuntime: AcpRuntime,
 ) : ViewModel() {
     private val _conversationId: Uuid = Uuid.parse(id)
     val conversation: StateFlow<Conversation> = chatService.getConversationFlow(_conversationId)
+
+    /**
+     * Live ACP tool-permission prompts (desktop-style approval flow). The chat page
+     * renders these as dialogs; decisions are forwarded via [respondAgentPermission].
+     */
+    val agentPermissionPrompts: StateFlow<List<AgentPrompt>> =
+        acpRuntime.permissionPrompts
+            .map { it.values.sortedBy { prompt -> prompt.requestId } }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun respondAgentPermission(requestId: Long, optionId: String?) {
+        acpRuntime.respondPermission(requestId, optionId)
+    }
+
+    /** Session modes advertised by the bound agent for this conversation. */
+    val agentSessionModes: StateFlow<AcpRuntime.AgentSessionModes> =
+        acpRuntime.sessionModeStates
+            .map { it[_conversationId] ?: AcpRuntime.AgentSessionModes() }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, AcpRuntime.AgentSessionModes())
+
+    fun selectAgentSessionMode(modeId: String) {
+        viewModelScope.launch {
+            acpRuntime.setSessionModeFor(_conversationId, modeId)
+        }
+    }
+
     var chatListInitialized by mutableStateOf(false) // 聊天列表是否已经滚动到底部
 
     // 聊天输入状态 - 保存在 ViewModel 中避免 TransactionTooLargeException

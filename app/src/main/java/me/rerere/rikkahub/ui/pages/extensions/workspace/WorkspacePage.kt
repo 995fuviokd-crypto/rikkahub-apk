@@ -22,7 +22,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -30,9 +36,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,6 +56,7 @@ import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
+import me.rerere.workspace.RootfsInstallStage
 import androidx.compose.ui.res.stringResource
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -64,6 +75,44 @@ fun WorkspacePage(vm: WorkspaceVM = koinViewModel()) {
     var editTarget by remember { mutableStateOf<WorkspaceEntity?>(null) }
     var deleteTarget by remember { mutableStateOf<WorkspaceEntity?>(null) }
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val installProgress by vm.installProgress.collectAsStateWithLifecycle()
+    val installError by vm.installError.collectAsStateWithLifecycle()
+
+    LaunchedEffect(installProgress) {
+        installProgress?.let { progress ->
+            val message = when (progress.stage) {
+                RootfsInstallStage.DOWNLOADING -> {
+                    val totalBytes = progress.totalBytes
+                    val percent = if (totalBytes != null && totalBytes > 0) {
+                        " (${(progress.bytesRead * 100 / totalBytes)}%)"
+                    } else ""
+                    "Downloading system rootfs$percent"
+                }
+                RootfsInstallStage.EXTRACTING -> {
+                    "Extracting files (${progress.entriesExtracted} entries)"
+                }
+                RootfsInstallStage.INSTALLED -> {
+                    "System installed successfully"
+                }
+            }
+            snackbarHostState.showSnackbar(
+                message = message,
+                duration = SnackbarDuration.Short,
+            )
+        }
+    }
+
+    LaunchedEffect(installError) {
+        installError?.let { error ->
+            snackbarHostState.showSnackbar(
+                message = error,
+                duration = SnackbarDuration.Long,
+            )
+        }
+    }
+
     Scaffold(
         topBar = {
             LargeFlexibleTopAppBar(
@@ -78,6 +127,7 @@ fun WorkspacePage(vm: WorkspaceVM = koinViewModel()) {
                 Icon(HugeIcons.Add01, contentDescription = null)
             }
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = CustomColors.topBarColors.containerColor,
     ) { innerPadding ->
@@ -108,9 +158,10 @@ fun WorkspacePage(vm: WorkspaceVM = koinViewModel()) {
             title = stringResource(R.string.workspace_page_create),
             initialName = "",
             existingNames = workspaces.map { it.name.trim() }.toSet(),
+            showImagePicker = true,
             onDismiss = { showAddDialog = false },
-            onConfirm = { name ->
-                vm.create(name)
+            onConfirm = { name, imageUrl ->
+                vm.create(name, imageUrl)
                 showAddDialog = false
             },
         )
@@ -122,7 +173,7 @@ fun WorkspacePage(vm: WorkspaceVM = koinViewModel()) {
             initialName = workspace.name,
             existingNames = workspaces.filter { it.id != workspace.id }.map { it.name.trim() }.toSet(),
             onDismiss = { editTarget = null },
-            onConfirm = { name ->
+            onConfirm = { name, _ ->
                 vm.rename(workspace, name)
                 editTarget = null
             },
@@ -264,10 +315,12 @@ private fun EditWorkspaceDialog(
     title: String,
     initialName: String,
     existingNames: Set<String>,
+    showImagePicker: Boolean = false,
     onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
+    onConfirm: (String, String?) -> Unit,
 ) {
     var name by rememberSaveable(initialName) { mutableStateOf(initialName) }
+    var selectedImage by rememberSaveable { mutableStateOf(VmCatalog.default().id) }
     val trimmedName = name.trim()
     val isDuplicate = trimmedName.isNotEmpty() && trimmedName in existingNames
 
@@ -275,21 +328,63 @@ private fun EditWorkspaceDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.workspace_page_name)) },
-                singleLine = true,
-                isError = isDuplicate,
-                supportingText = if (isDuplicate) {
-                    { Text(stringResource(R.string.workspace_page_name_duplicate)) }
-                } else null,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.workspace_page_name)) },
+                    singleLine = true,
+                    isError = isDuplicate,
+                    supportingText = if (isDuplicate) {
+                        { Text(stringResource(R.string.workspace_page_name_duplicate)) }
+                    } else null,
+                )
+                if (showImagePicker) {
+                    Text(
+                        text = stringResource(R.string.vm_page_system_version),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                        VmCatalog.images.forEachIndexed { index, image ->
+                            SegmentedButton(
+                                selected = selectedImage == image.id,
+                                onClick = { selectedImage = image.id },
+                                shape = SegmentedButtonDefaults.itemShape(
+                                    index = index,
+                                    count = VmCatalog.images.size,
+                                ),
+                            ) {
+                                Text(stringResource(image.labelRes))
+                            }
+                        }
+                    }
+                    val selected = VmCatalog.images.firstOrNull { it.id == selectedImage }
+                    if (selected != null) {
+                        Text(
+                            text = stringResource(selected.descRes) + " · ~${selected.sizeHintMb}MB",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        text = stringResource(R.string.vm_page_create_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(trimmedName) },
+                onClick = {
+                    val image = if (showImagePicker) {
+                        VmCatalog.images.firstOrNull { it.id == selectedImage }?.url
+                    } else {
+                        null
+                    }
+                    onConfirm(trimmedName, image)
+                },
                 enabled = name.isNotBlank() && !isDuplicate,
             ) {
                 Text(stringResource(R.string.common_save))

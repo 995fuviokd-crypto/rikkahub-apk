@@ -2,54 +2,48 @@ package me.rerere.workspace
 
 import java.io.BufferedReader
 import java.io.InputStream
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.consumeAsFlow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/**
- * A long-lived process with a bidirectional stdio channel, used to drive ACP-style
- * agents (JSON-RPC over stdin/stdout) and other interactive CLIs inside a workspace.
- *
- * The process is started by [WorkspaceProcessRunner] and kept alive until [close].
- * Inbound output is forwarded line-by-line through [stdoutLines]; outbound messages are
- * written via [writeLine]. Thread-safety is handled by the underlying channels.
- */
 class WorkspaceProcessSession internal constructor(
     private val process: Process,
 ) {
     private val closed = AtomicBoolean(false)
-    private val lines = Channel<String>(Channel.UNLIMITED)
+    private val stdoutChannel = Channel<String>(Channel.BUFFERED)
+    private val stderrChannel = Channel<String>(Channel.BUFFERED)
+    private val forwardThreads = mutableListOf<Thread>()
 
     init {
-        process.inputStream.forwardLines()
+        forwardThreads.add(process.inputStream.forwardTo(stdoutChannel))
+        forwardThreads.add(process.errorStream.forwardTo(stderrChannel))
     }
 
-    private fun InputStream.forwardLines() {
-        Thread {
+    private fun InputStream.forwardTo(channel: Channel<String>): Thread {
+        val thread = Thread {
             try {
                 bufferedReader().forEachLine { line ->
-                    if (!closed.get()) lines.trySend(line)
+                    if (!closed.get()) channel.trySend(line)
                 }
             } catch (_: Exception) {
-                // process exited / stream closed
             } finally {
-                lines.close()
+                channel.close()
             }
         }.apply {
             isDaemon = true
             start()
         }
+        return thread
     }
 
-    /** Stream of stdout lines produced by the process. */
-    val stdoutLines: Flow<String> = lines.consumeAsFlow()
+    val stdoutLines: Flow<String> = stdoutChannel.consumeAsFlow()
 
-    /** Writes a single line (terminated by `\n`) to the process stdin. */
+    val stderrLines: Flow<String> = stderrChannel.consumeAsFlow()
+
     suspend fun writeLine(line: String) {
         if (closed.get()) return
         withContext(Dispatchers.IO) {
@@ -59,29 +53,28 @@ class WorkspaceProcessSession internal constructor(
         }
     }
 
-    /** Whether the underlying process is still alive. */
     val isAlive: Boolean
         get() = runCatching { process.isAlive }.getOrDefault(false)
 
-    /** Forces the process to exit and closes the stream channel. */
-    fun close() {
-        if (closed.compareAndSet(false, true)) {
-            runCatching { process.destroy() }
-            runCatching { process.destroyForcibly() }
-        }
+    /**
+     * Suspends until the process exits and returns its exit code (null on failure),
+     * used by ACP `terminal/wait_for_exit`.
+     */
+    suspend fun waitForExit(): Int? = withContext(Dispatchers.IO) {
+        runCatching { process.waitFor() }.getOrNull()
     }
 
-    fun stderrLines(): Flow<String> = flowOfStderr(process.errorStream)
-
-    private fun flowOfStderr(stream: InputStream): Flow<String> = flow {
-        val collector = this
-        withContext(Dispatchers.IO) {
-            stream.bufferedReader().use { reader ->
-                while (true) {
-                    val line = reader.readLine() ?: break
-                    collector.emit(line)
-                }
-            }
+    fun close() {
+        if (!closed.compareAndSet(false, true)) return
+        // 先 destroy() 让子进程关闭 IO 流, 转发线程因流关闭自然终结;
+        // 等 5 秒让线程退出(写日志/清理), 超时再强杀避免残留
+        runCatching { process.destroy() }
+        runCatching { process.waitFor(5, TimeUnit.SECONDS) }
+        if (process.isAlive) {
+            runCatching { process.destroyForcibly() }
+        }
+        forwardThreads.forEach { thread ->
+            runCatching { thread.join(1000) }
         }
     }
 }

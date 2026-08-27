@@ -29,6 +29,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -99,6 +101,10 @@ import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspacePage
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceDetailPage
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceFileEditorPage
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceTerminalPage
+import me.rerere.androidvm.VmVM
+import me.rerere.androidvm.navigation.VmNavigator
+import me.rerere.androidvm.ui.VmDetailPage
+import me.rerere.androidvm.ui.VmListPage
 import me.rerere.rikkahub.ui.pages.extensions.workflow.WorkflowListPage
 import me.rerere.rikkahub.ui.pages.extensions.workflow.WorkflowEditorPage
 import me.rerere.rikkahub.ui.pages.extensions.group.GroupDetailPage
@@ -282,6 +288,15 @@ class RouteActivity : ComponentActivity() {
 
         val backStack = rememberNavBackStack(startScreen)
         SideEffect { this@RouteActivity.navStack = backStack }
+
+        val vmNavigatorAdapter = object : VmNavigator {
+            override fun toDetail(instanceId: String) {
+                backStack.add(Screen.AndroidVmDetail(instanceId))
+            }
+            override fun back() {
+                backStack.removeLastOrNull()
+            }
+        }
 
         ShareHandler(backStack)
 
@@ -537,6 +552,27 @@ class RouteActivity : ComponentActivity() {
                                 )
                             }
 
+                            entry<Screen.AndroidVms> {
+                                val context = LocalContext.current
+                                val scope = rememberCoroutineScope()
+                                val vm = remember { VmVM(context, scope) }
+                                LaunchedEffect(Unit) { vm.load() }
+                                VmListPage(vm, vmNavigatorAdapter)
+                            }
+
+                            entry<Screen.AndroidVmDetail> { key ->
+                                val context = LocalContext.current
+                                val scope = rememberCoroutineScope()
+                                val vm = remember { VmVM(context, scope) }
+                                LaunchedEffect(Unit) { vm.load() }
+                                VmDetailPage(
+                                    vm = vm,
+                                    navigator = vmNavigatorAdapter,
+                                    instanceId = key.id,
+                                    onOpenTerminal = { backStack.add(Screen.WorkspaceTerminal(it)) },
+                                )
+                            }
+
                             entry<Screen.SkillDetail> { key ->
                                 SkillDetailPage(skillName = key.skillName)
                             }
@@ -753,6 +789,12 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object Workspaces : Screen
+
+    @Serializable
+    data object AndroidVms : Screen
+
+    @Serializable
+    data class AndroidVmDetail(val id: String) : Screen
 
     @Serializable
     data class WorkspaceDetail(val id: String) : Screen

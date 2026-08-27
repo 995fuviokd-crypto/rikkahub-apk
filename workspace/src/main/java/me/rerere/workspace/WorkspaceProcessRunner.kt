@@ -33,7 +33,7 @@ class WorkspaceProcessRunner(
         extraBindMounts: List<WorkspaceBindMount> = emptyList(),
         extraEnv: Map<String, String> = emptyMap(),
     ): WorkspaceProcessSession {
-        require(root.matches(ROOT_NAME_REGEX)) { "Invalid workspace root name: $root" }
+        require(root.matches(WorkspaceManager.ROOT_NAME_REGEX)) { "Invalid workspace root name: $root" }
         require(command.isNotEmpty()) { "Command is required" }
 
         val workspaceDir = File(baseDir, root)
@@ -59,7 +59,7 @@ class WorkspaceProcessRunner(
                 .directory(filesDir)
                 .redirectErrorStream(false)
                 .apply {
-                    environment()["PROOT_LOADER"] = loader!!.absolutePath
+                    environment()["PROOT_LOADER"] = checkNotNull(loader) { "proot loader not found" }.absolutePath
                     environment()["PROOT_TMP_DIR"] = tempDir.absolutePath
                     environment()["TMPDIR"] = tempDir.absolutePath
                 }
@@ -119,7 +119,9 @@ class WorkspaceProcessRunner(
         argv += "/usr/bin/env"
         argv += "-i"
         argv += "HOME=/root"
-        argv += "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        // /opt/nodejs/bin: tarball 安装的 Node 全局包装目录(npm i -g 的 CLI bin),
+        // 缺它时 npx 会误判包未安装而联网重新下载, 表现为连接极慢甚至失败
+        argv += "PATH=/opt/nodejs/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
         argv += "TERM=xterm-256color"
         argv += "LANG=C.UTF-8"
         argv += "LC_ALL=C.UTF-8"
@@ -136,6 +138,5 @@ class WorkspaceProcessRunner(
         const val FILES_DIR = "files"
         const val LINUX_DIR = "linux"
         const val TEMP_DIR = "tmp"
-        val ROOT_NAME_REGEX = Regex("[a-zA-Z0-9_-]+")
     }
 }

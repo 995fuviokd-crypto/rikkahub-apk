@@ -20,7 +20,32 @@ data class Model(
     val platformAgent: AgentPlatform? = null,
     val agentArguments: List<String> = emptyList(),
     val agentEnvironment: Map<String, String> = emptyMap(),
+    val agentSubagent: AgentSubagentConfig? = null,
 )
+
+/**
+ * 平台 Agent 的子代理（Subagent）委派配置。
+ *
+ * 引擎自动切换：AUTO 时 DSH 平台复用其自带 subagent 能力，
+ * 其余平台由 RikkaHub 内置引擎以本地工具（delegate_subagent）实现委派。
+ */
+@Serializable
+data class AgentSubagentConfig(
+    /** 是否启用子代理委派能力 */
+    val enabled: Boolean = false,
+    /** 引擎选择：auto 自动切换 / built_in RikkaHub 内置 / dsh DSH 自带 */
+    val engine: String = ENGINE_AUTO,
+    /** 子代理最大嵌套深度（1 = 不允许子代理再委派，防止无限递归） */
+    val maxDepth: Int = 1,
+    /** 子代理专用模型 ID；为空时跟随当前对话主模型 */
+    val modelId: Uuid? = null,
+) {
+    companion object {
+        const val ENGINE_AUTO = "auto"
+        const val ENGINE_BUILT_IN = "built_in"
+        const val ENGINE_DSH = "dsh"
+    }
+}
 
 @Serializable
 enum class AgentPlatform(

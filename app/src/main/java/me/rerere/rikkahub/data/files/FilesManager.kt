@@ -380,6 +380,8 @@ class FilesManager(
         val dir = File(context.filesDir, folder)
         val entries = dir.listFiles()
         if (dir.exists() && entries == null) {
+            Log.w(TAG, "deleteAll: cannot list directory $folder, force cleaning DB only")
+            repository.deleteByFolder(folder)
             return@withContext false
         }
 
@@ -490,6 +492,8 @@ object FileFolders {
     const val SKILLS = "skills"
     const val FONTS = "fonts"
     const val TOOL_OUTPUTS = "tool_outputs"
+    const val TOOLS = "tools"
+    const val CONFIG = "config"
 }
 
 suspend fun FilesManager.saveUploadFromUri(

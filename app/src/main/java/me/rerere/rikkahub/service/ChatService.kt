@@ -29,6 +29,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -65,6 +67,9 @@ import me.rerere.rikkahub.data.ai.GenerationHandler
 import me.rerere.rikkahub.data.ai.DeepSeekAnchor
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.createConversationTools
+import me.rerere.rikkahub.data.ai.subagent.createBuiltInSubagentTools
+import me.rerere.ai.provider.AgentPlatform
+import me.rerere.ai.provider.AgentSubagentConfig
 import me.rerere.rikkahub.data.ai.tools.createImageGenerationTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
@@ -134,6 +139,19 @@ private const val RECALL_MARKER_PREFIX = "[撤回] "
 
 // 压缩摘要输出的 token 上限，避免压缩模型生成过长的总结
 private const val COMPRESS_MAX_OUTPUT_TOKENS = 2048
+
+// 分块压缩的最大并发请求数：并发过高易触发 provider 限流导致整批失败
+private const val COMPRESS_CHUNK_CONCURRENCY = 3
+
+// 单个分块压缩失败后的重试次数（应对瞬时网络错误/限流）
+private const val COMPRESS_CHUNK_RETRY_ATTEMPTS = 3
+
+// 分块重试的基础退避间隔，按尝试次数线性递增
+private const val COMPRESS_CHUNK_RETRY_DELAY_MS = 500L
+
+// 自动压缩在同一 keepRecent 档位内的尝试次数：先排除瞬时错误，
+// 连续失败才降档缩小输入规模
+private const val AUTO_COMPRESS_ATTEMPTS_PER_LEVEL = 2
 
 // 流式生成过程中持久化已生成内容的节流间隔
 private const val STREAM_PERSIST_INTERVAL_MS = 800L
@@ -392,8 +410,7 @@ class ChatService(
     }
 
     fun getProcessingStatusFlow(conversationId: Uuid): StateFlow<String?> {
-        val session = sessions[conversationId] ?: return MutableStateFlow(null)
-        return session.processingStatus
+        return getOrCreateSession(conversationId).processingStatus
     }
 
     fun getRecallHistoryFlow(conversationId: Uuid): StateFlow<List<RecallRecord>> {
@@ -411,6 +428,30 @@ class ChatService(
                     s.generationJob.map { job -> s.id to job }
                 }) { pairs ->
                     pairs.filter { it.second != null }.toMap()
+                }
+            }
+        }
+    }
+
+    private fun launchGenerationJob(
+        conversationId: Uuid,
+        keepAliveInBackground: Boolean = true,
+        block: suspend () -> Unit,
+    ): Job {
+        if (!keepAliveInBackground) return appScope.launch { block() }
+
+        val generationId = Uuid.random()
+        val foregroundStarted = ChatGenerationForegroundService.acquire(
+            context = context,
+            generationId = generationId,
+            conversationId = conversationId,
+        )
+        return appScope.launch {
+            try {
+                block()
+            } finally {
+                if (foregroundStarted) {
+                    ChatGenerationForegroundService.release(context, generationId)
                 }
             }
         }
@@ -459,9 +500,10 @@ class ChatService(
         // 新的写操作使撤回历史失效，避免恢复与后续消息分叉
         clearRecallHistory(conversationId)
 
-        // 生成链整体在后台线程执行：流式 chunk 的 CPU 处理（消息重建、token 估算）
-        // 不再占用主线程，多个对话的生成可并行推进，避免互相拖累 UI 响应。
-        val job = appScope.launch(Dispatchers.Default) {
+        val job = launchGenerationJob(
+            conversationId = conversationId,
+            keepAliveInBackground = answer,
+        ) {
             try {
                 runCatching { previousJob?.join() }
                 finishInterruptedPendingTools(conversationId)
@@ -669,9 +711,13 @@ class ChatService(
         val session = getOrCreateSession(conversationId)
         session.getJob()?.cancel()
 
+        // 新的写操作使撤回历史失效，避免恢复与后续消息分叉
         clearRecallHistory(conversationId)
 
-        val job = appScope.launch(Dispatchers.Default) {
+        val job = launchGenerationJob(
+            conversationId = conversationId,
+            keepAliveInBackground = message.role == MessageRole.USER || regenerateAssistantMsg,
+        ) {
             try {
                 val conversation = session.state.value
 
@@ -715,7 +761,16 @@ class ChatService(
         val session = getOrCreateSession(conversationId)
         session.getJob()?.cancel()
 
-        val job = appScope.launch(Dispatchers.Default) {
+        val hasOtherPendingTools = session.state.value.messageNodes.any { node ->
+            node.currentMessage.parts.any { part ->
+                part is UIMessagePart.Tool && part.isPending && part.toolCallId != toolCallId
+            }
+        }
+
+        val job = launchGenerationJob(
+            conversationId = conversationId,
+            keepAliveInBackground = !hasOtherPendingTools,
+        ) {
             try {
                 val conversation = session.state.value
                 val newApprovalState = when {
@@ -885,6 +940,25 @@ class ChatService(
                 },
                 outputTransformers = outputTransformers,
                 tools = buildList {
+                    // 内置子代理引擎：配置在平台 Agent 模型上，AUTO 引擎下 DSH 平台
+                    // 交给其自带 subagent 能力，其余平台由本地 delegate_subagent 工具实现
+                    val subagentConfig = model.agentSubagent
+                    if (subagentConfig?.enabled == true) {
+                        val engineDsh = subagentConfig.engine == AgentSubagentConfig.ENGINE_DSH ||
+                            (subagentConfig.engine == AgentSubagentConfig.ENGINE_AUTO &&
+                                model.platformAgent == AgentPlatform.DEEPSEEK_HARNESS)
+                        if (!engineDsh) {
+                            addAll(
+                                createBuiltInSubagentTools(
+                                    config = subagentConfig,
+                                    settings = settings,
+                                    generationHandler = generationHandler,
+                                    assistant = assistant,
+                                    parentModel = model,
+                                )
+                            )
+                        }
+                    }
                     if (useExternalWebSearch) {
                         addAll(createSearchTools(settings))
                     }
@@ -1427,12 +1501,19 @@ class ChatService(
         val compressedSummaries = coroutineScope {
             // 按 token 预算分块：避免长消息拼出几十万 token 的 prompt
             // 导致压缩请求超出模型上下文窗口而失败
+            val semaphore = Semaphore(COMPRESS_CHUNK_CONCURRENCY)
             ConversationCompressor.splitChunksByTokens(messagesToCompress)
                 .map { chunk ->
                     val content = chunk.joinToString("\n\n") {
                         ConversationCompressor.compressionText(it, maxLength = 2000)
                     }
-                    async { compressMessages(content, "") }
+                    async {
+                        semaphore.withPermit {
+                            retryOnTransientError {
+                                compressMessages(content, "")
+                            }
+                        }
+                    }
                 }
                 .awaitAll()
         }
@@ -1468,6 +1549,25 @@ class ChatService(
     }
 
     /**
+     * 对压缩请求中的瞬时错误（网络抖动/限流）做有限次退避重试；
+     * 取消异常直接向上传播，保证用户停止操作即时生效。
+     */
+    private suspend fun <T> retryOnTransientError(block: suspend () -> T): T {
+        var lastError: Throwable? = null
+        repeat(COMPRESS_CHUNK_RETRY_ATTEMPTS) { attempt ->
+            if (attempt > 0) delay(COMPRESS_CHUNK_RETRY_DELAY_MS * attempt)
+            try {
+                return block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                lastError = e
+            }
+        }
+        throw lastError ?: IllegalStateException("compression request failed")
+    }
+
+    /**
      * 自动压缩结果：compressed 是否成功；tokensAfter 压缩后的估算 token 数；
      * keepRecentAtFloor 保留消息数是否已到下限（无法继续压缩）。
      */
@@ -1480,9 +1580,12 @@ class ChatService(
     /**
      * 自动压缩执行体：估算超阈值后，保留最近 N 条消息，将更早历史压缩为摘要。
      *
-     * 自适应调整：当用户设置的保留条数/阈值无法一次压缩到位时，自动逐步降低
-     * 保留条数重新压缩，直到压缩成功或保留条数降到 0；即使最终仍超阈值
-     * （用户阈值设置过低）也视为已完成压缩，交由调用方继续生成而非中断。
+     * 自适应调整：
+     * - 单条消息的对话同样可压（keepRecent=0 全量压缩该条），仅空对话直接放弃；
+     * - 同一保留档位内先做有限次快速重试排除瞬时错误（网络抖动/限流），
+     *   连续失败才按二分降低保留条数缩小输入规模，避免与输入无关的失败
+     *   触发大量无效的重复 LLM 请求；
+     * - 即使最终仍超阈值（用户阈值设置过低）也视为已完成压缩，交由调用方继续生成。
      */
     private suspend fun autoCompressConversation(
         conversationId: Uuid,
@@ -1493,7 +1596,7 @@ class ChatService(
         _compressingConversations.value = _compressingConversations.value + conversationId
         return try {
             val allMessages = conversation.activeMessages
-            if (allMessages.size <= 1) {
+            if (allMessages.isEmpty()) {
                 return AutoCompressResult(
                     compressed = false,
                     tokensAfter = TokenEstimate.estimateConversationTokens(conversation),
@@ -1502,6 +1605,7 @@ class ChatService(
             }
             val threshold = settings.autoCompressThresholdTokens
             var keepRecent = settings.autoCompressKeepRecent.coerceIn(0, allMessages.size - 1)
+            var attemptsAtLevel = 0
             while (true) {
                 val result = runCatching {
                     compressConversation(
@@ -1513,9 +1617,13 @@ class ChatService(
                     ).getOrThrow()
                 }
                 if (result.isFailure) {
-                    // 压缩请求失败（模型不可用/摘要生成失败）：先尝试降低保留条数换更小输入重试
+                    throwIfCancellation(result.exceptionOrNull())
+                    // 同一保留档位内先快速重试；连续失败才降档缩小输入
+                    attemptsAtLevel++
+                    if (attemptsAtLevel < AUTO_COMPRESS_ATTEMPTS_PER_LEVEL) continue
+                    attemptsAtLevel = 0
                     if (keepRecent > 0) {
-                        keepRecent = (keepRecent - 1).coerceAtLeast(0)
+                        keepRecent /= 2
                         continue
                     }
                     return AutoCompressResult(
@@ -1524,6 +1632,7 @@ class ChatService(
                         keepRecentAtFloor = true,
                     )
                 }
+                attemptsAtLevel = 0
                 val tokensAfter = TokenEstimate.estimateConversationTokens(getConversationFlow(conversationId).value)
                 if (tokensAfter < threshold) {
                     return AutoCompressResult(
@@ -1533,7 +1642,8 @@ class ChatService(
                     )
                 }
                 if (keepRecent > 0) {
-                    keepRecent = (keepRecent - 1).coerceAtLeast(0)
+                    // 压缩成功但上下文仍超阈值：继续把更早的保留消息并入摘要
+                    keepRecent /= 2
                     continue
                 }
                 // 保留条数已到 0 仍超阈值（用户阈值设置过低）：接受当前结果，由调用方继续生成
@@ -1545,6 +1655,8 @@ class ChatService(
             }
             // 理论上不可达；提供明确的 Nothing 结果以满足控制流类型
             error("unreachable: auto compress loop must return")
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Throwable) {
             AutoCompressResult(
                 compressed = false,
@@ -1554,6 +1666,11 @@ class ChatService(
         } finally {
             _compressingConversations.value = _compressingConversations.value - conversationId
         }
+    }
+
+    /** 取消异常必须向上传播，避免被通用兜底逻辑吞掉导致停止操作失效。 */
+    private fun throwIfCancellation(error: Throwable?) {
+        if (error is CancellationException) throw error
     }
 
     /**

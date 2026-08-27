@@ -1,5 +1,6 @@
 package me.rerere.workspace
 
+import android.util.Log
 import java.io.File
 import java.nio.file.Files
 
@@ -17,6 +18,15 @@ class RootfsPatcher {
         ensureLocale(etcDir, options.locale)
         ensureGroupNames(etcDir, options.groupIds.ifEmpty { currentSupplementaryGroupIds() })
         ensureTempDirs(linuxDir)
+        ensureShellEnvironment(linuxDir, options.hostname)
+        ensureNpmConfig(linuxDir)
+        ensureGitConfig(linuxDir)
+        ensureInputrc(linuxDir)
+        ensureSshConfig(linuxDir)
+        ensureGlobalGitignore(linuxDir)
+        ensureDoctorScript(linuxDir)
+        ensureTimezone(linuxDir)
+        ensureAptMirror(linuxDir)
     }
 
     private fun ensureRootfsDns(
@@ -55,11 +65,13 @@ class RootfsPatcher {
                 appendLine("options edns0 trust-ad")
             }
         )
+        verifyWrite(resolvConf, "resolv.conf (DNS)")
     }
 
     private fun ensureHosts(etcDir: File, hostname: String) {
         val hosts = File(etcDir, "hosts")
-        val lines = if (hosts.isFile) hosts.readLines() else emptyList()
+        val hostsContent = if (hosts.isFile) hosts.readText() else ""
+        val lines = hostsContent.lineSequence().toList()
         val hasIpv4Localhost = lines.any { line ->
             val normalized = line.substringBefore('#').trim().split(WHITESPACE_REGEX)
             normalized.firstOrNull() == "127.0.0.1" && "localhost" in normalized.drop(1)
@@ -73,7 +85,7 @@ class RootfsPatcher {
         hosts.parentFile?.mkdirs()
         hosts.appendText(
             buildString {
-                if (hosts.exists() && hosts.length() > 0 && !hosts.readText().endsWith('\n')) {
+                if (hostsContent.isNotEmpty() && !hostsContent.endsWith('\n')) {
                     appendLine()
                 }
                 if (!hasIpv4Localhost) {
@@ -111,7 +123,8 @@ class RootfsPatcher {
         if (!target.exists()) {
             target.writeText("root:x:0:\n")
         }
-        val lines = target.readLines().toMutableList()
+        val text = target.readText()
+        val lines = text.lines()
         val existingIds = lines.mapNotNull { line ->
             line.split(':').getOrNull(2)?.toLongOrNull()
         }.toSet()
@@ -130,7 +143,7 @@ class RootfsPatcher {
 
         target.appendText(
             buildString {
-                if (target.length() > 0 && !target.readText().endsWith('\n')) {
+                if (text.isNotEmpty() && !text.endsWith('\n')) {
                     appendLine()
                 }
                 additions.forEach { appendLine(it) }
@@ -165,7 +178,383 @@ class RootfsPatcher {
             .mapNotNull { it.toLongOrNull() }
     }
 
+    private fun ensureShellEnvironment(linuxDir: File, hostname: String) {
+        val profileD = File(linuxDir, "etc/profile.d").apply { mkdirs() }
+        val rikkahubSh = File(profileD, "rikkahub.sh")
+        // 模板带版本标记 rk-ext:N; 低于当前版本的旧模板整体重写升级
+        if (!rikkahubSh.isFile || !rikkahubSh.readText().contains(SHELL_ENV_VERSION_MARKER)) {
+            rikkahubSh.writeText(
+                buildString {
+                    appendLine("# RikkaHub workspace environment")
+                    appendLine("# $SHELL_ENV_VERSION_MARKER")
+                    appendLine("export PATH=\"/usr/local/bin:\$PATH\"")
+                    appendLine("export EDITOR=nano")
+                    appendLine("export PS1='\\[\\e[1;32m\\]${hostname}\\[\\e[0m\\]:\\[\\e[1;34m\\]\\w\\[\\e[0m\\]\\$ '")
+                    appendLine("alias ll='ls -la'")
+                    appendLine("alias la='ls -A'")
+                    appendLine("alias l='ls -CF'")
+                    appendLine("# --- 可扩展性/跨设备共享: /config 为宿主侧挂载区, 内容随 /config 同步 ---")
+                    appendLine("# 用户自定义 shell 扩展: 每个脚本独立容错加载")
+                    appendLine("if [ -d /config/profile.d ]; then")
+                    appendLine("  for __rk_f in /config/profile.d/*.sh; do")
+                    appendLine("    [ -f \"\$__rk_f\" ] && . \"\$__rk_f\"")
+                    appendLine("  done")
+                    appendLine("  unset __rk_f")
+                    appendLine("fi")
+                    appendLine("# 用户 npm 覆盖配置(优先级高于 ~/.npmrc)")
+                    appendLine("if [ -f /config/npm-user.npmrc ]; then")
+                    appendLine("  export NPM_CONFIG_USERCONFIG=/config/npm-user.npmrc")
+                    appendLine("fi")
+                    appendLine("# 简便性: /config/env 简易环境变量(每行 KEY=VALUE, # 注释), 门槛低于写 sh 脚本")
+                    appendLine("if [ -f /config/env ]; then")
+                    appendLine("  while IFS= read -r __rk_line || [ -n \"\$__rk_line\" ]; do")
+                    appendLine("    case \"\$__rk_line\" in ''|\\#*) continue ;; esac")
+                    appendLine("    case \"\$__rk_line\" in *=*) export \"\$__rk_line\" ;; esac")
+                    appendLine("  done < /config/env")
+                    appendLine("fi")
+                    appendLine("# 多平台共享: git over SSH 使用 /config/ssh 内密钥(ed25519 优先)")
+                    appendLine("if [ -d /config/ssh ]; then")
+                    appendLine("  for __rk_key in /config/ssh/id_ed25519 /config/ssh/id_rsa; do")
+                    appendLine("    if [ -f \"\$__rk_key\" ]; then")
+                    appendLine("      GIT_SSH_COMMAND=\"ssh -i \$__rk_key -o IdentitiesOnly=yes\"")
+                    appendLine("      [ -f /config/ssh/known_hosts ] && GIT_SSH_COMMAND=\"\$GIT_SSH_COMMAND -o UserKnownHostsFile=/config/ssh/known_hosts\"")
+                    appendLine("      [ -f /config/ssh/ssh_config ] && GIT_SSH_COMMAND=\"\$GIT_SSH_COMMAND -F /config/ssh/ssh_config\"")
+                    appendLine("      export GIT_SSH_COMMAND")
+                    appendLine("      break")
+                    appendLine("    fi")
+                    appendLine("  done")
+                    appendLine("  unset __rk_key")
+                    appendLine("fi")
+                    appendLine("[ -f /config/pip.conf ] && export PIP_CONFIG_FILE=/config/pip.conf")
+                    appendLine("# npm 全局包装与 pip user 安装路径(目录不存在时前置无害, guard 防重复)")
+                    appendLine("case \":\$PATH:\" in")
+                    appendLine("  *\":/config/npm-global/bin:\"*) ;;")
+                    appendLine("  *) export PATH=\"/config/npm-global/bin:/root/.local/bin:\$PATH\" ;;")
+                    appendLine("esac")
+                }
+            )
+        }
+
+        val bashrc = File(linuxDir, "root/.bashrc")
+        if (!bashrc.isFile || bashrc.readText().isBlank()) {
+            bashrc.writeText(
+                buildString {
+                    appendLine("# RikkaHub workspace bashrc")
+                    appendLine("if [ -f /etc/profile.d/rikkahub.sh ]; then . /etc/profile.d/rikkahub.sh; fi")
+                    appendLine("if [ -f /etc/bash_completion ] && ! shopt -oq posix; then . /etc/bash_completion; fi")
+                    appendLine("set -o vi 2>/dev/null || true")
+                }
+            )
+        }
+
+        val profile = File(linuxDir, "root/.profile")
+        if (!profile.isFile || profile.readText().isBlank()) {
+            profile.writeText(
+                buildString {
+                    appendLine("# RikkaHub workspace profile")
+                    appendLine("if [ -f /etc/profile.d/rikkahub.sh ]; then . /etc/profile.d/rikkahub.sh; fi")
+                    appendLine("if [ -f \"\$HOME/.bashrc\" ]; then . \"\$HOME/.bashrc\"; fi")
+                }
+            )
+        }
+    }
+
+    private fun ensureNpmConfig(linuxDir: File) {
+        val npmrc = File(linuxDir, "root/.npmrc")
+        if (npmrc.isFile && npmrc.readText().contains("registry=")) return
+        npmrc.parentFile?.mkdirs()
+        npmrc.writeText(
+            buildString {
+                appendLine("registry=https://registry.npmmirror.com")
+                appendLine("fetch-retries=3")
+                appendLine("fetch-timeout=60000")
+                appendLine("maxsockets=3")
+                appendLine("fund=false")
+                appendLine("audit=false")
+                appendLine("loglevel=warn")
+            }
+        )
+    }
+
+    private fun ensureGitConfig(linuxDir: File) {
+        val gitconfig = File(linuxDir, "root/.gitconfig")
+        if (!gitconfig.isFile) {
+            gitconfig.parentFile?.mkdirs()
+            gitconfig.writeText(
+                buildString {
+                    appendLine("[user]")
+                    appendLine("	name = RikkaHub Workspace")
+                    appendLine("	email = workspace@rikkahub.app")
+                    appendLine("[init]")
+                    appendLine("	defaultBranch = main")
+                    appendLine("[safe]")
+                    appendLine("	directory = /workspace")
+                    appendLine("[pull]")
+                    appendLine("	rebase = false")
+                    appendLine("[transfer]")
+                    appendLine("	fsckobjects = true")
+                }
+            )
+            verifyWrite(gitconfig, "gitconfig")
+        }
+        // 跨设备共享: /config 为宿主侧挂载区, 用户 git 身份/代理等放 /config/gitconfig
+        // (git 对不存在的 include 文件静默忽略)
+        if (!gitconfig.readText().contains("[include]")) {
+            gitconfig.appendText("\n[include]\n\tpath = /config/gitconfig\n")
+        }
+    }
+
+    private fun ensureInputrc(linuxDir: File) {
+        val inputrc = File(linuxDir, "root/.inputrc")
+        if (inputrc.isFile && inputrc.readText().contains("set editing-mode")) return
+        inputrc.parentFile?.mkdirs()
+        inputrc.writeText(
+            buildString {
+                appendLine("# RikkaHub workspace readline config")
+                appendLine("set editing-mode vi")
+                appendLine("set keymap vi-insert")
+                appendLine("set show-mode-in-prompt on")
+                appendLine("# History search: up/down arrow filter by prefix")
+                appendLine("\"\\e[A\": history-search-backward")
+                appendLine("\"\\e[B\": history-search-forward")
+                appendLine("# Tab completion: case-insensitive, show all matches")
+                appendLine("set completion-ignore-case on")
+                appendLine("set show-all-if-ambiguous on")
+                appendLine("set menu-complete-display-prefix on")
+                appendLine("# Bell off")
+                appendLine("set bell-style none")
+            }
+        )
+    }
+
+    private fun ensureSshConfig(linuxDir: File) {
+        val sshDir = File(linuxDir, "root/.ssh").apply { mkdirs() }
+        sshDir.setExecutable(true, true)
+        // known_hosts 空文件（首次自动 Git clone 不因 host key 交互阻塞）
+        val knownHosts = File(sshDir, "known_hosts")
+        if (!knownHosts.isFile) {
+            knownHosts.parentFile?.mkdirs()
+            knownHosts.writeText("")
+        }
+        // SSH 配置：自动化操作接受新 host key，不交互
+        val config = File(sshDir, "config")
+        if (!config.isFile) {
+            config.writeText(
+                buildString {
+                    appendLine("# RikkaHub workspace SSH config")
+                    appendLine("Host *")
+                    appendLine("    StrictHostKeyChecking accept-new")
+                    appendLine("    UserKnownHostsFile /root/.ssh/known_hosts")
+                    appendLine("    LogLevel ERROR")
+                }
+            )
+        }
+    }
+
+    private fun ensureGlobalGitignore(linuxDir: File) {
+        val gitignore = File(linuxDir, "root/.gitignore_global")
+        if (gitignore.isFile) return
+        gitignore.parentFile?.mkdirs()
+        gitignore.writeText(
+            buildString {
+                appendLine("# RikkaHub global gitignore")
+                appendLine("# Node")
+                appendLine("node_modules/")
+                appendLine("npm-debug.log*")
+                appendLine(".npm/")
+                appendLine("# Python")
+                appendLine("__pycache__/")
+                appendLine("*.pyc")
+                appendLine("*.egg-info/")
+                appendLine(".venv/")
+                appendLine("# Java / Gradle")
+                appendLine(".gradle/")
+                appendLine("build/")
+                appendLine("*.class")
+                appendLine("# IDE")
+                appendLine(".idea/")
+                appendLine(".vscode/")
+                appendLine("*.swp")
+                appendLine("*.swo")
+                appendLine("*~")
+                appendLine(".DS_Store")
+                appendLine("# Temp / cache")
+                appendLine(".cache/")
+                appendLine("tmp/")
+                appendLine("*.tmp")
+                appendLine("# OS")
+                appendLine("Thumbs.db")
+                appendLine(".directory")
+            }
+        )
+        // 在 .gitconfig 中注册为 excludesfile（如尚未注册）
+        val gitconfig = File(linuxDir, "root/.gitconfig")
+        if (gitconfig.isFile && !gitconfig.readText().contains("excludesfile")) {
+            val existing = gitconfig.readText()
+            gitconfig.writeText(existing.trimEnd() + "\n[core]\n\texcludesfile = /root/.gitignore_global\n")
+        }
+    }
+
+    /**
+     * 一键自检脚本 /usr/local/bin/rk-doctor:
+     * 工具链/网络/挂载区/磁盘/env 全量体检, PASS-FAIL 逐项输出并附修复提示。
+     * 每次都重写(脚本随版本演进), 开销可忽略。
+     */
+    private fun ensureDoctorScript(linuxDir: File) {
+        val binDir = File(linuxDir, "usr/local/bin").apply { mkdirs() }
+        val doctor = File(binDir, "rk-doctor")
+        doctor.writeText(DOCTOR_SCRIPT.trimIndent() + "\n")
+        doctor.setExecutable(true, false)
+    }
+
+    /** rikkahub.sh 模板版本标记: 内容演进时递增, 触发已安装 rootfs 的模板升级 */
+    private val SHELL_ENV_VERSION_MARKER = "rk-ext:2"
+
+    private val DOCTOR_SCRIPT = """
+        #!/bin/bash
+        # RikkaHub workspace self-check (usage: rk-doctor)
+        PASS=0; FAIL=0
+        ok()  { echo "[PASS] ${'$'}1"; PASS=${'$'}((PASS+1)); }
+        bad() { echo "[FAIL] ${'$'}1${'$'}{2:+ | hint: ${'$'}2}"; FAIL=${'$'}((FAIL+1)); }
+
+        echo "===== rk-doctor ====="
+        echo "-- tools --"
+        for t in node npm git curl wget unzip tar gzip python3 pip3; do
+          command -v "${'$'}t" >/dev/null 2>&1 && ok "${'$'}t" || bad "${'$'}t missing" "apt-get install -y ${'$'}t"
+        done
+        if command -v node >/dev/null 2>&1; then
+          echo "  node=${'$'}(node --version 2>/dev/null) npm=${'$'}(npm --version 2>/dev/null)"
+          [ -d /opt/nodejs ] && echo "  install: /opt/nodejs (mirror tarball)" || echo "  install: system package"
+        fi
+
+        echo "-- network --"
+        CODE=${'$'}(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 https://registry.npmmirror.com/ 2>/dev/null)
+        case "${'$'}CODE" in
+          200|301|302) ok "npmmirror reachable (HTTP ${'$'}CODE)" ;;
+          *) bad "npmmirror unreachable (HTTP ${'$'}{CODE:-000})" "check DNS/proxy (/etc/resolv.conf)" ;;
+        esac
+
+        echo "-- mounts --"
+        for d in /workspace /skills /tool_outputs /upload /tools /config; do
+          [ -d "${'$'}d" ] && ok "mount ${'$'}d" || bad "mount missing: ${'$'}d" "restart workspace session"
+        done
+
+        echo "-- extensions --"
+        for f in /config/env /config/npm-user.npmrc /config/gitconfig /config/tools.txt /config/pip.conf; do
+          [ -f "${'$'}f" ] && ok "config ${'$'}f"
+        done
+        if [ -d /config/ssh ] && ls /config/ssh/id_* >/dev/null 2>&1; then
+          ok "ssh key in /config/ssh"
+        elif [ -f ~/.ssh/id_ed25519 ] || [ -f ~/.ssh/id_rsa ]; then
+          ok "ssh key in ~/.ssh (device-local)"
+        else
+          echo "[SKIP] no ssh key (hint: put id_ed25519 under /config/ssh to share across devices)"
+        fi
+        for s in /config/profile.d/*.sh; do
+          [ -f "${'$'}s" ] && ok "profile script ${'$'}s"
+        done
+
+        echo "-- disk --"
+        echo "  avail(/workspace): ${'$'}(df -h /workspace 2>/dev/null | awk 'NR==2{print ${'$'}4}')"
+
+        echo "-- env --"
+        echo "  TZ offset: ${'$'}(date +%z 2>/dev/null)  LANG=${'$'}{LANG:-unset}"
+        echo "  NPM registry: ${'$'}(npm config get registry 2>/dev/null)"
+        [ -n "${'$'}{PIP_CONFIG_FILE:-}" ] && echo "  PIP config: ${'$'}PIP_CONFIG_FILE"
+        [ -n "${'$'}{GIT_SSH_COMMAND:-}" ] && echo "  GIT_SSH_COMMAND: ${'$'}{GIT_SSH_COMMAND%% *}-based (/config/ssh)"
+
+        echo "====================="
+        echo "result: ${'$'}PASS pass, ${'$'}FAIL fail"
+        [ "${'$'}FAIL" -eq 0 ]
+    """.trimIndent()
+
+    private fun ensureTimezone(linuxDir: File) {
+        val localtime = File(linuxDir, "etc/localtime")
+        if (localtime.exists()) return
+        val zoneinfoDir = File(linuxDir, "usr/share/zoneinfo")
+        val asiaShanghai = File(zoneinfoDir, "Asia/Shanghai")
+        if (asiaShanghai.isFile) {
+            localtime.parentFile?.mkdirs()
+            try {
+                Files.createSymbolicLink(localtime.toPath(), asiaShanghai.toPath())
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to create timezone symlink", e)
+            }
+        }
+        val timezoneFile = File(linuxDir, "etc/timezone")
+        if (!timezoneFile.isFile || timezoneFile.readText().isBlank()) {
+            timezoneFile.parentFile?.mkdirs()
+            timezoneFile.writeText("Asia/Shanghai\n")
+        }
+    }
+
+    private fun ensureAptMirror(linuxDir: File) {
+        val etcDir = File(linuxDir, "etc/apt")
+        if (!etcDir.isDirectory) return
+
+        // 1) 传统 sources.list（单文件）
+        patchOneLineSource(File(etcDir, "sources.list"))
+
+        // 2) sources.list.d/*.list（传统单行格式）
+        val listDir = File(etcDir, "sources.list.d")
+        if (listDir.isDirectory) {
+            listDir.listFiles { f -> f.isFile && f.name.endsWith(".list") }
+                ?.forEach { patchOneLineSource(it) }
+
+            // 3) *.sources（Deb822 格式, Ubuntu 24.04+ 默认）
+            listDir.listFiles { f -> f.isFile && f.name.endsWith(".sources") }
+                ?.forEach { patchDeb822Source(it) }
+        }
+    }
+
+    private fun patchOneLineSource(file: File) {
+        if (!file.isFile) return
+        val text = file.readText()
+        if (text.contains("mirrors")) return
+        val patched = text.replace(ONE_LINE_SOURCE_REGEX) { m ->
+            val prefix = m.groupValues[1]
+            val distro = m.groupValues[2]
+            "$prefix https://mirrors.tuna.tsinghua.edu.cn/$distro/ "
+        }
+        if (patched != text) {
+            file.writeText(patched)
+            Log.i(TAG, "Patched apt one-line source: ${file.name}")
+        }
+    }
+
+    private fun patchDeb822Source(file: File) {
+        if (!file.isFile) return
+        val text = file.readText()
+        if (text.contains("mirrors")) return
+        val patched = text.replace(DEB822_URIS_REGEX) { m ->
+            val uris = m.groupValues[1]
+            val patchedUris = uris.split(WHITESPACE_REGEX).joinToString(" ") { uri ->
+                val trimmed = uri.trim()
+                when {
+                    trimmed.contains("debian") ->
+                        trimmed.replace(DEBIAN_ARCHIVE_REGEX, "https://mirrors.tuna.tsinghua.edu.cn/debian/")
+                    trimmed.contains("ubuntu") ->
+                        trimmed.replace(UBUNTU_ARCHIVE_REGEX, "https://mirrors.tuna.tsinghua.edu.cn/ubuntu/")
+                    else -> trimmed
+                }
+            }
+            "URIs: $patchedUris"
+        }
+        if (patched != text) {
+            file.writeText(patched)
+            Log.i(TAG, "Patched apt Deb822 source: ${file.name}")
+        }
+    }
+
+    private fun verifyWrite(file: File, label: String) {
+        if (!file.isFile || file.length() == 0L) {
+            Log.w(TAG, "Patch write may have failed for $label: ${file.absolutePath} " +
+                "(exists=${file.isFile}, length=${file.length()})")
+        }
+    }
+
     private companion object {
+        private const val TAG = "RootfsPatcher"
         private const val MAX_DNS_SERVERS = 3
         private const val DEFAULT_HOSTNAME = "localhost"
         private val WHITESPACE_REGEX = Regex("\\s+")
@@ -175,9 +564,22 @@ class RootfsPatcher {
             "::1",
         )
         private val DEFAULT_DNS_SERVERS = listOf(
+            "223.5.5.5",
             "1.1.1.1",
             "8.8.8.8",
-            "223.5.5.5",
+        )
+        private val ONE_LINE_SOURCE_REGEX = Regex(
+            """(deb|deb-src)\s+https?://[^\s]+(debian|ubuntu)[^\s]*\s+"""
+        )
+        private val DEB822_URIS_REGEX = Regex(
+            """URIs:\s+(.+)""",
+            setOf(RegexOption.MULTILINE),
+        )
+        private val DEBIAN_ARCHIVE_REGEX = Regex(
+            """https?://[^\s]*debian[^\s]*"""
+        )
+        private val UBUNTU_ARCHIVE_REGEX = Regex(
+            """https?://[^\s]*ubuntu[^\s]*"""
         )
     }
 }

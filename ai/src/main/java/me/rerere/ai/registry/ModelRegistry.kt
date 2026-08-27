@@ -344,6 +344,12 @@ object ModelRegistry {
         toolReasoningAbility()
     }
 
+    private val QWEN_3_8 = defineModel {
+        tokens("qwen", "3", "8")
+        visionInput()
+        toolReasoningAbility()
+    }
+
     private val QWEN_3_5_MAX = defineModel {
         tokens("qwen", "3", "5", "max")
         toolReasoningAbility()
@@ -472,6 +478,17 @@ object ModelRegistry {
         toolReasoningAbility()
     }
 
+    private val GLM_5_3 = defineModel {
+        tokens("glm", "5", "3")
+        toolReasoningAbility()
+    }
+
+    private val GLM_5_3_FLASH = defineModel {
+        tokens("glm", "5", "3", "flash")
+        visionInput()
+        toolReasoningAbility()
+    }
+
     private val MINIMAX_M2 = defineModel {
         tokens("minimax", "m", "2")
         toolReasoningAbility()
@@ -528,6 +545,12 @@ object ModelRegistry {
 
     private val HY3 = defineModel {
         tokens("hy", "3")
+        toolReasoningAbility()
+    }
+
+    private val HY4 = defineModel {
+        tokens("hy", "4")
+        visionInput()
         toolReasoningAbility()
     }
 
@@ -603,6 +626,7 @@ object ModelRegistry {
         QWEN_3_5,
         QWEN_3_6,
         QWEN_3_7,
+        QWEN_3_8,
         QWEN_3_5_MAX,
         QWEN_3_6_MAX,
         QWEN_3_7_MAX,
@@ -626,6 +650,8 @@ object ModelRegistry {
         GLM_5,
         GLM_5_1,
         GLM_5_2,
+        GLM_5_3,
+        GLM_5_3_FLASH,
         MINIMAX_M2,
         MINIMAX_M2_5,
         MINIMAX_M2_7,
@@ -637,6 +663,7 @@ object ModelRegistry {
         XIAOMI_MIMO_V3,
         XIAOMI_MIMO_V3_PRO,
         HY3,
+        HY4,
         LONGCAT_2,
         MUSE_SPARK,
         MUSE_GLIMMER,

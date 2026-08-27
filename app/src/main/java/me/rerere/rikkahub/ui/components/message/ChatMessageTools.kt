@@ -34,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.json.JsonObject
@@ -48,6 +49,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.BubbleChatQuestion
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.TaskDone01
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.rikkahub.R
@@ -64,6 +66,61 @@ private const val ASK_USER_TOOL_NAME = "ask_user"
 @Composable
 fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool) {
     val loading = !tool.isFinished
+    val planEntries = remember(tool.metadata) { parsePlanEntries(tool.metadata) }
+    if (planEntries != null) {
+        // ACP plan (todo list): render entries with per-item status markers
+        ChainOfThoughtStep(
+            icon = {
+                Icon(
+                    imageVector = HugeIcons.TaskDone01,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = LocalContentColor.current.copy(alpha = 0.7f),
+                )
+            },
+            label = {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = stringResource(R.string.chat_message_tool_call_generic, "Plan"),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.shimmer(isLoading = loading),
+                    )
+                    planEntries.forEach { entry ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(
+                                text = when (entry.status) {
+                                    "completed" -> "[x]"
+                                    "in_progress" -> "[>]"
+                                    else -> "[ ]"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (entry.status == "completed") {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                            Text(
+                                text = entry.content,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textDecoration = if (entry.status == "completed") {
+                                    TextDecoration.LineThrough
+                                } else {
+                                    TextDecoration.None
+                                },
+                            )
+                        }
+                    }
+                }
+            },
+        )
+        return
+    }
     ChainOfThoughtStep(
         icon = {
             if (loading) {
@@ -88,6 +145,27 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
             )
         },
     )
+}
+
+/** UI-side snapshot of one ACP plan entry. */
+private data class PlanUiEntry(val content: String, val status: String?)
+
+/**
+ * Extracts plan entries from a server-tool card metadata produced by
+ * [me.rerere.ai.agent.SessionUpdateBridge]; null when the card is not a plan.
+ */
+private fun parsePlanEntries(metadata: kotlinx.serialization.json.JsonElement?): List<PlanUiEntry>? {
+    val obj = metadata as? JsonObject ?: return null
+    if (obj["kind"]?.jsonPrimitive?.contentOrNull != "plan") return null
+    val array = obj["plan_entries"] as? kotlinx.serialization.json.JsonArray ?: return null
+    return array.mapNotNull { element ->
+        val entry = element as? JsonObject ?: return@mapNotNull null
+        val content = entry["content"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+        PlanUiEntry(
+            content = content,
+            status = entry["status"]?.jsonPrimitive?.contentOrNull,
+        )
+    }.takeIf { it.isNotEmpty() }
 }
 
 @Composable

@@ -9,6 +9,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.ProviderHttpClient
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.util.KeyRoulette
 import okhttp3.OkHttpClient
@@ -23,7 +24,7 @@ class ChatCompletionsToolSchemaTest {
 
     @Before
     fun setUp() {
-        api = ChatCompletionsAPI(OkHttpClient(), KeyRoulette.default())
+        api = ChatCompletionsAPI(ProviderHttpClient(OkHttpClient()), KeyRoulette.default())
     }
 
     @Test
@@ -57,6 +58,7 @@ class ChatCompletionsToolSchemaTest {
             TextGenerationParams::class.java,
             ProviderSetting.OpenAI::class.java,
             Boolean::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType,
         )
         method.isAccessible = true
 
@@ -72,6 +74,7 @@ class ChatCompletionsToolSchemaTest {
             ),
             ProviderSetting.OpenAI(),
             false,
+            0,
         ) as JsonObject
     }
 }

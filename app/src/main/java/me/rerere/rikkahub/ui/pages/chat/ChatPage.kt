@@ -8,8 +8,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -30,6 +32,8 @@ import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.ui.Alignment
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.adaptive.currentWindowDpSize
@@ -74,6 +78,7 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.MessageAdd01
+import me.rerere.hugeicons.stroke.Shield02
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -98,6 +103,7 @@ import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
+import me.rerere.rikkahub.data.ai.agent.AgentPrompt
 import me.rerere.rikkahub.utils.ImageUtils
 import me.rerere.rikkahub.utils.STREAM_UI_THROTTLE_MS
 import me.rerere.rikkahub.utils.base64Decode
@@ -133,6 +139,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val enableWebSearch by vm.enableWebSearch.collectAsStateWithLifecycle()
     val errors by vm.errors.collectAsStateWithLifecycle()
     val compressingConversations by vm.compressingConversations.collectAsStateWithLifecycle()
+    val agentPermissionPrompts by vm.agentPermissionPrompts.collectAsStateWithLifecycle()
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val softwareKeyboardController = LocalSoftwareKeyboardController.current
@@ -277,6 +284,67 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
             }
         }
     }
+
+    // ACP 工具权限审批对话框（对齐桌面端 agent 的 allow/reject 交互）
+    agentPermissionPrompts.firstOrNull()?.let { prompt ->
+        AgentPermissionDialog(
+            prompt = prompt,
+            onRespond = { optionId -> vm.respondAgentPermission(prompt.requestId, optionId) },
+            onDismiss = { vm.respondAgentPermission(prompt.requestId, null) },
+        )
+    }
+}
+
+@Composable
+private fun AgentPermissionDialog(
+    prompt: AgentPrompt,
+    onRespond: (String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Icon(
+                    HugeIcons.Shield02,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(stringResource(R.string.chat_page_permission_title))
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = prompt.title?.takeIf { it.isNotBlank() }
+                        ?: stringResource(R.string.chat_page_permission_unknown_tool),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (prompt.options.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.chat_page_permission_no_options),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Column(horizontalAlignment = Alignment.End) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    prompt.options.forEach { option ->
+                        FilledTonalButton(onClick = { onRespond(option.optionId) }) {
+                            Text(option.name)
+                        }
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            }
+        },
+    )
 }
 
 @Composable
@@ -307,6 +375,7 @@ private fun ChatPageContent(
     var showFilesSheet by remember { mutableStateOf(false) }
 
     val stewardModeState by vm.stewardModeState.collectAsStateWithLifecycle()
+    val agentSessionModes by vm.agentSessionModes.collectAsStateWithLifecycle()
     val stewardMaxLoops by vm.stewardMaxLoops.collectAsStateWithLifecycle()
     val stewardUnlimitedLoops by vm.stewardUnlimitedLoops.collectAsStateWithLifecycle()
     val canRecall by vm.canRecall.collectAsStateWithLifecycle()
@@ -475,6 +544,8 @@ private fun ChatPageContent(
                     onToggleStewardMode = { vm.toggleStewardMode() },
                     onStewardMaxLoopsChange = { vm.setStewardMaxLoops(it) },
                     onStewardUnlimitedLoopsChange = { vm.setStewardUnlimitedLoops(it) },
+                    agentSessionModes = agentSessionModes,
+                    onSelectSessionMode = { vm.selectAgentSessionMode(it) },
                 )
             },
             containerColor = Color.Transparent,

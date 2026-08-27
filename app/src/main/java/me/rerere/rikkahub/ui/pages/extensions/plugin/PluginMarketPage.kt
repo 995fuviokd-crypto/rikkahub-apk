@@ -26,6 +26,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -33,6 +34,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
@@ -67,6 +69,7 @@ import me.rerere.hugeicons.stroke.BookOpen01
 import me.rerere.hugeicons.stroke.CloudDownload
 import me.rerere.hugeicons.stroke.CloudUpload
 import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.InformationCircle
 import me.rerere.hugeicons.stroke.Menu01
 import me.rerere.hugeicons.stroke.Github
 import me.rerere.hugeicons.stroke.Puzzle
@@ -75,6 +78,8 @@ import me.rerere.rikkahub.data.api.CommunityListItem
 import me.rerere.rikkahub.data.api.CommunityMarketDataSource
 import me.rerere.rikkahub.data.api.DshMarketPlugin
 import me.rerere.rikkahub.data.api.communityPluginIdFor
+import me.rerere.rikkahub.data.ai.agent.AgentEnvStatus
+import me.rerere.rikkahub.data.ai.agent.AgentInstallProgress
 import me.rerere.rikkahub.data.plugin.InstalledPlugin
 import me.rerere.rikkahub.data.plugin.PluginCategories
 import me.rerere.rikkahub.data.plugin.PluginManager
@@ -239,6 +244,21 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
         }
     }
 
+    // 工作区环境状态: DSH npm 类插件的环境提醒与一键补全
+    val envStatus by vm.envStatus.collectAsStateWithLifecycle()
+    val envProgress by vm.envProgress.collectAsStateWithLifecycle()
+    val envInstalling by vm.envInstalling.collectAsStateWithLifecycle()
+    val pkgInstallingId by vm.pkgInstallingId.collectAsStateWithLifecycle()
+    val pkgNotice by vm.pkgNotice.collectAsStateWithLifecycle()
+
+    LaunchedEffect(pkgNotice) {
+        val message = pkgNotice
+        if (message != null) {
+            snackbarHostState.showSnackbar(message)
+            vm.consumePkgNotice()
+        }
+    }
+
     // 进入市场页自动拉取最新索引
     LaunchedEffect(tab) {
         when (tab) {
@@ -346,6 +366,13 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
             when (tab) {
                 0 -> InstalledTab(
                     installed = installed,
+                    envStatus = envStatus,
+                    envProgress = envProgress,
+                    envInstalling = envInstalling,
+                    pkgInstallingId = pkgInstallingId,
+                    onInstallEnv = vm::installWorkspaceEnv,
+                    onRetryEnv = vm::refreshEnvStatus,
+                    onInstallPkg = { vm.installPkgToWorkspace(it) },
                     onToggle = vm::toggleEnabled,
                     onUninstall = { deleteTarget = it },
                     onInstallLocal = { localZipLauncher.launch(arrayOf("application/zip", "*/*")) },
@@ -490,6 +517,13 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
 @Composable
 private fun InstalledTab(
     installed: List<InstalledPlugin>,
+    envStatus: AgentEnvStatus,
+    envProgress: AgentInstallProgress?,
+    envInstalling: Boolean,
+    pkgInstallingId: String?,
+    onInstallEnv: () -> Unit,
+    onRetryEnv: () -> Unit,
+    onInstallPkg: (InstalledPlugin) -> Unit,
     onToggle: (String) -> Unit,
     onUninstall: (InstalledPlugin) -> Unit,
     onInstallLocal: () -> Unit,
@@ -500,11 +534,34 @@ private fun InstalledTab(
         installedCategory == PluginCategories.ALL ||
             (plugin.info?.type ?: "") == installedCategory
     }
+    // 需要 Node 环境的 DSH npm 类插件; 环境未就绪时在列表顶部提醒并提供一键补全
+    val runtimeDependent = filtered.filter { !it.info?.npmPackages.isNullOrEmpty() }
+    val envNotReady = envStatus != AgentEnvStatus.READY && envStatus != AgentEnvStatus.NO_ROOTFS
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        if (runtimeDependent.isNotEmpty() && envNotReady) {
+            item(key = "env-banner") {
+                WorkspaceEnvBanner(
+                    dependentCount = runtimeDependent.size,
+                    status = envStatus,
+                    progress = envProgress,
+                    installing = envInstalling,
+                    onInstallEnv = onInstallEnv,
+                    onRetryEnv = onRetryEnv,
+                )
+            }
+        } else if (runtimeDependent.isNotEmpty()) {
+            item(key = "env-ok") {
+                Text(
+                    text = "工作区环境已就绪，${runtimeDependent.size} 个插件的命令行能力可用",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -556,6 +613,9 @@ private fun InstalledTab(
         items(filtered, key = { it.id }) { plugin ->
             InstalledPluginCard(
                 plugin = plugin,
+                envNotReady = envNotReady,
+                installingPkg = pkgInstallingId == plugin.id,
+                onInstallPkg = { onInstallPkg(plugin) },
                 onClick = { onSelect(plugin) },
                 onToggle = { onToggle(plugin.id) },
                 onUninstall = { onUninstall(plugin) },
@@ -564,14 +624,99 @@ private fun InstalledTab(
     }
 }
 
+/**
+ * 工作区环境提醒横幅: 存在需要 Node.js 的 DSH 插件且环境未就绪时展示。
+ * 提供一键补全(检测→Node→常用工具), 失败时显示原因并可重试检测。
+ */
+@Composable
+private fun WorkspaceEnvBanner(
+    dependentCount: Int,
+    status: AgentEnvStatus,
+    progress: AgentInstallProgress?,
+    installing: Boolean,
+    onInstallEnv: () -> Unit,
+    onRetryEnv: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(
+                    HugeIcons.InformationCircle,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                Text(
+                    text = when (status) {
+                        AgentEnvStatus.NODE_MISSING -> "缺少 Node.js 运行环境"
+                        AgentEnvStatus.TOOLS_MISSING -> "工作区工具不完整（git/curl 等）"
+                        AgentEnvStatus.UNKNOWN, AgentEnvStatus.NO_ROOTFS -> "工作区环境未知"
+                        else -> "工作区环境未就绪"
+                    },
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
+            Text(
+                text = "$dependentCount 个插件提供命令行能力，需要 Node.js 环境。补全后即可在对话中直接使用。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            if (installing && progress != null) {
+                progress.percent?.let {
+                    LinearProgressIndicator(
+                        progress = { it / 100f },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                Text(
+                    text = progress.detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onInstallEnv,
+                    enabled = !installing,
+                ) {
+                    if (installing) {
+                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                        Text("安装中…", modifier = Modifier.padding(start = 6.dp))
+                    } else {
+                        Text("一键补全环境")
+                    }
+                }
+                if (!installing && status == AgentEnvStatus.UNKNOWN) {
+                    TextButton(onClick = onRetryEnv) { Text("重新检测") }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun InstalledPluginCard(
     plugin: InstalledPlugin,
+    envNotReady: Boolean,
+    installingPkg: Boolean,
+    onInstallPkg: () -> Unit,
     onClick: () -> Unit,
     onToggle: () -> Unit,
     onUninstall: () -> Unit,
 ) {
     val info = plugin.info
+    val needsRuntime = !info?.npmPackages.isNullOrEmpty()
     val hasCapability = info != null && (
         info.systemPrompt.isNotBlank() ||
             info.actions.isNotEmpty() ||
@@ -616,6 +761,18 @@ private fun InstalledPluginCard(
                             )
                         },
                     )
+                    if (needsRuntime && envNotReady) {
+                        AssistChip(
+                            onClick = {},
+                            label = {
+                                Text(
+                                    "需 Node 环境",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            },
+                        )
+                    }
                 }
                 if (plugin.info != null) {
                     if (plugin.info.description.isNotBlank()) {
@@ -625,6 +782,30 @@ private fun InstalledPluginCard(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                    }
+                    // 本地结合: 声明了 npm CLI 的插件提供预装入口, 装完 npx 直接命中本地
+                    if (needsRuntime) {
+                        val pkgs = info.npmPackages.joinToString(", ")
+                        Text(
+                            text = "CLI: $pkgs",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (!envNotReady && plugin.status == PluginStatus.ENABLED) {
+                            TextButton(
+                                onClick = onInstallPkg,
+                                enabled = !installingPkg,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            ) {
+                                if (installingPkg) {
+                                    CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp)
+                                    Text("正在装入工作区…", modifier = Modifier.padding(start = 6.dp))
+                                } else {
+                                    Icon(HugeIcons.CloudDownload, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Text("装入工作区", modifier = Modifier.padding(start = 4.dp))
+                                }
+                            }
+                        }
                     }
                 } else {
                     Text(
