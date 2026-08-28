@@ -22,7 +22,7 @@ android {
         applicationId = "me.rerere.rikkahub"
         minSdk = 26
         targetSdk = 37
-        versionCode = 190
+        versionCode = 191
         versionName = "2.4.15"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -318,6 +318,7 @@ dependencies {
     implementation(project(":material3"))
     implementation(project(":workspace"))
     implementation(project(":androidvm"))
+    implementation(project(":oauth"))
     // 仿光速虚拟机：黑盒 BlackBox 引擎。单开关 blackbox.enable=true 时自动接入（见 settings.gradle.kts）。
     if (providers.gradleProperty("blackbox.enable").getOrElse("false").toBoolean()) {
         implementation(project(":Bcore"))

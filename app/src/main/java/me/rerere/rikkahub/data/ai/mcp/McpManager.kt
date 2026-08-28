@@ -20,10 +20,12 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.oauth.CustomTabsOAuthAuthorizationLauncher
+import me.rerere.oauth.OAuthHttpClient
+import me.rerere.oauth.OAuthLoopbackCallbackServer
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
-import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.saveUploadFromBytes
 import me.rerere.rikkahub.utils.JsonInstant
@@ -42,7 +44,6 @@ class McpManager(
     private val settingsStore: SettingsStore,
     private val appScope: AppScope,
     private val filesManager: FilesManager,
-    appEventBus: AppEventBus,
 ) {
     // OkHttp/Ktor client 惰性构建：McpManager 在冷启动主线程依赖链中（ChatService→GenerationHandler），
     // 首次真正发请求时才初始化线程池，避免首帧卡顿
@@ -72,24 +73,26 @@ class McpManager(
     }
 
     private val statusStore = McpStatusStore()
-    private val oauthCoordinator: McpOAuthCoordinator by lazy {
-        McpOAuthCoordinator(
-            settingsStore = settingsStore,
-            appScope = appScope,
-            appEventBus = appEventBus,
-            oauthClient = McpOAuthClient(okHttpClient),
-            updateStatus = statusStore::update,
-        )
-    }
-    private val sessionRegistry: McpSessionRegistry by lazy {
-        McpSessionRegistry(
-            settingsStore = settingsStore,
-            appScope = appScope,
-            httpClient = httpClient,
-            oauthCoordinator = oauthCoordinator,
-            statusStore = statusStore,
-        )
-    }
+    private val oauthCallbackServer = OAuthLoopbackCallbackServer(
+        port = MCP_OAUTH_CALLBACK_PORT,
+        callbackPath = MCP_OAUTH_CALLBACK_PATH,
+    )
+    private val oauthCoordinator = McpOAuthCoordinator(
+        settingsStore = settingsStore,
+        appScope = appScope,
+        oauthClient = OAuthHttpClient(okHttpClient),
+        discoveryClient = McpOAuthDiscoveryClient(okHttpClient),
+        callbackServer = oauthCallbackServer,
+        authorizationLauncher = CustomTabsOAuthAuthorizationLauncher,
+        updateStatus = statusStore::update,
+    )
+    private val sessionRegistry = McpSessionRegistry(
+        settingsStore = settingsStore,
+        appScope = appScope,
+        httpClient = httpClient,
+        oauthCoordinator = oauthCoordinator,
+        statusStore = statusStore,
+    )
 
     init {
         // 后台线程收集并 reconcile：settingsFlow 首次发射会触发 MCP session 连接

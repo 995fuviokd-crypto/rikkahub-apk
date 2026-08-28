@@ -61,3 +61,4 @@ if (blackboxEnabled) {
     project(":Bcore").projectDir = file("third_party/BlackBox/Bcore")
     project(":Bcore:xposed").projectDir = file("third_party/BlackBox/Bcore/xposed")
 }
+include(":oauth")
