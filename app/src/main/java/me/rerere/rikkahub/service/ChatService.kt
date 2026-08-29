@@ -50,6 +50,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -64,7 +65,6 @@ import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.plugin.PluginHook
 import me.rerere.rikkahub.service.ConversationCompressor.markedAsCompressionSummary
 import me.rerere.rikkahub.data.ai.GenerationHandler
-import me.rerere.rikkahub.data.ai.DeepSeekAnchor
 import me.rerere.rikkahub.data.ai.TranslationHandler
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.createConversationTools
@@ -73,6 +73,7 @@ import me.rerere.ai.provider.AgentPlatform
 import me.rerere.ai.provider.AgentSubagentConfig
 import me.rerere.rikkahub.data.ai.tools.createImageGenerationTools
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
+import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.data.ai.tools.createSearchTools
 import me.rerere.rikkahub.data.ai.tools.createSkillTools
 import me.rerere.rikkahub.data.ai.tools.createWorkspaceTools
@@ -85,7 +86,6 @@ import me.rerere.rikkahub.data.ai.transformers.OcrTransformer
 import me.rerere.rikkahub.data.ai.transformers.PlaceholderTransformer
 import me.rerere.rikkahub.data.ai.transformers.PromptInjectionTransformer
 import me.rerere.rikkahub.data.ai.transformers.RegexOutputTransformer
-import me.rerere.rikkahub.data.ai.transformers.DeepSeekAnchorTransformer
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
 import me.rerere.rikkahub.data.ai.transformers.ThinkTagTransformer
 import me.rerere.rikkahub.data.ai.transformers.TimeReminderTransformer
@@ -135,14 +135,45 @@ import kotlin.uuid.Uuid
 private const val TAG = "ChatService"
 private const val MAX_AUTO_COMPRESS_TRIES = 3
 
+// DeepSeek 家族模型检测（官方 deepseek-* 与常见自托管别名）
+private val DEEPSEEK_MODEL_RE = Regex(
+    "deepseek|deep-seek|^ds[-/_]|(^|[^a-z])seek([^a-z]|$)",
+    RegexOption.IGNORE_CASE,
+)
+
 // 撤回标记 SYSTEM 消息的内容前缀，用于识别并清理重启后残留的撤回标记
 private const val RECALL_MARKER_PREFIX = "[撤回] "
 
-// 压缩摘要输出的 token 上限，避免压缩模型生成过长的总结
+// 压缩摘要输出的 token 上限兜底：实际按目标窗口比例动态放宽，仅当模型上下文未知时生效
 private const val COMPRESS_MAX_OUTPUT_TOKENS = 2048
 
+// 未注册模型的默认上下文窗口（token）：用于把百分比阈值换算为绝对 token 数
+private const val DEFAULT_CONTEXT_LENGTH_TOKENS = 128_000
+
+/**
+ * 解析自动压缩的绝对阈值（token）：
+ * 阈值 = 模型上下文窗口 × (Max 模式 ? 3 : 1) × 用户设定的百分比。
+ *
+ * - 上下文窗口优先取官方注册表 MODEL_CONTEXT_LENGTH；
+ *   自定义/未注册模型回退到默认窗口，保证功能可用。
+ * - Max 模式面向超长任务聚合场景：先按窗口 ×3 放大判定基准，
+ *   让压缩在远超单窗容量的对话中依然留足"摘要 + 近期消息 + 输出"余量。
+ */
+internal fun resolveContextLength(model: Model): Int {
+    return ModelRegistry.MODEL_CONTEXT_LENGTH.getData(model.modelId)
+        ?: DEFAULT_CONTEXT_LENGTH_TOKENS
+}
+
+internal fun resolveAutoCompressThreshold(model: Model, settings: Settings): Int {
+    val base = resolveContextLength(model).toLong() * (if (settings.autoCompressMaxMode) 3 else 1)
+    val percent = settings.autoCompressContextPercent.coerceIn(1, 100)
+    val threshold = base * percent / 100
+    // Int 溢出保护：Max(×3)+100% 下 2M 窗口可达 6M，仍在 Int 范围内；极端值兜底截断
+    return threshold.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+}
+
 // 分块压缩的最大并发请求数：并发过高易触发 provider 限流导致整批失败
-private const val COMPRESS_CHUNK_CONCURRENCY = 3
+private const val COMPRESS_CHUNK_CONCURRENCY = 4
 
 // 单个分块压缩失败后的重试次数（应对瞬时网络错误/限流）
 private const val COMPRESS_CHUNK_RETRY_ATTEMPTS = 3
@@ -150,9 +181,9 @@ private const val COMPRESS_CHUNK_RETRY_ATTEMPTS = 3
 // 分块重试的基础退避间隔，按尝试次数线性递增
 private const val COMPRESS_CHUNK_RETRY_DELAY_MS = 500L
 
-// 自动压缩在同一 keepRecent 档位内的尝试次数：先排除瞬时错误，
-// 连续失败才降档缩小输入规模
-private const val AUTO_COMPRESS_ATTEMPTS_PER_LEVEL = 2
+// 自动压缩在同一 keepRecent 档位内的尝试次数：compressMessages 内部已有重试，
+// 失败一次即降档，避免同一档位整块完整重压多次拖慢最坏路径
+private const val AUTO_COMPRESS_ATTEMPTS_PER_LEVEL = 1
 
 // 流式生成过程中持久化已生成内容的节流间隔
 private const val STREAM_PERSIST_INTERVAL_MS = 800L
@@ -255,7 +286,6 @@ private val inputTransformers by lazy {
     listOf(
         TimeReminderTransformer,
         PromptInjectionTransformer,
-        DeepSeekAnchorTransformer,
         PlaceholderTransformer,
         DocumentAsPromptTransformer,
         OcrTransformer,
@@ -315,6 +345,10 @@ class ChatService(
     // 正在执行自动压缩的会话 id 集合：UI 据此在消息列表尾部显示"正在压缩历史对话"指示
     private val _compressingConversations = MutableStateFlow<Set<Uuid>>(emptySet())
     val compressingConversations: StateFlow<Set<Uuid>> = _compressingConversations.asStateFlow()
+
+    // 各会话当前自动重连次数：UI 在生成指示器下方实时显示"已重连 N 次"
+    private val _reconnectAttempts = MutableStateFlow<Map<Uuid, Int>>(emptyMap())
+    val reconnectAttempts: StateFlow<Map<Uuid, Int>> = _reconnectAttempts.asStateFlow()
 
     fun addError(
         error: Throwable,
@@ -846,6 +880,11 @@ class ChatService(
         var reconnectAttempts = 0
         // 生成中自动压缩的 token 估算节流：跨重连/压缩循环保留上次估算时间
         var lastTokenEstimateTime = 0L
+        // 自动压缩阈值：按当前模型上下文窗口 × 百分比（Max 模式再 ×3）解析一次，循环内复用
+        val autoCompressThreshold = resolveAutoCompressThreshold(model, settings)
+        // 压缩摘要目标 token：按上下文窗口的 1/8 派生，替代旧的固定值，
+        // 保证摘要规模与模型容量成正比（128k → ~16k；上限 32k 防止劣质模型跑飞）
+        val compressTargetTokens = (resolveContextLength(model) / 8).coerceIn(2048, 32_000)
         // 副作用记录器：贯穿本轮完整生成（含重连/压缩续跑），完成后绑定到最后的 AI 节点
         val workspaceIds = resolveWorkspaceIds(assistant, model)
         val sideEffectRecorder = SideEffectRecorder(
@@ -876,7 +915,7 @@ class ChatService(
 
             // 自动压缩：生成前强制介入（统一由 AutoCompressSignal 分支执行压缩，避免重复压缩）
             if (settings.autoCompressEnabled && messageRange == null && autoCompressTries < MAX_AUTO_COMPRESS_TRIES) {
-                if (TokenEstimate.estimateConversationTokens(conversation) >= settings.autoCompressThresholdTokens) {
+                if (TokenEstimate.estimateConversationTokens(conversation) >= autoCompressThreshold) {
                     throw AutoCompressSignal()
                 }
             }
@@ -965,6 +1004,16 @@ class ChatService(
                         addAll(createSearchTools(settings))
                     }
                     addAll(localTools.getTools(assistant.localTools))
+                    // AI 全能控制：全局工具开关与助手自身的 localTools 取并集
+                    addAll(
+                        localTools.getTools(
+                            buildList {
+                                if (settings.globalToolScripts) add(LocalToolOption.Scripts)
+                                if (settings.globalToolAccessibility) add(LocalToolOption.Accessibility)
+                                if (settings.globalToolPowerManagement) add(LocalToolOption.PowerManagement)
+                            }
+                        )
+                    )
                     addAll(
                         createImageGenerationTools(
                             settings = settings,
@@ -1036,7 +1085,7 @@ class ChatService(
                     if (now - lastTokenEstimateTime >= TOKEN_ESTIMATE_INTERVAL_MS) {
                         lastTokenEstimateTime = now
                         val currentConversation = getConversationFlow(conversationId).value
-                        if (TokenEstimate.estimateConversationTokens(currentConversation) >= settings.autoCompressThresholdTokens) {
+                        if (TokenEstimate.estimateConversationTokens(currentConversation) >= autoCompressThreshold) {
                             throw AutoCompressSignal()
                         }
                     }
@@ -1069,7 +1118,9 @@ class ChatService(
                 val compressResult = autoCompressConversation(
                     conversationId,
                     getConversationFlow(conversationId).value,
-                    settings
+                    settings,
+                    threshold = autoCompressThreshold,
+                    targetTokens = compressTargetTokens,
                 )
                 if (!compressResult.compressed) {
                     addError(
@@ -1080,15 +1131,14 @@ class ChatService(
                     break
                 }
                 // 压缩后上下文已降到阈值以下，继续正常生成
-                if (compressResult.tokensAfter < settings.autoCompressThresholdTokens) continue
-                // 仍超阈值：已达到保留下限（keepRecent=0），说明用户设定的阈值过低、
-                // 即使把所有历史压成摘要也无法降到阈值以下。此时不再中断对话，
-                // 而是接受当前压缩结果继续生成，并把压缩重试次数置满，
+                if (compressResult.tokensAfter < autoCompressThreshold) continue
+                // 仍超阈值：已达到保留下限（keepRecent=0），说明即使把所有历史压成摘要也无法降到阈值以下。
+                // 此时不再中断对话，而是接受当前压缩结果继续生成，并把压缩重试次数置满，
                 // 避免后续轮次反复触发无意义的重复压缩。
                 if (compressResult.keepRecentAtFloor) {
                     Logging.log(
                         TAG,
-                        "auto compress reached floor, continue with compressed context (tokens=${compressResult.tokensAfter}, threshold=${settings.autoCompressThresholdTokens})"
+                        "auto compress reached floor, continue with compressed context (tokens=${compressResult.tokensAfter}, threshold=$autoCompressThreshold)"
                     )
                     autoCompressTries = MAX_AUTO_COMPRESS_TRIES
                     continue
@@ -1111,6 +1161,8 @@ class ChatService(
                 reconnectAttempts++
                 if (reconnectAttempts <= settings.autoReconnectMaxRetries) {
                     Logging.log(TAG, "handleMessageComplete: generation interrupted (${failure?.javaClass?.simpleName}), reconnecting ($reconnectAttempts/${settings.autoReconnectMaxRetries})")
+                    // 暴露到 UI：生成指示器下方显示"已重连 N 次"
+                    _reconnectAttempts.value = _reconnectAttempts.value + (conversationId to reconnectAttempts)
                     // 丢弃流式中断留下的半截 assistant 消息，重连从干净的 user 消息重新生成：
                     // 若保留半截 assistant 作为最后一条消息续跑（续写），部分 provider 对
                     // "最后一条是 assistant"的续写请求会一直挂起不返回任何数据，表现为一直连接/加载、内容不输出。
@@ -1175,6 +1227,8 @@ class ChatService(
                     generateSuggestion(conversationId, finalConversation)
                 }
             }
+            // 本轮生成结束（成功/失败）：清除重连计数，避免下轮残留旧值
+            _reconnectAttempts.value = _reconnectAttempts.value - conversationId
             break
         }
     }
@@ -1190,11 +1244,20 @@ class ChatService(
         model: Model,
     ): Set<Uuid> {
         assistant.effectiveWorkspaceIds.let { if (it.isNotEmpty()) return it }
-        if (!DeepSeekAnchor.isDeepSeekModel(model.modelId)) return emptySet()
+        if (!isDeepSeekFamilyModel(model.modelId)) return emptySet()
         return workspaceRepository.listFlow().first()
             .firstOrNull { it.shellStatus == WorkspaceShellStatus.READY.name }
             ?.let { setOf(Uuid.parse(it.id)) }
             .orEmpty()
+    }
+
+    /** DeepSeek 家族模型检测（官方 deepseek-* 与常见自托管别名）。 */
+    private fun isDeepSeekFamilyModel(modelId: String?): Boolean {
+        if (modelId.isNullOrBlank()) return false
+        val lower = modelId.lowercase()
+        return DEEPSEEK_MODEL_RE.containsMatchIn(modelId) ||
+            lower.startsWith("ds-") ||
+            lower.startsWith("ds/")
     }
 
     private suspend fun createWorkspaceToolsIfReady(workspaceIds: Set<Uuid>, cwd: String? = null): List<Tool> {
@@ -1471,10 +1534,10 @@ class ChatService(
             throw IllegalStateException(context.getString(R.string.chat_page_compress_not_enough_messages), e)
         }
 
-        suspend fun compressMessages(content: String, instructionHint: String): String {
+        suspend fun compressMessages(content: String, instructionHint: String, outputTargetTokens: Int = targetTokens): String {
             val prompt = settings.compressPrompt.applyPlaceholders(
                 "content" to content,
-                "target_tokens" to targetTokens.toString(),
+                "target_tokens" to outputTargetTokens.toString(),
                 "additional_context" to buildString {
                     if (additionalPrompt.isNotBlank()) {
                         append("Additional instructions from user: $additionalPrompt")
@@ -1490,8 +1553,10 @@ class ChatService(
             val result = providerHandler.generateText(
                 providerSetting = provider,
                 messages = listOf(UIMessage.user(prompt)),
+                // 摘要输出上限与目标规模联动：targetTokens 的 1.5 倍 + 余量，
+                // 避免旧固定 2048 截断大窗口模型的摘要；上限 32k 防止异常输出
                 params = backgroundTextGenerationParams(model, reasoningLevel = ReasoningLevel.OFF)
-                    .copy(maxTokens = COMPRESS_MAX_OUTPUT_TOKENS),
+                    .copy(maxTokens = (outputTargetTokens + outputTargetTokens / 2).coerceIn(COMPRESS_MAX_OUTPUT_TOKENS, 32_000)),
             )
 
             return result.message.toText().trim().takeIf { it.isNotBlank() }
@@ -1500,19 +1565,32 @@ class ChatService(
 
         val previousSummary = conversation.compression?.summary.orEmpty()
 
+        // 按压缩模型实际上下文窗口动态分配单块预算与单条截断：
+        // 大窗口模型一次容纳更多历史（块数少→速度快、块间不割裂→质量高）；小窗口自动收敛避免超窗
+        val compressWindow = resolveContextLength(model)
+        val chunkTokenBudget = (compressWindow * 70 / 100)
+            .coerceIn(ConversationCompressor.DEFAULT_TOKEN_BUDGET_PER_CHUNK, 200_000)
+        val contentMaxLength = (compressWindow / 8)
+            .coerceIn(ConversationCompressor.DEFAULT_MAX_CONTENT_LENGTH, 64_000)
+
         val compressedSummaries = coroutineScope {
             // 按 token 预算分块：避免长消息拼出几十万 token 的 prompt
             // 导致压缩请求超出模型上下文窗口而失败
             val semaphore = Semaphore(COMPRESS_CHUNK_CONCURRENCY)
-            ConversationCompressor.splitChunksByTokens(messagesToCompress)
+            ConversationCompressor.splitChunksByTokens(messagesToCompress, chunkTokenBudget, contentMaxLength)
                 .map { chunk ->
                     val content = chunk.joinToString("\n\n") {
-                        ConversationCompressor.compressionText(it, maxLength = 2000)
+                        ConversationCompressor.compressionText(it, maxLength = contentMaxLength)
                     }
+                    // 每块摘要目标按块内消息占比缩放：多块时各块输出较短摘要，
+                    // 避免每块都按全局目标输出导致摘要总量膨胀、融合压力大且信息发散
+                    val chunkTarget = (targetTokens.toLong() * chunk.size / messagesToCompress.size)
+                        .toInt()
+                        .coerceIn(COMPRESS_MAX_OUTPUT_TOKENS, targetTokens)
                     async {
                         semaphore.withPermit {
                             retryOnTransientError {
-                                compressMessages(content, "")
+                                compressMessages(content, "", outputTargetTokens = chunkTarget)
                             }
                         }
                     }
@@ -1582,17 +1660,19 @@ class ChatService(
     /**
      * 自动压缩执行体：估算超阈值后，保留最近 N 条消息，将更早历史压缩为摘要。
      *
-     * 自适应调整：
-     * - 单条消息的对话同样可压（keepRecent=0 全量压缩该条），仅空对话直接放弃；
+     * 阈值与保留条数均按模型上下文窗口动态派生，用户只需调整百分比与 Max 模式：
+     * - 初始保留条数 = 窗口相关系数（大窗口保更多近期消息，保障当前任务连贯）；
      * - 同一保留档位内先做有限次快速重试排除瞬时错误（网络抖动/限流），
      *   连续失败才按二分降低保留条数缩小输入规模，避免与输入无关的失败
      *   触发大量无效的重复 LLM 请求；
-     * - 即使最终仍超阈值（用户阈值设置过低）也视为已完成压缩，交由调用方继续生成。
+     * - 即使最终仍超阈值也视为已完成压缩，交由调用方继续生成。
      */
     private suspend fun autoCompressConversation(
         conversationId: Uuid,
         conversation: Conversation,
-        settings: Settings
+        settings: Settings,
+        threshold: Int,
+        targetTokens: Int,
     ): AutoCompressResult {
         // UI 指示：进入"正在压缩历史对话"状态（静默执行，不产生任何用户消息）
         _compressingConversations.value = _compressingConversations.value + conversationId
@@ -1605,8 +1685,9 @@ class ChatService(
                     keepRecentAtFloor = true,
                 )
             }
-            val threshold = settings.autoCompressThresholdTokens
-            var keepRecent = settings.autoCompressKeepRecent.coerceIn(0, allMessages.size - 1)
+            // 初始保留档位：普通模式 32 条；Max 模式上下文基准放大 3 倍，同步保留 96 条
+            var keepRecent = if (settings.autoCompressMaxMode) 96 else 32
+            keepRecent = keepRecent.coerceIn(0, allMessages.size - 1)
             var attemptsAtLevel = 0
             while (true) {
                 val result = runCatching {
@@ -1614,7 +1695,7 @@ class ChatService(
                         conversationId = conversationId,
                         conversation = getConversationFlow(conversationId).value,
                         additionalPrompt = "",
-                        targetTokens = threshold,
+                        targetTokens = targetTokens,
                         keepRecentMessages = keepRecent
                     ).getOrThrow()
                 }

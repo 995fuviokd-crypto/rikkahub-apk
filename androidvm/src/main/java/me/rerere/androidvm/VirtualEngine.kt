@@ -36,11 +36,11 @@ interface VirtualEngine {
     /** 列出已安装模块。 */
     suspend fun listModules(): List<VmModuleInfo>
 
-    /** 启用/停用模块。 */
-    suspend fun setModuleEnabled(packageName: String, enabled: Boolean)
+    /** 启用/停用模块（Xposed 包名或 Magisk 模块 id）。 */
+    suspend fun setModuleEnabled(moduleId: String, enabled: Boolean)
 
-    /** 卸载模块。 */
-    suspend fun uninstallModule(packageName: String)
+    /** 卸载模块（Xposed 包名或 Magisk 模块 id）。 */
+    suspend fun uninstallModule(moduleId: String)
 
     /** 克隆实例（应用隔离/多开）。 */
     suspend fun clone(instance: VmInstance, newName: String): VmInstance
@@ -53,4 +53,22 @@ interface VirtualEngine {
      * 默认空实现：Linux/BlackBox 无独立内核，重启即下次启动生效。
      */
     suspend fun rebootGuest(instance: VmInstance) = Unit
+
+    /**
+     * 设置虚拟 root 开关（Android 虚拟化才有意义）。
+     * 默认空实现：Linux / 客机 ROM 不处理。
+     */
+    suspend fun setVirtualRoot(instance: VmInstance, enabled: Boolean) = Unit
+
+    /**
+     * 设置隐藏 root（反检测）开关（Android 虚拟化才有意义）。
+     * 默认空实现：Linux / 客机 ROM 不处理。
+     */
+    suspend fun setHideRoot(instance: VmInstance, enabled: Boolean) = Unit
+
+    /**
+     * 设置隐藏 Xposed（反检测）开关（Android 虚拟化才有意义）。
+     * 默认空实现：Linux / 客机 ROM 不处理。
+     */
+    suspend fun setHideXposed(instance: VmInstance, enabled: Boolean) = Unit
 }

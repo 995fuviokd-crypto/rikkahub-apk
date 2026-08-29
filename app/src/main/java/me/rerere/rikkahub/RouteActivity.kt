@@ -122,6 +122,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesThemePage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesGeneralPage
 import me.rerere.rikkahub.ui.pages.setting.SettingGlobalPromptPage
+import me.rerere.rikkahub.ui.pages.setting.SettingExtensionsPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAgentPage
 import me.rerere.rikkahub.ui.pages.setting.SettingNetworkProxyPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesNotificationPage
@@ -453,6 +454,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingGlobalPromptPage()
                             }
 
+                            entry<Screen.SettingExtensions> {
+                                SettingExtensionsPage()
+                            }
+
                             entry<Screen.SettingAgent> {
                                 SettingAgentPage()
                             }
@@ -728,6 +733,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingGlobalPrompt : Screen
+
+    @Serializable
+    data object SettingExtensions : Screen
 
     @Serializable
     data object SettingAgent : Screen

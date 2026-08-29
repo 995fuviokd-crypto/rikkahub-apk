@@ -26,7 +26,6 @@ import me.rerere.rikkahub.data.plugin.PluginJson
 import me.rerere.rikkahub.data.plugin.PluginManager
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import okhttp3.Request
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.http.GET
@@ -60,6 +59,17 @@ data class CommunityListItem(
     @SerialName("assets") val assets: List<CommunityAsset> = emptyList(),
     val author: JsonElement? = null,
     val publisher: JsonElement? = null,
+    /** 近 30 天下载量 */
+    val downloads: Int = 0,
+    val downloadCount: Int = 0,
+    /** 是否精选推荐 */
+    val featured: Boolean = false,
+    /** 下载量/点赞/更新时间等统计 */
+    val stats: JsonObject? = null,
+    /** 用户反应（点赞等） */
+    val reactions: List<JsonObject>? = null,
+    /** 版本历史 */
+    val versions: List<CommunityVersion>? = null,
 ) {
     val displayAuthor: String
         get() = source?.repoOwner.orEmpty().ifBlank {
@@ -67,6 +77,14 @@ data class CommunityListItem(
         }
 
     val sourceKind: String get() = source?.kind.orEmpty()
+
+    /** 展示用下载量：优先 downloadCount，其次 downloads，再取 stats.downloads */
+    val displayDownloads: Int
+        get() = when {
+            downloadCount > 0 -> downloadCount
+            downloads > 0 -> downloads
+            else -> (stats?.get("downloads") as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
+        }
 }
 
 /** release 资产：script/package 类型无 GitHub 目录来源，改由该下载地址获取 */
@@ -476,54 +494,6 @@ class CommunityMarketDataSource(
         return null
     }
 
-    /** 解析 smithery.yaml 中的 startCommand.command 列表 */
-    private fun parseSmitheryCommand(content: String): List<Pair<String, List<String>>> {
-        val cmdMatch = Regex("""(?m)^\s*(?:startCommand\s*:)?\s*command\s*:\s*(.+?)\s*$""").find(content) ?: return emptyList()
-        val cmdText = cmdMatch.groupValues[1].takeIf { it.isNotBlank() }
-        if (cmdText != null) {
-            val parts = cmdText.split(Regex("\\s+")).filter { it.isNotBlank() }
-            return listOf(parts.first() to parts.drop(1))
-        }
-        val rest = content.substring(cmdMatch.range.last)
-        val args = Regex("""(?m)^\s*-\s*(.+?)\s*$""").findAll(rest)
-            .map { it.groupValues[1].trim().trim('"', '\'', '`') }
-            .filter { it.isNotBlank() && !it.startsWith("#") }
-            .take(16)
-            .toList()
-        if (args.isEmpty()) return emptyList()
-        return listOf(args.first() to args.drop(1))
-    }
-
-    /** 解析 package.json：优先 bin 入口（node 执行），其次 scripts.start，最后 main */
-    private fun parsePackageJsonCommand(content: String): Pair<String, List<String>>? {
-        val root = runCatching { Json.parseToJsonElement(content).jsonObject }.getOrNull() ?: return null
-        (root["bin"]?.jsonObject?.values?.firstOrNull() as? JsonPrimitive)?.contentOrNull?.let { bin ->
-            return "node" to listOf(bin)
-        }
-        ((root["bin"] as? JsonPrimitive)?.contentOrNull)?.let { bin ->
-            return "node" to listOf(bin)
-        }
-        (root["scripts"]?.jsonObject?.get("start") as? JsonPrimitive)?.contentOrNull?.let { start ->
-            val parts = start.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
-            if (parts.isNotEmpty()) return parts.first() to parts.drop(1)
-        }
-        (root["main"] as? JsonPrimitive)?.contentOrNull?.let { main ->
-            return "node" to listOf(main)
-        }
-        return null
-    }
-
-    /** 解析 README 中的 npx/uvx 启动命令（先剥离代码块，避免匹配示例代码） */
-    private fun parseReadmeRunCommand(content: String): Pair<String, List<String>>? {
-        val noCodeBlocks = content.replace(Regex("```[\\s\\S]*?```"), "")
-        val regex = Regex("""(npx|uvx|node)\s+([@\w][\w@./-]*)((?:[\s-]+[@\w./-][\w@./-]*)*)""")
-        val m = regex.find(noCodeBlocks) ?: return null
-        val runner = m.groupValues[1]
-        val pkg = m.groupValues[2]
-        val tail = m.groupValues[3].trim().split(Regex("\\s+")).filter { it.isNotBlank() && it != "-y" }
-        return (runner to (listOf("-y", pkg) + tail))
-    }
-
     /** 生成应用内 webview 可展示的插件索引页（web/index.html），含名称/描述/工具清单/文件列表 */
     private fun generateIndexHtml(
         dir: File,
@@ -645,37 +615,10 @@ class CommunityMarketDataSource(
     }
 
     private suspend fun downloadBytes(url: String): ByteArray {
-        return withContext(Dispatchers.IO) {
-            // GitHub 资源直连失败（被墙/超时）时自动切换镜像加速源重试
-            val candidates = if (isGitHubUrl(url)) {
-                listOf(url) + PluginMarketDataSource.MIRROR_PREFIXES.map { it + url }
-            } else {
-                listOf(url)
-            }
-            var lastError: Throwable? = null
-            for (candidate in candidates) {
-                try {
-                    val bytes = httpClient.newCall(Request.Builder().url(candidate).build()).execute().use { response ->
-                        if (!response.isSuccessful) error("HTTP ${response.code}")
-                        response.body?.bytes() ?: error("空响应")
-                    }
-                    return@withContext bytes
-                } catch (e: Throwable) {
-                    lastError = e
-                }
-            }
-            throw lastError ?: IllegalStateException("Download failed: $url")
-        }
-    }
-
-    private fun isGitHubUrl(url: String): Boolean {
-        val host = runCatching { java.net.URL(url).host }.getOrNull() ?: return false
-        return host.endsWith("github.com") || host.endsWith("githubusercontent.com")
+        return MarketHttp.downloadFirstAvailable(httpClient, url, timeoutMs = 30_000)
     }
 
     companion object {
-        const val SORTS_JSON = "likes,downloads,updated"
-
         /** 资源类型在社区市场中的中文名 */
         fun typeLabel(type: String): String = when (type) {
             "skill" -> "技能"
@@ -713,8 +656,9 @@ class CommunityMarketDataSource(
             return GitHubSource(parts[0], parts[1], ref, path)
         }
 
-        /** tar.gz 解压到目录（codeload 使用标准 tar，兼容 GNU longname 块与 pax 跳过） */
-        fun extractTarGz(bytes: ByteArray, targetDir: File) {
+        /** tar.gz 解压到目录（codeload 使用标准 tar，兼容 GNU longname 块与 pax 跳过）。
+         *  internal 供 DSH 市场 tarball 直链安装复用 */
+        internal fun extractTarGz(bytes: ByteArray, targetDir: File) {
             GZIPInputStream(ByteArrayInputStream(bytes)).use { gz ->
                 val header = ByteArray(512)
                 while (true) {

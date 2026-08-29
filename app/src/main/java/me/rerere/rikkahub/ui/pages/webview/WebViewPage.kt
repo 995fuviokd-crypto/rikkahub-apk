@@ -53,8 +53,16 @@ fun WebViewPage(url: String, contentId: String, pluginId: String = "") {
     val context = LocalContext.current
     val pluginManager: PluginManager = koinInject()
     val scriptRuntime: ScriptRuntime = koinInject()
+    val cordisBridge: me.rerere.rikkahub.data.plugin.CordisPluginBridge = koinInject()
     val interfaces = if (pluginId.isNotEmpty()) {
-        mapOf("AndroidPlugin" to PluginJsBridge(pluginId, pluginManager, scriptRuntime))
+        val base = mutableMapOf<String, Any>(
+            "AndroidPlugin" to PluginJsBridge(pluginId, pluginManager, scriptRuntime)
+        )
+        // 阶段 7：Cordis 面板插件额外注入 CordisBridge（能力缝访问）
+        cordisBridge.createJsBridge(pluginId)?.let {
+            base["CordisBridge"] = it
+        }
+        base
     } else {
         emptyMap()
     }

@@ -68,12 +68,12 @@ class LinuxContainerEngine(private val context: Context) : VirtualEngine {
 
     override suspend fun listModules(): List<VmModuleInfo> = emptyList()
 
-    override suspend fun setModuleEnabled(packageName: String, enabled: Boolean) {
-        throw UnsupportedOperationException("Linux 容器不支持模块")
+    override suspend fun setModuleEnabled(moduleId: String, enabled: Boolean) {
+        throw UnsupportedOperationException("Linux 容器不支持虚拟框架模块")
     }
 
-    override suspend fun uninstallModule(packageName: String) {
-        throw UnsupportedOperationException("Linux 容器不支持模块")
+    override suspend fun uninstallModule(moduleId: String) {
+        throw UnsupportedOperationException("Linux 容器不支持虚拟框架模块")
     }
 
     override suspend fun clone(instance: VmInstance, newName: String): VmInstance {

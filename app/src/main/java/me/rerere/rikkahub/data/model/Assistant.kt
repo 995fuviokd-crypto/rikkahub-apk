@@ -28,7 +28,7 @@ data class Assistant(
     val contextMessageLimit: Int = 0,
     val streamOutput: Boolean = true,
     val enableMemory: Boolean = false,
-    val useGlobalMemory: Boolean = false, // 使用全局共享记忆而非助手隔离记忆
+    val useGlobalMemory: Boolean = true, // 使用全局共享记忆而非助手隔离记忆
     val enableMemoryVectorEmbedding: Boolean = false, // 记忆召回启用向量嵌入
     val enableRecentChatsReference: Boolean = false,
     val messageTemplate: String = "{{ message }}",
@@ -53,10 +53,6 @@ data class Assistant(
     val enableTimeReminder: Boolean = false,            // 时间间隔提醒注入
     val allowConversationSystemPrompt: Boolean = false, // 允许对话单独重写 system prompt
     val allowConversationPromptInjection: Boolean = false, // 允许对话单独绑定提示词注入
-
-    // DeepSeek V4 条件复刻锚定（借鉴 noone89 + dcws：极简工具 + Beyond 档提示词 + 预热）
-    // 默认开启：仅对 DeepSeek 家族模型生效，复刻训练条件以稳定 "We need" 协作口吻
-    val deepSeekAnchorEnabled: Boolean = true,
 ) {
     /**
      * 生效的工作区集合：优先多选字段（workspaceIds），

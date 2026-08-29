@@ -268,28 +268,6 @@ private fun AssistantPromptContent(
             FormItem(
                 modifier = Modifier.padding(8.dp),
                 label = {
-                    Text(stringResource(R.string.assistant_page_deepseek_anchor))
-                },
-                description = {
-                    Text(stringResource(R.string.assistant_page_deepseek_anchor_desc))
-                },
-                tail = {
-                    Switch(
-                        checked = assistant.deepSeekAnchorEnabled,
-                        onCheckedChange = {
-                            onUpdate(assistant.copy(deepSeekAnchorEnabled = it))
-                        }
-                    )
-                }
-            )
-        }
-
-        Card(
-            colors = CustomColors.cardColorsOnSurfaceContainer
-        ) {
-            FormItem(
-                modifier = Modifier.padding(8.dp),
-                label = {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {

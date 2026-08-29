@@ -97,7 +97,7 @@ internal fun FilesPicker(
     onShowInjectionSheetChange: (Boolean) -> Unit,
     showAutoCompressDialog: Boolean,
     onShowAutoCompressDialogChange: (Boolean) -> Unit,
-    onAutoCompressSettings: (enabled: Boolean, thresholdTokens: Int, keepRecent: Int) -> Unit,
+    onAutoCompressSettings: (enabled: Boolean, contextPercent: Int, maxMode: Boolean) -> Unit,
     showAutoReconnectDialog: Boolean,
     onShowAutoReconnectDialogChange: (Boolean) -> Unit,
     onAutoReconnectSettings: (enabled: Boolean, maxRetries: Int) -> Unit,
@@ -226,10 +226,15 @@ internal fun FilesPicker(
             supportingContent = {
                 Text(
                     text = if (settings.autoCompressEnabled) {
+                        val suffix = if (settings.autoCompressMaxMode) {
+                            stringResource(R.string.chat_page_auto_compress_status_max_suffix)
+                        } else {
+                            ""
+                        }
                         stringResource(
                             R.string.chat_page_auto_compress_status_on,
-                            settings.autoCompressThresholdTokens,
-                            settings.autoCompressKeepRecent
+                            settings.autoCompressContextPercent,
+                            suffix
                         )
                     } else {
                         stringResource(R.string.chat_page_auto_compress_status_off)
@@ -336,11 +341,11 @@ internal fun FilesPicker(
     if (showAutoCompressDialog) {
         AutoCompressDialog(
             initialEnabled = settings.autoCompressEnabled,
-            initialThresholdTokens = settings.autoCompressThresholdTokens,
-            initialKeepRecent = settings.autoCompressKeepRecent,
+            initialContextPercent = settings.autoCompressContextPercent,
+            initialMaxMode = settings.autoCompressMaxMode,
             onDismiss = { onShowAutoCompressDialogChange(false) },
-            onConfirm = { enabled, thresholdTokens, keepRecent ->
-                onAutoCompressSettings(enabled, thresholdTokens, keepRecent)
+            onConfirm = { enabled, contextPercent, maxMode ->
+                onAutoCompressSettings(enabled, contextPercent, maxMode)
                 onShowAutoCompressDialogChange(false)
             }
         )

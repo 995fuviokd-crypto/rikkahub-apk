@@ -44,9 +44,9 @@ class GuestRomEngine(private val context: Context) : VirtualEngine {
     }
 
     override suspend fun listModules(): List<VmModuleInfo> = emptyList()
-    override suspend fun setModuleEnabled(packageName: String, enabled: Boolean) = Unit
-    override suspend fun uninstallModule(packageName: String) = Unit
+override suspend fun setModuleEnabled(moduleId: String, enabled: Boolean) = Unit
 
+    override suspend fun uninstallModule(moduleId: String) = Unit
     override suspend fun clone(instance: VmInstance, newName: String): VmInstance =
         instance.copy(id = newName, name = newName, createdAt = System.currentTimeMillis())
 

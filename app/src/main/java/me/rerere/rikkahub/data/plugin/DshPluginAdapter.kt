@@ -85,24 +85,53 @@ class DshPluginAdapter(
                 PluginManager.unzipTo(bytes, tempRoot)
                 val root = locateRepoRoot(tempRoot, ref.repo)
                     ?: error("仓库内容为空或无法解压")
-                val info = convertRepo(root, ref)
-                // 面板优先：带 client 入口的仓库生成可交互运行壳，否则退回纯文档页
-                val clientEntry = findClientEntry(root)
-                val docsPage = buildDocsPage(root, ref)
-                val indexHtml = if (clientEntry != null) {
-                    buildPanelPage(ref, runCatching { clientEntry.readText() }.getOrDefault(""), docsPage)
-                } else {
-                    docsPage
-                }
-                convertToZip(
-                    info,
-                    indexHtml = indexHtml,
-                    clientJs = clientEntry?.let { runCatching { it.readText() }.getOrNull() },
-                )
+                convertRootToZip(root, ref)
             } finally {
                 runCatching { tempRoot.deleteRecursively() }
             }
         }
+    }
+
+    /** 从 npm tarball（feed 的 tarball 字段，.tgz）转换：解压后复用仓库根目录转换逻辑 */
+    suspend fun fetchTarballAsZip(tarballUrl: String): Result<ByteArray> = withContext(Dispatchers.IO) {
+        runCatching {
+            val bytes = download(tarballUrl)
+            val tempRoot = Files.createTempDirectory("dsh-tb-").toFile()
+            try {
+                me.rerere.rikkahub.data.api.CommunityMarketDataSource.extractTarGz(bytes, tempRoot)
+                // npm 包发布后顶层统一为 package/ 目录
+                val root = tempRoot.listFiles()?.filter { it.isDirectory }
+                    ?.firstOrNull { it.name == "package" }
+                    ?: locateRepoRoot(tempRoot, "")
+                    ?: error("tarball 内容为空或无法解压")
+                val ref = DshRepoRef(
+                    owner = "",
+                    repo = root.name,
+                    ref = "npm",
+                )
+                convertRootToZip(root, ref)
+            } finally {
+                runCatching { tempRoot.deleteRecursively() }
+            }
+        }
+    }
+
+    /** 仓库解压根目录 → RikkaHub 插件 zip（fetchAsZip 与 tarball 通道共用） */
+    private fun convertRootToZip(root: File, ref: DshRepoRef): ByteArray {
+        val info = convertRepo(root, ref)
+        // 面板优先：带 client 入口的仓库生成可交互运行壳，否则退回纯文档页
+        val clientEntry = findClientEntry(root)
+        val docsPage = buildDocsPage(root, ref)
+        val indexHtml = if (clientEntry != null) {
+            buildPanelPage(ref, runCatching { clientEntry.readText() }.getOrDefault(""), docsPage)
+        } else {
+            docsPage
+        }
+        return convertToZip(
+            info,
+            indexHtml = indexHtml,
+            clientJs = clientEntry?.let { runCatching { it.readText() }.getOrNull() },
+        )
     }
 
     /**

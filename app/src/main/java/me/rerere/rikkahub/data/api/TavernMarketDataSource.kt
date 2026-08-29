@@ -1,16 +1,11 @@
 package me.rerere.rikkahub.data.api
 
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.util.concurrent.TimeUnit
-import kotlin.coroutines.resume
-import androidx.core.net.toUri
 
 /** 市场仓库 tavern.json 中的一条角色卡条目 */
 @Serializable
@@ -29,7 +24,7 @@ data class TavernListing(
 /**
  * 酒馆角色卡市场数据源：与插件市场共用同一个 GitHub 仓库，
  * 索引为根目录 tavern.json，卡片文件放 tavern/ 目录。
- * raw 直连失败自动降级镜像。
+ * raw 直连失败自动降级镜像（复用 [MarketHttp]）。
  */
 class TavernMarketDataSource(
     private val httpClient: OkHttpClient,
@@ -51,55 +46,16 @@ class TavernMarketDataSource(
 
     /** gz 自动解压为 UTF-8 文本 */
     private fun decodeBytes(bytes: ByteArray): String {
-        if (bytes.size >= 2 && (bytes[0].toInt() and 0xff) == 0x1f && (bytes[1].toInt() and 0xff) == 0x8b) {
+        if (MarketHttp.isGzipArchive(bytes)) {
             java.util.zip.GZIPInputStream(bytes.inputStream()).use { it.readBytes() }
                 .also { return it.toString(Charsets.UTF_8) }
         }
         return bytes.toString(Charsets.UTF_8)
     }
 
-    private fun candidates(repoPath: String): List<String> = listOf(
-        "https://raw.githubusercontent.com/$repoPath",
-        "https://gh-proxy.com/https://raw.githubusercontent.com/$repoPath",
-        "https://ghfast.top/https://raw.githubusercontent.com/$repoPath",
-    )
-
-    private fun download(url: String): ByteArray {
-        val client = httpClient.newBuilder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .build()
-        client.newCall(Request.Builder().url(url).build()).execute().use { response ->
-            if (!response.isSuccessful) error("HTTP ${response.code}")
-            return response.body?.bytes() ?: error("空响应")
-        }
-    }
-
-    private fun fetchViaMirrors(repoPath: String): String {
-        var lastError: Throwable? = null
-        for (candidate in candidates(repoPath)) {
-            try {
-                return download(candidate).toString(Charsets.UTF_8)
-            } catch (e: Throwable) {
-                lastError = e
-            }
-        }
-        throw lastError ?: IllegalStateException("拉取失败")
-    }
-
-    /** 拉取 tavern.json 索引；repo 可为 owner/repo 或完整 https 直链 */
-    suspend fun fetchIndex(repo: String): Result<List<TavernListing>> =
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            runCatching {
-                val r = repo.trim().trim('/')
-                if (r.startsWith("http://") || r.startsWith("https://")) {
-                    return@runCatching parseIndexJson(download(r).toString(Charsets.UTF_8))
-                }
-                val parts = r.split('/')
-                if (parts.size != 2 || parts.any { it.isBlank() }) error("仓库格式应为 owner/repo 或完整 URL")
-                parseIndexJson(fetchViaMirrors("${parts[0]}/${parts[1]}/main/tavern.json"))
-            }
-        }
+    /** 下载字节；GitHub 域名自动附加速镜像 */
+    private suspend fun download(url: String): ByteArray =
+        MarketHttp.downloadFirstAvailable(httpClient, url, timeoutMs = 30_000)
 
     /** 下载卡片文件字节（JSON 或 PNG），支持仓库相对路径与完整直链 */
     suspend fun downloadCard(repo: String, file: String): Result<ByteArray> =
@@ -111,20 +67,12 @@ class TavernMarketDataSource(
                     return@runCatching download(path)
                 }
                 val parts = repo.trim().trim('/').split('/')
-                var lastError: Throwable? = null
-                for (candidate in candidates("${parts[0]}/${parts[1]}/main/$path")) {
-                    try {
-                        return@runCatching download(candidate)
-                    } catch (e: Throwable) {
-                        lastError = e
-                    }
-                }
-                throw lastError ?: IllegalStateException("下载失败")
+                download("${parts[0]}/${parts[1]}/main/$path")
             }
         }
 
     companion object {
-        private val json = Json { ignoreUnknownKeys = true }
+        private val json = MarketHttp.json
 
         /** 酒馆索引自动降级候选：市场仓库 → 公共直链（gzip） */
         val defaultIndexUrls = listOf(

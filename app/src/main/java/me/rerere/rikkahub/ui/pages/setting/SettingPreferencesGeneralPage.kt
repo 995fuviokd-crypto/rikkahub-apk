@@ -110,6 +110,24 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                             )
                         },
                     )
+                    if (settings.multiRouteConcurrent) {
+                        item(
+                            headlineContent = { Text("并发线路数") },
+                            supportingContent = {
+                                Text("最大同时竞速的线路数（含备用线路）：${settings.maxConcurrentRoutes}")
+                                Slider(
+                                    value = settings.maxConcurrentRoutes.toFloat(),
+                                    onValueChange = {
+                                        vm.updateSettings(
+                                            settings.copy(maxConcurrentRoutes = it.toInt().coerceIn(1, 5))
+                                        )
+                                    },
+                                    valueRange = 1f..5f,
+                                    steps = 3,
+                                )
+                            },
+                        )
+                    }
                     item(
                         headlineContent = { Text("消息撤回：分段截断") },
                         supportingContent = { Text("关闭时撤回整条消息；开启时按边界标点截断最后一段") },

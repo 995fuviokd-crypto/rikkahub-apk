@@ -155,24 +155,7 @@ object PluginCategories {
         else -> type.ifBlank { "其他" }
     }
 
-    /** 市场筛选维度：全部 + 类型 + 常见分类 */
-    val known = listOf(
-        ALL,
-        TYPE_PLUGIN,
-        TYPE_SKILL,
-        TYPE_MCP,
-        TYPE_JSON,
-        TYPE_CHARACTER,
-        "development",
-        "productivity",
-        "creative",
-        "knowledge",
-        "automation",
-        "media",
-        "other",
-    )
-
-    /** 市场页分类筛选（按类型精简） */
+    /** 市场筛选维度：全部 + 类型 */
     val marketTypes = listOf(
         ALL,
         TYPE_PLUGIN,

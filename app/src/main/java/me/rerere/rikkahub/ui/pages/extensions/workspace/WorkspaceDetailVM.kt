@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
@@ -256,19 +257,21 @@ class WorkspaceDetailVM(
                 DEV_TOOLS.map { DevToolState(tool = it) }
             }
             _devTools.value = current.map { it.copy(checking = true) }
-            // 单条命令批量检测全部工具，避免每个工具都启动一次 PRoot 进程导致页面卡死
+            // 单条命令批量检测全部工具，避免每个工具都启动一次 PRoot 进程导致页面卡死。
+            // 只用 command -v（覆盖 PATH）做检测；去掉 find 全盘遍历，避免大 rootfs 上检测超时卡死。
             val commands = current.map { it.tool.command }
             val detection = runCatching {
-                repository.executeCommand(
-                    workspace.id,
-                    buildString {
-                        append("for c in ")
-                        append(commands.joinToString(" ") { shellQuote(it) })
-                        append("; do if command -v \"${'$'}c\" >/dev/null 2>&1 ")
-                        append("|| find /opt /usr/local /usr/bin /bin -maxdepth 4 -name \"${'$'}c\" 2>/dev/null | grep -q .; ")
-                        append("then echo \"FOUND:${'$'}c\"; else echo \"MISSING:${'$'}c\"; fi; done")
-                    }
-                )
+                withTimeoutOrNull(DETECT_TIMEOUT_MS) {
+                    repository.executeCommand(
+                        workspace.id,
+                        buildString {
+                            append("for c in ")
+                            append(commands.joinToString(" ") { shellQuote(it) })
+                            append("; do if command -v \"${'$'}c\" >/dev/null 2>&1; ")
+                            append("then echo \"FOUND:${'$'}c\"; else echo \"MISSING:${'$'}c\"; fi; done")
+                        }
+                    )
+                }
             }.getOrNull()
             val found = detection?.stdout.orEmpty()
                 .lineSequence()
@@ -533,6 +536,9 @@ data class DevToolState(
 
 /** 开发工具安装单次命令超时（apt 更新 + 大文件下载需要较长时间） */
 private const val TOOL_INSTALL_TIMEOUT_MS = 10 * 60 * 1000L
+
+/** 开发工具检测命令超时：只做 command -v，正常应毫秒级返回，超时兜底避免页面卡死 */
+private const val DETECT_TIMEOUT_MS = 15_000L
 
 /** 安装失败重试间隔 */
 private const val TOOL_INSTALL_RETRY_DELAY_MS = 1_500L

@@ -5,15 +5,14 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.serializer
-import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
-import okhttp3.Request
 
 /**
  * DSH（DeepSeek Harness）插件市场数据源。
- * 数据来自社区精选注册表 awesome-dsh-plugin 的实时 JSON feed（GitHub Pages，随仓库自动重建）：
+ * 数据来自社区精选注册表 awesome-dsh-plugin 的实时 JSON feed
+ * （官方站点 https://awesome-dsh-plugin.com/plugins.json，随仓库自动重建）：
  * feed 不可达时降级解析仓库 README.md 条目并合并 data/stars.json 的 star 数据。
- * 安装走 [DshPluginAdapter]（GitHub 仓库 → RikkaHub 插件 zip）。
+ * 安装优先走 feed 的 tarball/npm 直链，其次经 [DshPluginAdapter]（GitHub 仓库 → RikkaHub 插件 zip）。
  */
 @Serializable
 data class DshMarketPlugin(
@@ -23,7 +22,13 @@ data class DshMarketPlugin(
     val category: String = "",
     @SerialName("description") val description: DshDescription = DshDescription(),
     val npm: String? = null,
+    /** 官方 feed 提供的 npm tarball 直链（发布 Release 资产时存在），安装时优先使用 */
+    val tarball: String? = null,
+    /** 官方站点详情页（含截图/版本历史） */
+    val page: String = "",
     val stars: Int = 0,
+    /** 近 30 天下载量 */
+    val downloads: Int = 0,
     val install: String = "",
 ) {
     /** 仓库引用 owner/repo，供 DshPluginAdapter 拉取转换 */
@@ -31,6 +36,9 @@ data class DshMarketPlugin(
 
     val displayDescription: String
         get() = description.zh.ifBlank { description.en }
+
+    /** feed 是否提供 tarball 直链（可选安装通道） */
+    val hasTarball: Boolean get() = !tarball.isNullOrBlank()
 }
 
 @Serializable
@@ -57,27 +65,40 @@ class DshMarketDataSource(
     private val httpClient: OkHttpClient,
 ) {
     companion object {
-        private const val FEED_URL = "https://beancookie.github.io/awesome-dsh-plugin/plugins.json"
+        /** 官方实时 feed：awesome-dsh-plugin 组织官网（仓储自动重建，含 tarball/downloads 字段） */
+        private const val FEED_URL = "https://awesome-dsh-plugin.com/plugins.json"
+
+        /** 降级：解析官方仓库 README 条目（迁移到新组织后原 beancookie 仓库停更） */
         private const val README_URL =
-            "https://raw.githubusercontent.com/beancookie/awesome-dsh-plugin/main/README.md"
+            "https://raw.githubusercontent.com/awesome-dsh-plugin/awesome-dsh-plugin/main/README.md"
         private const val STARS_URL =
-            "https://raw.githubusercontent.com/beancookie/awesome-dsh-plugin/main/data/stars.json"
-        private const val MIRROR_PREFIX_GHPROXY = "https://gh-proxy.com/"
+            "https://raw.githubusercontent.com/awesome-dsh-plugin/awesome-dsh-plugin/main/data/stars.json"
 
-        private val json = Json { ignoreUnknownKeys = true }
+        private val json = MarketHttp.json
 
-        /** feed 内置分类（id 与 awesome 仓库一致），README 降级解析也复用 */
+        /** feed 内置分类（id 与官方站点一致），README 降级解析也复用 */
         internal val FALLBACK_CATEGORIES = listOf(
+            DshCategory("agi", "AGI 架构探索", "AGI Architecture Exploration"),
             DshCategory("ui", "UI 增强", "UI Enhancements"),
+            DshCategory("usage", "用量与计费", "Usage & Billing"),
             DshCategory("theme", "主题与外观", "Themes & Appearance"),
+            DshCategory("model", "模型与账号接入", "Models & Providers"),
+            DshCategory("identity", "身份与通信", "Identity & Communication"),
             DshCategory("session", "会话与消息", "Sessions & Messages"),
             DshCategory("memory", "记忆", "Memory"),
             DshCategory("tools", "工具与能力", "Tools & Capabilities"),
+            DshCategory("browser", "浏览器与网页", "Browser & Web"),
+            DshCategory("vision", "视觉与多模态", "Vision & Multimodal"),
+            DshCategory("voice", "语音与音频", "Voice & Audio"),
+            DshCategory("docs", "文档与渲染", "Documentation & Rendering"),
             DshCategory("skill", "技能包", "Skills"),
             DshCategory("workflow", "工作流与自动化", "Workflow & Automation"),
+            DshCategory("git", "Git 与代码评审", "Git & Code Review"),
             DshCategory("notify", "通知与集成", "Notifications & Integrations"),
-            DshCategory("model", "模型与账号接入", "Models & Providers"),
             DshCategory("dev", "开发与运行时", "Development & Runtime"),
+            DshCategory("security", "安全与权限", "Security & Permissions"),
+            DshCategory("remote", "远程与移动端", "Remote & Mobile"),
+            DshCategory("market", "插件市场与管理", "Plugin Market & Management"),
             DshCategory("fun", "娱乐", "Just for Fun"),
         )
 
@@ -101,48 +122,39 @@ class DshMarketDataSource(
         fetchFeed().recoverCatching { fetchReadmeFallback() }
     }
 
-    private fun fetchFeed(): Result<DshMarketList> = runCatching {
-        var lastError: Throwable? = null
-        for (url in candidates(FEED_URL)) {
-            try {
-                val feed = json.decodeFromString(FeedDto.serializer(), httpGet(url))
-                val plugins = feed.plugins.map { p ->
-                    DshMarketPlugin(
-                        name = p.name,
-                        owner = p.owner,
-                        url = p.url,
-                        category = p.category,
-                        description = p.description,
-                        npm = p.npm,
-                        stars = p.stars,
-                        install = p.install,
-                    )
-                }
-                if (plugins.isEmpty()) error("feed 为空")
-                val categories = feed.categories.map { (id, label) ->
-                    DshCategory(id, label.zh, label.en)
-                }
-                return@runCatching DshMarketList(
-                    plugins = plugins,
-                    categories = categories.ifEmpty { FALLBACK_CATEGORIES },
-                    updated = feed.updated,
-                    fromFallback = false,
-                )
-            } catch (e: Throwable) {
-                lastError = e
-            }
+    private suspend fun fetchFeed(): Result<DshMarketList> = runCatching {
+        val feed = json.decodeFromString(FeedDto.serializer(), httpGet(FEED_URL))
+        val plugins = feed.plugins.map { p ->
+            DshMarketPlugin(
+                name = p.name,
+                owner = p.owner,
+                url = p.url,
+                category = p.category,
+                description = p.description,
+                npm = p.npm,
+                tarball = p.tarball,
+                page = p.page,
+                stars = p.stars,
+                downloads = p.downloads,
+                install = p.install,
+            )
         }
-        throw lastError ?: IllegalStateException("DSH feed 拉取失败")
+        if (plugins.isEmpty()) error("feed 为空")
+        val categories = feed.categories.map { (id, label) ->
+            DshCategory(id, label.zh, label.en)
+        }
+        DshMarketList(
+            plugins = plugins,
+            categories = categories.ifEmpty { FALLBACK_CATEGORIES },
+            updated = feed.updated,
+            fromFallback = false,
+        )
     }
 
     /** 降级：解析 README 条目行 `- [owner/repo](url) — 描述`，按分类标题分节，合并 stars.json */
-    private fun fetchReadmeFallback(): DshMarketList {
-        val readme = candidates(README_URL).firstNotNullOfOrNull { url ->
-            runCatching { httpGet(url) }.getOrNull()
-        } ?: error("DSH 市场 README 拉取失败")
-        val stars = candidates(STARS_URL).firstNotNullOfOrNull { url ->
-            runCatching { httpGet(url) }.getOrNull()
-        }?.let(::parseStarsJson) ?: emptyMap()
+    private suspend fun fetchReadmeFallback(): DshMarketList {
+        val readme = httpGet(README_URL)
+        val stars = runCatching { httpGet(STARS_URL) }.getOrNull()?.let(::parseStarsJson) ?: emptyMap()
         val plugins = parseReadme(readme, stars)
         if (plugins.isEmpty()) error("README 解析不到任何插件条目")
         return DshMarketList(
@@ -190,19 +202,10 @@ class DshMarketDataSource(
         return plugins
     }
 
-    private data class Candidate(val url: String)
-
-    private fun candidates(url: String): List<String> = listOf(
-        url,
-        MIRROR_PREFIX_GHPROXY + url,
-        "https://cdn.jsdelivr.net/" + url.removePrefix("https://raw.githubusercontent.com/"),
-    )
-
-    private fun httpGet(url: String): String {
-        httpClient.newCall(Request.Builder().url(url).build()).execute().use { response ->
-            if (!response.isSuccessful) error("HTTP ${response.code}")
-            return response.body?.string() ?: error("空响应")
-        }
+    /** 下载文本（GitHub 域名自动附加速镜像），供 feed/README/stars 复用 */
+    private suspend fun httpGet(url: String): String {
+        val bytes = MarketHttp.downloadFirstAvailable(httpClient, url, timeoutMs = 30_000)
+        return bytes.toString(Charsets.UTF_8)
     }
 
     @Serializable
@@ -227,7 +230,10 @@ class DshMarketDataSource(
         val category: String = "",
         val description: DshDescription = DshDescription(),
         val npm: String? = null,
+        val tarball: String? = null,
+        val page: String = "",
         val stars: Int = 0,
+        val downloads: Int = 0,
         val install: String = "",
     )
 

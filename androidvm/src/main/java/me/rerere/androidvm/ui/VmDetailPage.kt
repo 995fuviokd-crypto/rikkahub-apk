@@ -31,18 +31,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.ArrowLeft
 import com.composables.icons.lucide.Download
+import com.composables.icons.lucide.EyeOff
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Maximize
 import com.composables.icons.lucide.Play
 import com.composables.icons.lucide.Power
 import com.composables.icons.lucide.Puzzle
 import com.composables.icons.lucide.Shield
+import com.composables.icons.lucide.ShieldBan
 import com.composables.icons.lucide.Trash2
+import me.rerere.androidvm.R
 import me.rerere.androidvm.VmEngineType
 import me.rerere.androidvm.VmInstance
+import me.rerere.androidvm.VmModuleInfo
+import me.rerere.androidvm.VmModuleKind
 import me.rerere.androidvm.VmVM
 import me.rerere.androidvm.navigation.VmNavigator
 import java.io.File
@@ -67,11 +73,11 @@ fun VmDetailPage(
     }
     if (instance == null) {
         Scaffold(
-            topBar = { TopAppBar(title = { Text("实例不存在") }) },
+            topBar = { TopAppBar(title = { Text(stringResource(R.string.vm_detail_not_found_title)) }) },
             snackbarHost = { SnackbarHost(snackbar) },
         ) {
             androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().padding(it)) {
-                Text("未找到该虚拟机实例", modifier = Modifier.align(androidx.compose.ui.Alignment.Center))
+                Text(stringResource(R.string.vm_detail_not_found_body), modifier = Modifier.align(androidx.compose.ui.Alignment.Center))
             }
         }
         return
@@ -87,7 +93,7 @@ fun VmDetailPage(
                 tmp.outputStream().use { out -> input.copyTo(out) }
             }
             vm.installApp(instance, tmp.absolutePath)
-        }.onFailure { vm.message.value = "读取 APK 失败：${it.message}" }
+        }.onFailure { vm.message.value = context.getString(R.string.vm_msg_read_apk_failed, it.message) }
     }
     val modulePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
@@ -97,7 +103,7 @@ fun VmDetailPage(
                 tmp.outputStream().use { out -> input.copyTo(out) }
             }
             vm.installModule(instance, tmp.absolutePath)
-        }.onFailure { vm.message.value = "读取模块失败：${it.message}" }
+        }.onFailure { vm.message.value = context.getString(R.string.vm_msg_read_module_failed, it.message) }
     }
     LaunchedEffect(instanceId) {
         if (isAndroid) vm.loadModules()
@@ -132,16 +138,16 @@ fun VmDetailPage(
             // 运行环境入口
             item {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("运行环境", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                    Text(stringResource(R.string.vm_runtime_env), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                     if (isAndroid) {
                         FilledTonalButton(onClick = { picker.launch("application/vnd.android.package-archive") }) {
                             Icon(Lucide.Download, null)
-                            Text("安装 APK")
+                            Text(stringResource(R.string.vm_install_apk))
                         }
                     } else {
                         FilledTonalButton(onClick = { onOpenTerminal(instance.id) }) {
                             Icon(Lucide.Play, null)
-                            Text("打开终端")
+                            Text(stringResource(R.string.vm_open_terminal))
                         }
                     }
                 }
@@ -150,12 +156,12 @@ fun VmDetailPage(
             // 已安装应用（Android 虚拟化）
             if (isAndroid) {
                 item {
-                    Text("已安装应用", style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.vm_installed_apps), style = MaterialTheme.typography.titleSmall)
                 }
                 if (instance.installedApps.isEmpty()) {
                     item {
                         Text(
-                            "尚未安装应用，点击上方「安装 APK」",
+                            stringResource(R.string.vm_no_apps_hint),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.outline,
                         )
@@ -167,7 +173,7 @@ fun VmDetailPage(
                             Text(pkg, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                             OutlinedButton(onClick = { vm.launch(instance, pkg) }) {
                                 Icon(Lucide.Play, null)
-                                Text("启动")
+                                Text(stringResource(R.string.vm_launch))
                             }
                         }
                     }
@@ -180,27 +186,47 @@ fun VmDetailPage(
             item {
                 VmSwitchRow(
                     icon = Lucide.Shield,
-                    title = "虚拟 Root（su 支持）",
-                    subtitle = if (isAndroid) "在虚拟空间内提供虚拟 su，应用可见 root（非真 root）" else "仅 Android 虚拟化支持",
+                    title = stringResource(R.string.vm_virtual_root),
+                    subtitle = if (isAndroid) stringResource(R.string.vm_virtual_root_desc_android) else stringResource(R.string.vm_android_only_desc),
                     checked = instance.virtualRoot,
                     enabled = isAndroid,
                     onChecked = { vm.toggleVirtualRoot(instance, it) },
                 )
             }
+            item {
+                VmSwitchRow(
+                    icon = Lucide.EyeOff,
+                    title = stringResource(R.string.vm_hide_root),
+                    subtitle = if (isAndroid) stringResource(R.string.vm_hide_root_desc_android) else stringResource(R.string.vm_android_only_desc),
+                    checked = instance.hideRoot,
+                    enabled = isAndroid,
+                    onChecked = { vm.toggleHideRoot(instance, it) },
+                )
+            }
+            item {
+                VmSwitchRow(
+                    icon = Lucide.ShieldBan,
+                    title = stringResource(R.string.vm_hide_xposed),
+                    subtitle = if (isAndroid) stringResource(R.string.vm_hide_xposed_desc_android) else stringResource(R.string.vm_android_only_desc),
+                    checked = instance.hideXposed,
+                    enabled = isAndroid,
+                    onChecked = { vm.toggleHideXposed(instance, it) },
+                )
+            }
             if (isAndroid) {
                 item {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Magisk / 模块", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                        Text(stringResource(R.string.vm_magisk_modules), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                         FilledTonalButton(onClick = { modulePicker.launch("*/*") }) {
                             Icon(Lucide.Download, null)
-                            Text("刷入 Magisk")
+                            Text(stringResource(R.string.vm_flash_magisk))
                         }
                     }
                 }
                 if (vm.modules.isEmpty()) {
                     item {
                         Text(
-                            "尚未刷入模块，点击「刷入 Magisk」选择 Magisk/Xposed 模块",
+                            stringResource(R.string.vm_no_modules_hint),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.outline,
                         )
@@ -210,11 +236,25 @@ fun VmDetailPage(
                         val mod = vm.modules[idx]
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text(mod.name.ifBlank { mod.packageName }, style = MaterialTheme.typography.bodyMedium)
-                                Text(mod.packageName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(mod.name.ifBlank { mod.moduleId }, style = MaterialTheme.typography.bodyMedium)
+                                    if (mod.kind == VmModuleKind.MAGISK) {
+                                        Text(
+                                            stringResource(R.string.vm_badge_magisk),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.padding(start = 6.dp),
+                                        )
+                                    }
+                                }
+                                Text(
+                                    buildModuleSubtitle(mod),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.outline,
+                                )
                             }
-                            Switch(checked = mod.enabled, onCheckedChange = { vm.setModuleEnabled(mod.packageName, it) })
-                            IconButton(onClick = { vm.uninstallModule(mod.packageName) }) {
+                            Switch(checked = mod.enabled, onCheckedChange = { vm.setModuleEnabled(mod.moduleId, it) })
+                            IconButton(onClick = { vm.uninstallModule(mod.moduleId) }) {
                                 Icon(Lucide.Trash2, null)
                             }
                         }
@@ -222,10 +262,10 @@ fun VmDetailPage(
                 }
                 item {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("重启虚拟机", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                        Text(stringResource(R.string.vm_restart_vm), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                         OutlinedButton(onClick = { vm.restart(instance) }) {
                             Icon(Lucide.Power, null)
-                            Text("重启")
+                            Text(stringResource(R.string.vm_restart))
                         }
                     }
                 }
@@ -233,8 +273,8 @@ fun VmDetailPage(
             item {
                 VmSwitchRow(
                     icon = Lucide.Maximize,
-                    title = "悬浮窗小窗",
-                    subtitle = if (isAndroid) "以悬浮窗形式运行" else "仅 Android 虚拟化支持",
+                    title = stringResource(R.string.vm_floating_window),
+                    subtitle = if (isAndroid) stringResource(R.string.vm_floating_window_desc_android) else stringResource(R.string.vm_android_only_desc),
                     checked = instance.floatingWindow,
                     enabled = isAndroid,
                     onChecked = { vm.toggleFloatingWindow(instance, it) },
@@ -243,8 +283,8 @@ fun VmDetailPage(
             item {
                 VmSwitchRow(
                     icon = Lucide.Power,
-                    title = "息屏保活",
-                    subtitle = if (isAndroid) "后台持续运行" else "仅 Android 虚拟化支持",
+                    title = stringResource(R.string.vm_keep_alive),
+                    subtitle = if (isAndroid) stringResource(R.string.vm_keep_alive_desc_android) else stringResource(R.string.vm_android_only_desc),
                     checked = instance.keepAlive,
                     enabled = isAndroid,
                     onChecked = { vm.toggleKeepAlive(instance, it) },
@@ -255,15 +295,31 @@ fun VmDetailPage(
 
             item {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("危险操作", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                    Text(stringResource(R.string.vm_danger_zone), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                     OutlinedButton(onClick = { vm.delete(instance) }) {
                         Icon(Lucide.Trash2, null)
-                        Text("删除实例")
+                        Text(stringResource(R.string.vm_delete_instance))
                     }
                 }
             }
         }
     }
+}
+
+/** 模块副标题：Magisk 展示 v版本 · @作者 · 描述，Xposed 展示包名。 */
+private fun buildModuleSubtitle(mod: VmModuleInfo): String {
+    if (mod.kind == VmModuleKind.MAGISK) {
+        val head = listOfNotNull(
+            mod.version.takeIf { it.isNotBlank() }?.let { "v$it" },
+            mod.author.takeIf { it.isNotBlank() }?.let { "@$it" },
+        ).joinToString(" ")
+        return listOfNotNull(
+            head.takeIf { it.isNotBlank() },
+            mod.description.takeIf { it.isNotBlank() },
+            mod.moduleId,
+        ).joinToString(" · ")
+    }
+    return mod.moduleId
 }
 
 @Composable

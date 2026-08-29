@@ -115,12 +115,16 @@ class SettingsStore(
         val MEMORY_PROMPT = stringPreferencesKey("memory_prompt")
         val SELF_HOSTED_PROMPT = stringPreferencesKey("self_hosted_prompt")
         val AUTO_COMPRESS_ENABLED = booleanPreferencesKey("auto_compress_enabled")
-        val AUTO_COMPRESS_THRESHOLD_TOKENS = intPreferencesKey("auto_compress_threshold_tokens")
-        val AUTO_COMPRESS_KEEP_RECENT = intPreferencesKey("auto_compress_keep_recent")
+        val AUTO_COMPRESS_CONTEXT_PERCENT = intPreferencesKey("auto_compress_context_percent")
+        val AUTO_COMPRESS_MAX_MODE = booleanPreferencesKey("auto_compress_max_mode")
         val AUTO_RECONNECT_ENABLED = booleanPreferencesKey("auto_reconnect_enabled")
         val AUTO_RECONNECT_MAX_RETRIES = intPreferencesKey("auto_reconnect_max_retries")
         // 多线路并发：请求自动探测同名模型的多条 provider 线路，并发竞速 + 故障转移
         val MULTI_ROUTE_CONCURRENT = booleanPreferencesKey("multi_route_concurrent")
+        val MAX_CONCURRENT_ROUTES = intPreferencesKey("max_concurrent_routes")
+        val GLOBAL_TOOL_SCRIPTS = booleanPreferencesKey("global_tool_scripts")
+        val GLOBAL_TOOL_ACCESSIBILITY = booleanPreferencesKey("global_tool_accessibility")
+        val GLOBAL_TOOL_POWER_MANAGEMENT = booleanPreferencesKey("global_tool_power_management")
 
         // 消息撤回
         val RECALL_SEGMENTED = booleanPreferencesKey("recall_segmented")
@@ -254,11 +258,15 @@ class SettingsStore(
                 memoryPrompt = preferences[MEMORY_PROMPT] ?: DEFAULT_MEMORY_PROMPT,
                 selfHostedPrompt = preferences[SELF_HOSTED_PROMPT] ?: DEFAULT_SELF_HOSTED_PROMPT,
                 autoCompressEnabled = preferences[AUTO_COMPRESS_ENABLED] ?: false,
-                autoCompressThresholdTokens = preferences[AUTO_COMPRESS_THRESHOLD_TOKENS] ?: 32000,
-                autoCompressKeepRecent = preferences[AUTO_COMPRESS_KEEP_RECENT] ?: 32,
+                autoCompressContextPercent = preferences[AUTO_COMPRESS_CONTEXT_PERCENT] ?: 60,
+                autoCompressMaxMode = preferences[AUTO_COMPRESS_MAX_MODE] ?: false,
                 autoReconnectEnabled = preferences[AUTO_RECONNECT_ENABLED] ?: false,
                 autoReconnectMaxRetries = preferences[AUTO_RECONNECT_MAX_RETRIES] ?: 3,
                 multiRouteConcurrent = preferences[MULTI_ROUTE_CONCURRENT] ?: false,
+                maxConcurrentRoutes = preferences[MAX_CONCURRENT_ROUTES] ?: 3,
+                globalToolScripts = preferences[GLOBAL_TOOL_SCRIPTS] ?: false,
+                globalToolAccessibility = preferences[GLOBAL_TOOL_ACCESSIBILITY] ?: false,
+                globalToolPowerManagement = preferences[GLOBAL_TOOL_POWER_MANAGEMENT] ?: false,
                 recallSegmented = preferences[RECALL_SEGMENTED] ?: false,
                 recallBoundaryPunctuation = preferences[RECALL_BOUNDARY_PUNCTUATION] ?: "。！？～",
                 recallRollbackEnabled = preferences[RECALL_ROLLBACK_ENABLED] ?: true,
@@ -501,11 +509,15 @@ class SettingsStore(
             preferences[MEMORY_PROMPT] = settings.memoryPrompt
             preferences[SELF_HOSTED_PROMPT] = settings.selfHostedPrompt
             preferences[AUTO_COMPRESS_ENABLED] = settings.autoCompressEnabled
-            preferences[AUTO_COMPRESS_THRESHOLD_TOKENS] = settings.autoCompressThresholdTokens
-            preferences[AUTO_COMPRESS_KEEP_RECENT] = settings.autoCompressKeepRecent
+            preferences[AUTO_COMPRESS_CONTEXT_PERCENT] = settings.autoCompressContextPercent
+            preferences[AUTO_COMPRESS_MAX_MODE] = settings.autoCompressMaxMode
             preferences[AUTO_RECONNECT_ENABLED] = settings.autoReconnectEnabled
             preferences[AUTO_RECONNECT_MAX_RETRIES] = settings.autoReconnectMaxRetries
             preferences[MULTI_ROUTE_CONCURRENT] = settings.multiRouteConcurrent
+            preferences[MAX_CONCURRENT_ROUTES] = settings.maxConcurrentRoutes
+            preferences[GLOBAL_TOOL_SCRIPTS] = settings.globalToolScripts
+            preferences[GLOBAL_TOOL_ACCESSIBILITY] = settings.globalToolAccessibility
+            preferences[GLOBAL_TOOL_POWER_MANAGEMENT] = settings.globalToolPowerManagement
             preferences[RECALL_SEGMENTED] = settings.recallSegmented
             preferences[RECALL_BOUNDARY_PUNCTUATION] = settings.recallBoundaryPunctuation
             preferences[RECALL_ROLLBACK_ENABLED] = settings.recallRollbackEnabled
@@ -729,15 +741,25 @@ data class Settings(
     val imageGenerationPrompt: String = DEFAULT_IMAGE_GENERATION_PROMPT,
     val memoryPrompt: String = DEFAULT_MEMORY_PROMPT,
     val selfHostedPrompt: String = DEFAULT_SELF_HOSTED_PROMPT,
-    // 自动压缩：上下文 token 估算达到阈值时自动压缩并继续生成
+    // 自动压缩：上下文 token 估算达到阈值时自动压缩并继续生成。
+    // 阈值按当前模型上下文窗口的百分比动态计算；
+    // Max 模式先按窗口 ×3 放大基准（长任务聚合场景）再应用百分比
     val autoCompressEnabled: Boolean = false,
-    val autoCompressThresholdTokens: Int = 32000,
-    val autoCompressKeepRecent: Int = 32,
+    val autoCompressContextPercent: Int = 60,
+    val autoCompressMaxMode: Boolean = false,
     // 自动重连：生成过程中遇到网络断开时自动重试直到收到响应
     val autoReconnectEnabled: Boolean = false,
     val autoReconnectMaxRetries: Int = 3,
     // 多线路并发：请求自动探测同名模型的多条 provider 线路，并发竞速 + 故障转移
     val multiRouteConcurrent: Boolean = false,
+    // 多线路并发最大线路数：限制同时竞速的备用线路数量（1-5，默认3）
+    val maxConcurrentRoutes: Int = 3,
+    // AI 全能控制：全局脚本工具开关（对所有助手生效，与助手自身的 localTools 取并集）
+    val globalToolScripts: Boolean = false,
+    // AI 全能控制：全局无障碍控制开关（对所有助手生效，与助手自身的 localTools 取并集）
+    val globalToolAccessibility: Boolean = false,
+    // AI 全能控制：全局电源管理开关（对所有助手生效，与助手自身的 localTools 取并集）
+    val globalToolPowerManagement: Boolean = false,
     // 消息撤回：范围（true=分段截断，false=整条）、边界标点、副作用回滚、撤回后告知 AI
     val recallSegmented: Boolean = false,
     val recallBoundaryPunctuation: String = "。！？～",

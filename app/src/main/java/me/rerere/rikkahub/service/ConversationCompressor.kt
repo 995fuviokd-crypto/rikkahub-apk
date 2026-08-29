@@ -2,12 +2,13 @@ package me.rerere.rikkahub.service
 
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.utils.TokenEstimate
 
 /**
  * 对话压缩的纯计算逻辑（与 LLM 调用解耦，便于单元测试）。
  *
  * - keepRecent：保留最近 N 条消息，更早历史交由压缩；
- * - splitChunks：超过单块上限时递归二分，保证块内顺序与原对话一致；
+ * - splitChunksByTokens：按 token 预算 + 消息数上限分块，保证块内顺序与原对话一致；
  * - compressionText：提取消息全文（含工具调用/输出），避免摘要只含纯文本造成信息丢失。
  */
 object ConversationCompressor {
@@ -41,31 +42,26 @@ object ConversationCompressor {
         )
     }
 
-    /**
-     * 超过单块上限时递归二分，返回保持原始顺序的分块列表，
-     * 每块大小不超过 [MAX_MESSAGES_PER_CHUNK]。
-     */
-    fun splitChunks(messages: List<UIMessage>): List<List<UIMessage>> {
-        if (messages.size <= MAX_MESSAGES_PER_CHUNK) return listOf(messages)
-        val mid = messages.size / 2
-        val left = splitChunks(messages.subList(0, mid))
-        val right = splitChunks(messages.subList(mid, messages.size))
-        return left + right
-    }
-
     /** 单块压缩 prompt 的默认 token 预算：保证压缩请求不超出常见模型上下文窗口 */
     const val DEFAULT_TOKEN_BUDGET_PER_CHUNK = 24_000
+
+    /** 单条消息进入压缩 prompt 的默认截断长度（字符）：长消息也保留足够上下文 */
+    const val DEFAULT_MAX_CONTENT_LENGTH = 8000
 
     /**
      * 按 token 预算分块：逐条累加压缩文本的估算 token 数，
      * 超过预算（或达到单块消息数上限）即切新块，保持原始顺序。
      *
-     * 与 [splitChunks]（仅按消息条数）不同，这里同时约束消息数与 token 总量，
-     * 避免 256 条长消息拼出几十万 token 的 prompt 导致压缩请求超限失败。
+     * 同时约束消息数与 token 总量，避免长消息拼出几十万 token 的 prompt
+     * 导致压缩请求超限失败。
+     *
+     * @param maxLength 单条消息截断长度，与 [compressionText] 保持一致，
+     *   避免估算(按截断后文本)与实际送入 prompt 的文本不一致导致块内 token 低估。
      */
     fun splitChunksByTokens(
         messages: List<UIMessage>,
         tokenBudget: Int = DEFAULT_TOKEN_BUDGET_PER_CHUNK,
+        maxLength: Int = DEFAULT_MAX_CONTENT_LENGTH,
     ): List<List<UIMessage>> {
         if (messages.isEmpty()) return emptyList()
         val budget = tokenBudget.coerceAtLeast(1)
@@ -73,7 +69,7 @@ object ConversationCompressor {
         var current = mutableListOf<UIMessage>()
         var currentTokens = 0
         messages.forEach { message ->
-            val tokens = estimateTokensFor(message)
+            val tokens = estimateTokensFor(message, maxLength)
             if (current.isNotEmpty() && (currentTokens + tokens > budget || current.size >= MAX_MESSAGES_PER_CHUNK)) {
                 chunks.add(current)
                 current = mutableListOf()
@@ -86,20 +82,33 @@ object ConversationCompressor {
         return chunks
     }
 
-    private fun estimateTokensFor(message: UIMessage): Int {
-        // 压缩文本按 maxLength=2000 截断，估算时同样截断，避免高估
-        val text = compressionText(message, maxLength = 2000)
-        return text.length / 4 + 1
+    private fun estimateTokensFor(message: UIMessage, maxLength: Int): Int {
+        // 压缩文本按 maxLength 截断，估算时同样截断，避免高估；
+        // 用 CJK 感知的 TokenEstimate，避免 length/4 对中文低估导致分块后 prompt 超窗
+        val text = compressionText(message, maxLength = maxLength)
+        return TokenEstimate.estimateTokens(text).coerceAtLeast(1)
     }
 
     /**
      * 提取消息用于压缩的完整文本：除纯文本外，还包括推理内容、工具调用（名称/入参/输出）、
      * 服务端工具与文档/图片等非文本内容，减少压缩过程的信息丢失。
+     *
+     * 超长文本采用「保留开头 + 保留结尾 + 中间省略」策略：消息头部通常包含角色、工具名与输入，
+     * 尾部往往是工具输出/回复结论，仅截取头部会丢失关键决策信息。
      */
     fun compressionText(message: UIMessage, maxLength: Int = 2000): String {
         val body = message.parts.joinToString(separator = "\n") { partText(it, maxLength) }
         val text = "[${message.role.name}]: $body"
-        return if (text.length > maxLength) text.take(maxLength) + "..." else text
+        return if (text.length > maxLength) truncateKeepingEnds(text, maxLength) else text
+    }
+
+    /** 截断保留开头与结尾，中间用省略标记连接；总长与原截断（maxLength + "..."）一致。 */
+    private fun truncateKeepingEnds(text: String, maxLength: Int): String {
+        val ellipsis = "..."
+        val headLen = maxLength * 2 / 3
+        val tailLen = (maxLength - headLen - ellipsis.length).coerceIn(0, maxLength - headLen)
+        if (tailLen <= 0) return text.take(maxLength) + ellipsis
+        return text.take(headLen) + ellipsis + text.takeLast(tailLen)
     }
 
     private fun partText(part: UIMessagePart, maxLength: Int): String = when (part) {

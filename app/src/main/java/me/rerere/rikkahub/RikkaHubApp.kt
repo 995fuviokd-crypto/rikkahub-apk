@@ -34,7 +34,9 @@ import me.rerere.rikkahub.di.viewModelModule
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.fts.SimpleDictManager
+import me.rerere.rikkahub.data.db.RestoreStaging
 import me.rerere.rikkahub.data.ai.mcp.McpManager
+import me.rerere.rikkahub.data.ai.group.GroupScheduler
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.FloatingBubbleService
 import me.rerere.rikkahub.service.KeepAliveService
@@ -70,6 +72,13 @@ class RikkaHubApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // 应用备份恢复暂存区：若存在待应用数据库文件，必须在 Koin/Room 构建
+        // （任何数据库连接打开）之前覆盖到正式路径，否则运行中的数据库连接
+        // 因文件被替换而失效，进程内协程访问会立即闪退
+        runCatching { RestoreStaging.applyIfPending(this) }.onFailure {
+            Log.e(TAG, "apply pending database restore failed", it)
+        }
+
         if (GlobalContext.getOrNull() == null) {
             startKoin {
                 androidLogger()
@@ -119,6 +128,20 @@ class RikkaHubApp : Application() {
                 get<OkHttpClient>()
             }.onFailure {
                 Log.e(TAG, "preload chat service chain failed", it)
+            }
+        }
+
+        // 启动任务中心定时调度器（守护协程，每分钟检查 cron 触发的群组任务）
+        get<AppScope>().launch(Dispatchers.Default) {
+            runCatching { get<GroupScheduler>().start() }.onFailure {
+                Log.e(TAG, "start GroupScheduler failed", it)
+            }
+        }
+
+        // 启动 DSH/脚本插件运行时协调者：把已启用插件同步进 CordisKernel 并热插拔
+        get<AppScope>().launch(Dispatchers.Default) {
+            runCatching { get<me.rerere.rikkahub.data.plugin.CordisRuntimeHost>().start() }.onFailure {
+                Log.e(TAG, "start CordisRuntimeHost failed", it)
             }
         }
 

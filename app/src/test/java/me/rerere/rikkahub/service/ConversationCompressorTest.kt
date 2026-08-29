@@ -29,12 +29,12 @@ class ConversationCompressorTest {
         assertEquals(ids(all.dropLast(10)), ids(split.messagesToCompress))
         assertEquals(ids(all.takeLast(10)), ids(split.messagesToKeep))
 
-        val chunks = ConversationCompressor.splitChunks(split.messagesToCompress)
+        val chunks = ConversationCompressor.splitChunksByTokens(split.messagesToCompress)
         assertEquals(1, chunks.size)
         assertEquals(40, chunks.single().size)
     }
 
-    /** 长压缩 300k+：总字符量超过 300k 且消息数超过单块上限，正确递归分块。 */
+    /** 长压缩 300k+：消息数超过单块上限，按 token 预算切块且不丢失消息。 */
     @Test
     fun `long conversation over 300k chars splits into bounded chunks without loss`() {
         val all = messages(count = 600, charsPerMessage = 500)
@@ -45,21 +45,23 @@ class ConversationCompressorTest {
         assertEquals(550, split.messagesToCompress.size)
         assertEquals(50, split.messagesToKeep.size)
 
-        val chunks = ConversationCompressor.splitChunks(split.messagesToCompress)
-        // 递归二分：550 -> 275+275 -> (137+138)+(137+138)
-        assertEquals(4, chunks.size)
+        val chunks = ConversationCompressor.splitChunksByTokens(
+            messages = split.messagesToCompress,
+            tokenBudget = 5000,
+        )
+        // 550 条 × 500 字符 ≈ 550×125 token = 68750 token，预算 5000 时切成多块
+        assertTrue(chunks.size > 1)
         assertTrue(chunks.all { it.size <= ConversationCompressor.MAX_MESSAGES_PER_CHUNK })
-        assertEquals(listOf(137, 138, 137, 138), chunks.map { it.size })
 
         val flattened = chunks.flatten()
         assertEquals(ids(split.messagesToCompress), ids(flattened))
     }
 
-    /** 顺序保持：递归二分后块与块拼接顺序与压缩前完全一致。 */
+    /** 顺序保持：按 token 预算分块后块与块拼接顺序与压缩前完全一致。 */
     @Test
     fun `chunks preserve original message order`() {
-        val all = messages(count = 1000)
-        val chunks = ConversationCompressor.splitChunks(all)
+        val all = messages(count = 600, charsPerMessage = 500)
+        val chunks = ConversationCompressor.splitChunksByTokens(all, tokenBudget = 5000)
         assertEquals(ids(all), ids(chunks.flatten()))
     }
 
@@ -85,12 +87,14 @@ class ConversationCompressorTest {
         }
     }
 
-    /** 边界：恰好 256 条一块，257 条二分两块。 */
+    /** 边界：消息数达到单块上限时按条数切块。 */
     @Test
     fun `chunk boundary at max messages per chunk`() {
-        assertEquals(1, ConversationCompressor.splitChunks(messages(256)).size)
-        assertEquals(2, ConversationCompressor.splitChunks(messages(257)).size)
-        assertEquals(listOf(128, 129), ConversationCompressor.splitChunks(messages(257)).map { it.size })
+        assertTrue(ConversationCompressor.splitChunksByTokens(messages(256)).size == 1)
+        assertTrue(ConversationCompressor.splitChunksByTokens(messages(257)).size == 2)
+        assertTrue(ConversationCompressor.splitChunksByTokens(messages(257)).all {
+            it.size <= ConversationCompressor.MAX_MESSAGES_PER_CHUNK
+        })
     }
 
     /** 空输入不崩溃。 */
@@ -99,7 +103,7 @@ class ConversationCompressorTest {
         val split = ConversationCompressor.splitRecent(emptyList(), keepRecentMessages = 0)
         assertTrue(split.messagesToCompress.isEmpty())
         assertTrue(split.messagesToKeep.isEmpty())
-        assertTrue(ConversationCompressor.splitChunks(emptyList()).flatten().isEmpty())
+        assertTrue(ConversationCompressor.splitChunksByTokens(emptyList()).isEmpty())
     }
 
     // ---- splitChunksByTokens：按 token 预算分块，避免超长 prompt 超限 ----
@@ -135,9 +139,11 @@ class ConversationCompressorTest {
         assertEquals(ids(all), ids(chunks.flatten()))
         chunks.forEach { chunk ->
             val tokens = chunk.sumOf { msg ->
-                ConversationCompressor.compressionText(msg, maxLength = 2000).length / 4 + 1
+                me.rerere.rikkahub.utils.TokenEstimate.estimateTokens(
+                    ConversationCompressor.compressionText(msg, maxLength = ConversationCompressor.DEFAULT_MAX_CONTENT_LENGTH)
+                )
             }
-            // 单条消息估算约 1000/4+1=251 token，预算内任意块累计不应超 budget
+            // 单条消息 ASCII 1000 字符约 250 token，预算内任意块累计不应超 budget
             assertTrue("chunk tokens $tokens exceed budget $budget", tokens <= budget)
         }
     }
@@ -184,11 +190,18 @@ class ConversationCompressorTest {
     }
 
     @Test
-    fun `compression text truncates at max length with ellipsis`() {
-        val longMsg = UIMessage.user("a".repeat(200))
+    fun `compression text truncates keeping both head and tail`() {
+        val longMsg = UIMessage.user("A".repeat(100) + "B".repeat(100))
         val text = ConversationCompressor.compressionText(longMsg, maxLength = 50)
-        assertTrue(text.endsWith("..."))
+        // 总长与原截断一致（maxLength + "...")
         assertTrue(text.length <= 53)
+        // 中间省略标记存在
+        assertTrue(text.contains("..."))
+        // 头部保留（含角色前缀与 A 段开头）
+        assertTrue(text.startsWith("[USER]: "))
+        assertTrue(text.substringAfter("[USER]: ").startsWith("AAA"))
+        // 尾部结论保留（B 段结尾）
+        assertTrue(text.endsWith("BBB"))
     }
 
     // ---- markedAsCompressionSummary：摘要标记兜底 ----

@@ -81,24 +81,47 @@ internal fun createWorkspaceTerminalSession(
         else -> "/bin/sh"  // 默认使用 sh
     }
 
-    args += listOf(
-        "/usr/bin/env",
-        "-i",
-        "HOME=/root",
-        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        "TERM=xterm-256color",
-        "LANG=C.UTF-8",
-        "LC_ALL=C.UTF-8",
-        "USER=root",
-        "SHELL=$shell",
-        shell,
-    )
+    // 检查 /usr/bin/env 是否存在，如果不存在则直接启动 shell
+    val hasEnv = File(linuxDir, "usr/bin/env").exists()
+    
+    if (hasEnv) {
+        args += listOf(
+            "/usr/bin/env",
+            "-i",
+            "HOME=/root",
+            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "TERM=xterm-256color",
+            "LANG=C.UTF-8",
+            "LC_ALL=C.UTF-8",
+            "USER=root",
+            "SHELL=$shell",
+            shell,
+        )
+    } else {
+        // 如果没有 env，直接启动 shell 并通过环境变量设置
+        args += shell
+    }
 
-    val env = arrayOf(
-        "PROOT_LOADER=${loader.absolutePath}",
-        "PROOT_TMP_DIR=${tempDir.absolutePath}",
-        "TMPDIR=${tempDir.absolutePath}",
-    )
+    val env = if (hasEnv) {
+        arrayOf(
+            "PROOT_LOADER=${loader.absolutePath}",
+            "PROOT_TMP_DIR=${tempDir.absolutePath}",
+            "TMPDIR=${tempDir.absolutePath}",
+        )
+    } else {
+        arrayOf(
+            "PROOT_LOADER=${loader.absolutePath}",
+            "PROOT_TMP_DIR=${tempDir.absolutePath}",
+            "TMPDIR=${tempDir.absolutePath}",
+            "HOME=/root",
+            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "TERM=xterm-256color",
+            "LANG=C.UTF-8",
+            "LC_ALL=C.UTF-8",
+            "USER=root",
+            "SHELL=$shell",
+        )
+    }
 
     return TerminalSession(
         proot.absolutePath,

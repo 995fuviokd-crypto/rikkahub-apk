@@ -143,6 +143,51 @@ val repositoryModule = module {
         me.rerere.rikkahub.data.plugin.PluginManager(get(), get())
     }
 
+    // Cordis 内核与插件桥接：供 agent-loop（阶段 5）与面板壳（阶段 7）使用
+    // 共享事件总线：内核与 HostToolsSeam 复用，保证 tools/change 事件达插件监听器
+    single<me.rerere.rikkahub.data.cordis.CordisEventBus> {
+        me.rerere.rikkahub.data.cordis.CordisEventBus()
+    }
+
+    // 宿主能力缝实现：单例共享，同时注入 CordisHost 与 AgentHost
+    single<me.rerere.rikkahub.data.cordis.LlmSeam> {
+        me.rerere.rikkahub.data.cordis.HostLlmSeam(get(), get())
+    }
+
+    single<me.rerere.rikkahub.data.cordis.ToolsSeam> {
+        me.rerere.rikkahub.data.cordis.HostToolsSeam(get())
+    }
+
+    single<me.rerere.rikkahub.data.cordis.SystemPromptSeam> {
+        me.rerere.rikkahub.data.cordis.HostSystemPromptSeam()
+    }
+
+    single<me.rerere.rikkahub.data.cordis.SessionsSeam> {
+        me.rerere.rikkahub.data.cordis.HostSessionsSeam()
+    }
+
+    single<me.rerere.rikkahub.data.cordis.CordisHost> {
+        me.rerere.rikkahub.data.cordis.CordisHost(
+            llm = get(),
+            tools = get(),
+            sessions = get(),
+            systemPrompt = get(),
+        )
+    }
+
+    single {
+        me.rerere.rikkahub.data.cordis.CordisKernel(get(), get())
+    }
+
+    // Agent 启动器：组合真实能力缝驱动 agent-loop（阶段 9）
+    single {
+        me.rerere.rikkahub.data.agent.AgentHost(get(), get(), get(), get())
+    }
+
+    single {
+        me.rerere.rikkahub.data.plugin.CordisPluginBridge(get(), null, get())
+    }
+
     single<me.rerere.rikkahub.data.script.ScriptChatBridge> {
         me.rerere.rikkahub.data.chat.RikkaScriptChatBridge(get(), get(), get())
     }
@@ -161,5 +206,13 @@ val repositoryModule = module {
 
     single {
         me.rerere.rikkahub.data.api.CommunityMarketDataSource.create(get(), get())
+    }
+
+    // 四个市场数据源统一在此注册（官方/社区/DSH/酒馆）
+    single {
+        me.rerere.rikkahub.data.api.DshMarketDataSource(httpClient = get())
+    }
+    single {
+        me.rerere.rikkahub.data.api.TavernMarketDataSource(httpClient = get())
     }
 }

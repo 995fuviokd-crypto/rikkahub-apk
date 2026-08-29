@@ -5,8 +5,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.data.plugin.PluginMarketEntry
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.ResponseBody
@@ -83,16 +81,12 @@ interface GitHubPluginAPI {
 
 @Serializable
 data class GitHubContent(
-    val name: String = "",
     val sha: String = "",
-    val size: Int = 0,
-    val download_url: String? = null,
 )
 
 @Serializable
 data class GitHubUser(
     val login: String = "",
-    val id: Long = 0,
 )
 
 /** 提交审核队列条目（submissions.json）。status: pending / approved / rejected */
@@ -112,8 +106,6 @@ data class SubmissionEntry(
     val status: String = "pending",
     val submitter: String = "",
     val submittedAt: String = "",
-    val reviewedAt: String? = null,
-    val reviewNote: String? = null,
 )
 
 @Serializable
@@ -148,31 +140,12 @@ class PluginMarketDataSource(
 ) {
     /** 下载插件 zip 字节。优先原地址，失败或内容异常时自动切换镜像加速源。 */
     suspend fun downloadZip(url: String): ByteArray {
-        val candidates = buildList {
-            add(url)
-            MIRROR_PREFIXES.forEach { mirror ->
-                add(mirror + url)
-            }
-        }
-        var lastError: Throwable? = null
-        for (candidate in candidates) {
-            try {
-                val bytes = withContext(Dispatchers.IO) {
-                    httpClient.newCall(okhttp3.Request.Builder().url(candidate).build()).execute().use { response ->
-                        if (!response.isSuccessful) error("HTTP ${response.code}")
-                        response.body?.bytes() ?: error("空响应")
-                    }
-                }
-                if (!bytes.isZipArchive()) {
-                    lastError = IllegalArgumentException("下载内容不是有效的插件包（zip 头校验失败），已尝试镜像源")
-                    continue
-                }
-                return bytes
-            } catch (e: Throwable) {
-                lastError = e
-            }
-        }
-        throw lastError ?: IllegalStateException("下载失败")
+        return MarketHttp.downloadFirstAvailable(
+            httpClient = httpClient,
+            url = url,
+            timeoutMs = 30_000,
+            validator = MarketHttp::isZipArchive,
+        )
     }
 
     suspend fun parseIndex(repo: String): Result<List<PluginMarketEntry>> {
@@ -181,64 +154,6 @@ class PluginMarketDataSource(
         return runCatching {
             val raw = api.getPluginIndex(owner, repoName).string()
             marketJson.decodeFromString(marketEntrySerializer, raw)
-        }
-    }
-
-    /**
-     * 上传插件 zip 到用户仓库 plugins/ 目录，同时更新 plugins.json 索引。
-     * 返回上传后的浏览器访问链接。
-     */
-    suspend fun uploadPlugin(
-        token: String,
-        repo: String,
-        zipFileName: String,
-        zipBytes: ByteArray,
-        entry: PluginMarketEntry,
-    ): Result<String> {
-        val (owner, repoName) = splitRepo(repo)
-            ?: return Result.failure(IllegalArgumentException("仓库格式应为 owner/repo"))
-        val auth = "Bearer $token"
-        return runCatching {
-            val zipPath = "plugins/$zipFileName"
-            val existingZip = try {
-                api.getContent(owner, repoName, zipPath, auth).sha
-            } catch (e: Throwable) {
-                null
-            }
-            api.uploadContent(
-                owner, repoName, zipPath, auth,
-                GitHubCommitBody(
-                    message = "Add plugin ${entry.name} ${entry.version}",
-                    content = zipBytes.toBase64GitHub(),
-                    sha = existingZip,
-                ),
-            )
-
-            // 更新 plugins.json 索引：读现有 -> 合并 -> 写回
-            val existingIndex = try {
-                api.getPluginIndex(owner, repoName).string()
-            } catch (e: Throwable) {
-                "[]"
-            }
-            val current = runCatching {
-                marketJson.decodeFromString(marketEntrySerializer, existingIndex)
-            }.getOrDefault(emptyList())
-            val updated = current.filterNot { it.id == entry.id } + entry
-            val indexJson = marketJson.encodeToString(marketEntrySerializer, updated)
-            val existingIndexSha = try {
-                api.getContent(owner, repoName, "plugins.json", auth).sha
-            } catch (e: Throwable) {
-                null
-            }
-            api.uploadContent(
-                owner, repoName, "plugins.json", auth,
-                GitHubCommitBody(
-                    message = "Update plugin index for ${entry.name}",
-                    content = indexJson.toByteArray().toBase64GitHub(),
-                    sha = existingIndexSha,
-                ),
-            )
-            "https://github.com/$owner/$repoName/blob/main/plugins/$zipFileName"
         }
     }
 
@@ -331,16 +246,6 @@ class PluginMarketDataSource(
         if (parts.size < 2 || parts[0].isBlank() || parts[1].isBlank()) return null
         return parts[0] to parts[1]
     }
-
-    companion object {
-        /** GitHub 加速镜像前缀（按顺序尝试，域名失效可替换） */
-        val MIRROR_PREFIXES = listOf(
-            "https://ghfast.top/",
-            "https://gh-proxy.com/",
-        )
-    }
 }
 
 /** 判断字节是否为 zip 包（PK 文件头） */
-private fun ByteArray.isZipArchive(): Boolean = size >= 4 &&
-    this[0] == 'P'.code.toByte() && this[1] == 'K'.code.toByte()

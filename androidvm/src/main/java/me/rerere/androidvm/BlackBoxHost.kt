@@ -72,4 +72,39 @@ object BlackBoxHost {
             cls.getMethod("doCreate").invoke(core)
         }.onFailure { Log.e(TAG, "BlackBox doCreate 失败", it) }
     }
+
+    /**
+     * 引擎配置开关状态共享。
+     *
+     * 写入与 app 模块 RikkaBoxConfig 相同的 SharedPreferences（MODE_MULTI_PROCESS），
+     * 让宿主进程与虚拟 app 进程都读到一致状态：Bcore 的 ClientConfiguration
+     * （isVirtualRootEnabled / isHideRoot / isHideXposed）由 RikkaBoxConfig 从该偏好返回，
+     * 从而驱动 VirtualRootHelper 与 IO 重定向的对应行为。
+     *
+     * 该方法不依赖 Bcore 是否存在（纯偏好写入），未接入引擎时静默 no-op。
+     */
+    private fun writeEnginePref(context: Context, key: String, enabled: Boolean) {
+        runCatching {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_MULTI_PROCESS)
+                .edit().putBoolean(key, enabled).apply()
+        }.onFailure { Log.w(TAG, "写入偏好 $key 失败", it) }
+    }
+
+    /** 虚拟 root：虚拟空间内 su 探测返回「存在」。 */
+    fun setVirtualRoot(context: Context, enabled: Boolean) =
+        writeEnginePref(context, KEY_VIRTUAL_ROOT, enabled)
+
+    /** 隐藏 root（反检测）：IO 重定向把 su 路径指向 -fake。 */
+    fun setHideRoot(context: Context, enabled: Boolean) =
+        writeEnginePref(context, KEY_HIDE_ROOT, enabled)
+
+    /** 隐藏 Xposed（反检测）：包列表把 XP 安装器包列入 black。 */
+    fun setHideXposed(context: Context, enabled: Boolean) =
+        writeEnginePref(context, KEY_HIDE_XPOSED, enabled)
+
+    // 与 app 模块 RikkaBoxConfig 的 companion 常量保持一致（双写双读）。
+    private const val PREFS_NAME = "rikkahub_vm"
+    private const val KEY_VIRTUAL_ROOT = "virtual_root"
+    private const val KEY_HIDE_ROOT = "hide_root"
+    private const val KEY_HIDE_XPOSED = "hide_xposed"
 }

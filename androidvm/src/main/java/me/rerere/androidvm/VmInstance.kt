@@ -33,6 +33,10 @@ data class VmInstance(
     /** rootfs 下载地址（Linux 模式为 tar.gz；Android 模式为 ROM 镜像地址） */
     val rootfsUrl: String,
     val virtualRoot: Boolean = false,
+    /** 隐藏 root 特征（反检测，为苛刻应用提供干净环境） */
+    val hideRoot: Boolean = false,
+    /** 隐藏 Xposed 框架特征（反检测） */
+    val hideXposed: Boolean = false,
     val floatingWindow: Boolean = false,
     val keepAlive: Boolean = false,
     /** 已安装应用包名或 Linux 软件名列表 */
@@ -41,14 +45,24 @@ data class VmInstance(
 )
 
 /**
- * 虚拟框架模块信息（Xposed/Magisk 模块在 Bcore 虚拟空间内加载）。
+ * 虚拟框架模块信息（Magisk 模块 zip 或 Xposed APK 在 Bcore 虚拟空间内加载）。
  *
- * 注意：用户态虚拟化无法运行真 Magisk（需修改 boot 镜像）；FBlackBox 的「Magisk 能力」
- * 实为在虚拟空间内加载 Xposed/模块，由 [me.rerere.androidvm.engine.BlackBoxEngine] 反射驱动。
+ * [kind] 区分来源：
+ *  - MAGISK：标准 Magisk 模块 zip（module.prop + system/ 文件注入 + system.prop 元数据）
+ *  - XPOSED：Xposed APK 模块（黑盒 installXPModule 原生加载）
+ * [moduleId] 为 Magisk 模块 id 或 Xposed 包名（二者互斥，主键字段）。
  */
 @Serializable
+enum class VmModuleKind { MAGISK, XPOSED }
+
+@Serializable
 data class VmModuleInfo(
-    val packageName: String,
+    val moduleId: String,
     val name: String = "",
+    val kind: VmModuleKind = VmModuleKind.XPOSED,
     val enabled: Boolean = false,
+    val version: String = "",
+    val author: String = "",
+    val description: String = "",
+    val props: List<String> = emptyList(),
 )

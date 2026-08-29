@@ -25,14 +25,14 @@ import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
 @Composable
 fun AutoCompressDialog(
     initialEnabled: Boolean,
-    initialThresholdTokens: Int,
-    initialKeepRecent: Int,
+    initialContextPercent: Int,
+    initialMaxMode: Boolean,
     onDismiss: () -> Unit,
-    onConfirm: (enabled: Boolean, thresholdTokens: Int, keepRecent: Int) -> Unit
+    onConfirm: (enabled: Boolean, contextPercent: Int, maxMode: Boolean) -> Unit
 ) {
     var enabled by remember { mutableStateOf(initialEnabled) }
-    var thresholdTokens by remember { mutableIntStateOf(initialThresholdTokens) }
-    var keepRecent by remember { mutableIntStateOf(initialKeepRecent) }
+    var contextPercent by remember { mutableIntStateOf(initialContextPercent) }
+    var maxMode by remember { mutableStateOf(initialMaxMode) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -62,18 +62,36 @@ fun AutoCompressDialog(
 
                 if (enabled) {
                     OutlinedNumberInput(
-                        value = thresholdTokens,
-                        onValueChange = { thresholdTokens = it },
-                        label = stringResource(R.string.chat_page_auto_compress_threshold_tokens),
+                        value = contextPercent,
+                        onValueChange = { contextPercent = it },
+                        label = stringResource(R.string.chat_page_auto_compress_context_percent),
                         modifier = Modifier.fillMaxWidth(),
                     )
 
-                    OutlinedNumberInput(
-                        value = keepRecent,
-                        onValueChange = { keepRecent = it },
-                        label = stringResource(R.string.chat_page_auto_compress_keep_recent),
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                    )
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.chat_page_auto_compress_max_mode),
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Text(
+                                text = stringResource(R.string.chat_page_auto_compress_max_mode_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = maxMode,
+                            onCheckedChange = { maxMode = it }
+                        )
+                    }
 
                     Text(
                         text = stringResource(R.string.chat_page_auto_compress_warning),
@@ -87,8 +105,8 @@ fun AutoCompressDialog(
             TextButton(onClick = {
                 onConfirm(
                     enabled,
-                    thresholdTokens.coerceAtLeast(1),
-                    keepRecent.coerceAtLeast(0)
+                    contextPercent.coerceIn(1, 100),
+                    maxMode
                 )
             }) {
                 Text(stringResource(R.string.confirm))

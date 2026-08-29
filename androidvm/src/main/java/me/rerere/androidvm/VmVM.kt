@@ -13,6 +13,7 @@ import me.rerere.androidvm.engine.BlackBoxEngine
 import me.rerere.androidvm.engine.GuestRomEngine
 import me.rerere.androidvm.engine.LinuxContainerEngine
 import me.rerere.androidvm.navigation.VmNavigator
+import me.rerere.androidvm.R
 import java.util.UUID
 
 /**
@@ -96,7 +97,7 @@ class VmVM(
     fun launch(instance: VmInstance, packageName: String) {
         scope.launch(Dispatchers.IO) {
             runCatching { engineFor(instance).launch(instance, packageName) }
-                .onFailure { message.value = "启动失败：${it.message}" }
+                .onFailure { message.value = context.getString(R.string.vm_msg_launch_failed, it.message) }
         }
     }
 
@@ -109,8 +110,8 @@ class VmVM(
                 val idx = instances.indexOfFirst { it.id == instance.id }
                 if (idx >= 0) instances[idx] = instances[idx].copy(installedApps = apps)
                 persist()
-                message.value = "安装完成"
-            }.onFailure { message.value = "安装失败：${it.message}" }
+                message.value = context.getString(R.string.vm_msg_install_done)
+            }.onFailure { message.value = context.getString(R.string.vm_msg_install_failed, it.message) }
         }
     }
 
@@ -120,8 +121,29 @@ class VmVM(
         persist()
     }
 
-    fun toggleVirtualRoot(instance: VmInstance, enabled: Boolean) =
+    fun toggleVirtualRoot(instance: VmInstance, enabled: Boolean) {
         update(instance.copy(virtualRoot = enabled))
+        scope.launch(Dispatchers.IO) {
+            runCatching { engineFor(instance).setVirtualRoot(instance, enabled) }
+                .onFailure { message.value = context.getString(R.string.vm_msg_set_failed, it.message) }
+        }
+    }
+
+    fun toggleHideRoot(instance: VmInstance, enabled: Boolean) {
+        update(instance.copy(hideRoot = enabled))
+        scope.launch(Dispatchers.IO) {
+            runCatching { engineFor(instance).setHideRoot(instance, enabled) }
+                .onFailure { message.value = context.getString(R.string.vm_msg_set_failed, it.message) }
+        }
+    }
+
+    fun toggleHideXposed(instance: VmInstance, enabled: Boolean) {
+        update(instance.copy(hideXposed = enabled))
+        scope.launch(Dispatchers.IO) {
+            runCatching { engineFor(instance).setHideXposed(instance, enabled) }
+                .onFailure { message.value = context.getString(R.string.vm_msg_set_failed, it.message) }
+        }
+    }
 
     fun toggleFloatingWindow(instance: VmInstance, enabled: Boolean) =
         update(instance.copy(floatingWindow = enabled))
@@ -135,7 +157,7 @@ class VmVM(
     fun loadModules() {
         scope.launch(Dispatchers.IO) {
             runCatching { modules.clear(); modules.addAll(BlackBoxEngine().listModules()) }
-                .onFailure { message.value = "读取模块失败：${it.message}" }
+                .onFailure { message.value = context.getString(R.string.vm_msg_load_modules_failed, it.message) }
         }
     }
 
@@ -146,30 +168,34 @@ class VmVM(
                 val pkg = engine.installModule(instance, filePath)
                 modules.clear()
                 modules.addAll(engine.listModules())
-                message.value = "Magisk/模块刷入完成：$pkg"
-            }.onFailure { message.value = "刷入失败：${it.message}" }
+                message.value = context.getString(R.string.vm_msg_module_flashed, pkg)
+            }.onFailure { message.value = context.getString(R.string.vm_msg_flash_failed, it.message) }
         }
     }
 
-    fun setModuleEnabled(packageName: String, enabled: Boolean) {
+    fun setModuleEnabled(moduleId: String, enabled: Boolean) {
         scope.launch(Dispatchers.IO) {
             runCatching {
-                BlackBoxEngine().setModuleEnabled(packageName, enabled)
+                BlackBoxEngine().setModuleEnabled(moduleId, enabled)
                 modules.clear()
                 modules.addAll(BlackBoxEngine().listModules())
-                message.value = if (enabled) "已启用：$packageName" else "已停用：$packageName"
-            }.onFailure { message.value = "设置失败：${it.message}" }
+                message.value = if (enabled) {
+                    context.getString(R.string.vm_msg_module_enabled, moduleId)
+                } else {
+                    context.getString(R.string.vm_msg_module_disabled, moduleId)
+                }
+            }.onFailure { message.value = context.getString(R.string.vm_msg_set_failed, it.message) }
         }
     }
 
-    fun uninstallModule(packageName: String) {
+    fun uninstallModule(moduleId: String) {
         scope.launch(Dispatchers.IO) {
             runCatching {
-                BlackBoxEngine().uninstallModule(packageName)
+                BlackBoxEngine().uninstallModule(moduleId)
                 modules.clear()
                 modules.addAll(BlackBoxEngine().listModules())
-                message.value = "已卸载：$packageName"
-            }.onFailure { message.value = "卸载失败：${it.message}" }
+                message.value = context.getString(R.string.vm_msg_module_uninstalled, moduleId)
+            }.onFailure { message.value = context.getString(R.string.vm_msg_uninstall_failed, it.message) }
         }
     }
 
@@ -178,11 +204,11 @@ class VmVM(
         if (instance.engineType == VmEngineType.GUEST_ROM) {
             scope.launch(Dispatchers.IO) {
                 runCatching { engineFor(instance).rebootGuest(instance) }
-                    .onSuccess { message.value = "客机已重启，Magisk/模块已生效" }
-                    .onFailure { message.value = "重启客机失败：${it.message}" }
+                    .onSuccess { message.value = context.getString(R.string.vm_msg_guest_rebooted) }
+                    .onFailure { message.value = context.getString(R.string.vm_msg_guest_reboot_failed, it.message) }
             }
         } else {
-            message.value = "虚拟空间已重启，Magisk/模块将在下次启动应用时生效"
+            message.value = context.getString(R.string.vm_msg_space_restarted)
         }
     }
 

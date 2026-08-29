@@ -126,6 +126,7 @@ fun ChatList(
     hazeState: HazeState,
     errors: List<ChatError> = emptyList(),
     isCompressing: Boolean = false,
+    reconnectAttempts: Int = 0,
     onDismissError: (Uuid) -> Unit = {},
     onClearAllErrors: () -> Unit = {},
     onRegenerate: (UIMessage) -> Unit = {},
@@ -169,6 +170,7 @@ fun ChatList(
                 hazeState = hazeState,
                 errors = errors,
                 isCompressing = isCompressing,
+                reconnectAttempts = reconnectAttempts,
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
                 onRegenerate = onRegenerate,
@@ -200,6 +202,7 @@ private fun ChatListNormal(
     hazeState: HazeState,
     errors: List<ChatError>,
     isCompressing: Boolean = false,
+    reconnectAttempts: Int = 0,
     onDismissError: (Uuid) -> Unit,
     onClearAllErrors: () -> Unit,
     onRegenerate: (UIMessage) -> Unit,
@@ -437,20 +440,32 @@ private fun ChatListNormal(
 
             if (loading) {
                 item(LoadingIndicatorKey) {
-                    Row(
+                    Column(
                         modifier = Modifier.padding(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        RabbitLoadingIndicator(
-                            modifier = Modifier.size(28.dp)
-                        )
-                        AnimatedVisibility(
-                            visible = processingStatus != null,
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
+                            RabbitLoadingIndicator(
+                                modifier = Modifier.size(28.dp)
+                            )
+                            AnimatedVisibility(
+                                visible = processingStatus != null,
+                            ) {
+                                Text(
+                                    text = processingStatus ?: "",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        // 自动重连进行中：在生成指示器下方实时显示已重连次数
+                        if (reconnectAttempts > 0) {
                             Text(
-                                text = processingStatus ?: "",
-                                style = MaterialTheme.typography.labelMedium,
+                                text = "已自动重连 $reconnectAttempts 次，正在恢复生成…",
+                                style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }

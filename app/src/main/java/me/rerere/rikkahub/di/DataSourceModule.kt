@@ -76,13 +76,6 @@ val dataSourceModule = module {
     }
 
     single {
-        me.rerere.rikkahub.data.api.DshMarketDataSource(httpClient = get())
-    }
-    single {
-        me.rerere.rikkahub.data.api.TavernMarketDataSource(httpClient = get())
-    }
-
-    single {
         val context: Context = get()
         Room.databaseBuilder(context, AppDatabase::class.java, "rikka_hub")
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
@@ -209,6 +202,14 @@ val dataSourceModule = module {
 
     single {
         get<AppDatabase>().groupDao()
+    }
+
+    single {
+        get<AppDatabase>().sessionEventDao()
+    }
+
+    single {
+        me.rerere.rikkahub.data.session.SessionEventRepository(dao = get())
     }
 
     single {

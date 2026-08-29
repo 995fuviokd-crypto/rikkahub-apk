@@ -184,6 +184,9 @@ class ChatVM(
     // 正在执行自动压缩的会话集合：UI 据此显示"正在压缩历史对话"指示
     val compressingConversations: StateFlow<Set<Uuid>> = chatService.compressingConversations
 
+    // 各会话当前自动重连次数：UI 在生成指示器下方实时显示
+    val reconnectAttempts: StateFlow<Map<Uuid, Int>> = chatService.reconnectAttempts
+
     fun dismissError(id: Uuid) = chatService.dismissError(id)
 
     fun clearAllErrors() = chatService.clearAllErrors()

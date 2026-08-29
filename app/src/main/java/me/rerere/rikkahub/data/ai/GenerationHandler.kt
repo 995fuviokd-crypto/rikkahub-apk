@@ -149,7 +149,7 @@ class GenerationHandler(
                             }
                         }
                     }
-                }
+                }.take(settings.maxConcurrentRoutes.coerceIn(1, 5))
             } else {
                 emptyList()
             }
@@ -205,30 +205,9 @@ class GenerationHandler(
                 addAll(tools)
             }
 
-            // DeepSeek V4 条件复刻：首轮工具锚定（极简工具对）+ 输出预算阶梯（dcws capSchedule）
-            val deepSeekAnchor = DeepSeekAnchor.isDeepSeekModel(model.modelId) && assistant.deepSeekAnchorEnabled
-            val hasToolCalls = messages.any { it.getTools().isNotEmpty() }
-            val effectiveTools = if (deepSeekAnchor && !hasToolCalls && toolsInternal.isNotEmpty()) {
-                val anchored = toolsInternal.filter { it.name in DeepSeekAnchor.BOOTSTRAP_TOOL_NAMES }
-                if (anchored.isEmpty()) toolsInternal else anchored
-            } else {
-                toolsInternal
-            }
-
-            // 输出预算阶梯：首轮 1024 → 次轮 4096 → 释放。
-            // reasoning 模型豁免：reasoning token 计入 max_completion_tokens，
-            // 过小的预算会截断思考链，表现为生成卡顿/不流畅。
+            // 输出预算：默认使用助手配置的 maxTokens
             val reasoningEnabled = model.abilities.contains(ModelAbility.REASONING) && assistant.reasoningLevel.isEnabled
-            val effectiveMaxTokens = if (deepSeekAnchor && !reasoningEnabled) {
-                val cap = DeepSeekAnchor.capFor(messages.count { it.role == MessageRole.USER })
-                when {
-                    cap == null -> assistant.maxTokens
-                    assistant.maxTokens == null -> cap
-                    else -> minOf(cap, assistant.maxTokens)
-                }
-            } else {
-                assistant.maxTokens
-            }
+            val effectiveMaxTokens = assistant.maxTokens
 
             // Check if we have tool calls ready to continue after user interaction.
             val pendingTools = messages.lastOrNull()?.getTools()?.filter {
@@ -267,7 +246,7 @@ class GenerationHandler(
                     model = model,
                     providerImpl = providerImpl,
                     provider = provider,
-                    tools = effectiveTools,
+                    tools = toolsInternal,
                     maxTokens = effectiveMaxTokens,
                     memories = memories ?: emptyList(),
                     stream = assistant.streamOutput,
@@ -285,7 +264,7 @@ class GenerationHandler(
                         settings.multiRouteConcurrent &&
                         !messages.any { it.getTools().isNotEmpty() } &&
                         messages.count { it.role == MessageRole.USER } <= 1 &&
-                        effectiveTools.isEmpty()
+                        toolsInternal.isEmpty()
                     ) backupRoutes else emptyList(),
                 )
                 messages = messages.visualTransforms(
@@ -317,7 +296,7 @@ class GenerationHandler(
                 // Check for tools that need approval
                 var hasPendingApproval = false
                 val updatedTools = tools.map { tool ->
-                    val toolDef = effectiveTools.find { it.name == tool.toolName }
+                    val toolDef = toolsInternal.find { it.name == tool.toolName }
                     when {
                         // 自动审批开启：需审批的工具直接放行执行（ask_user 这类需要人工输入的工具除外）
                         settings.autoApproveTools &&
@@ -410,7 +389,7 @@ class GenerationHandler(
                     else -> {
                         // Auto or Approved - execute the tool
                         runCatching {
-                            val toolDef = effectiveTools.find { toolDef -> toolDef.name == tool.toolName }
+                            val toolDef = toolsInternal.find { toolDef -> toolDef.name == tool.toolName }
                                 ?: error("Tool ${tool.toolName} not found")
                             val args = runCatching {
                                 json.parseToJsonElement(tool.input.ifBlank { "{}" })
@@ -421,7 +400,7 @@ class GenerationHandler(
                             sideEffectRecorder?.onBeforeTool(toolDef.name, args)
                             val result = toolDef.execute(args)
                             sideEffectRecorder?.onAfterTool(toolDef.name, args, result)
-                            val hasShellAccess = effectiveTools.any { it.name == "workspace_shell" }
+                            val hasShellAccess = toolsInternal.any { it.name == "workspace_shell" }
                             executedTools += tool.copy(
                                 output = maybeTruncateToolOutput(tool.toolCallId, result, hasShellAccess)
                             )

@@ -14,6 +14,7 @@ import me.rerere.rikkahub.data.db.dao.GroupDAO
 import me.rerere.rikkahub.data.db.dao.ManagedFileDAO
 import me.rerere.rikkahub.data.db.dao.MemoryDAO
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
+import me.rerere.rikkahub.data.db.dao.SessionEventDAO
 import me.rerere.rikkahub.data.db.dao.WorkspaceDAO
 import me.rerere.rikkahub.data.db.dao.WorkflowDAO
 import me.rerere.rikkahub.data.db.dao.WorkflowExecutionRecordDAO
@@ -28,12 +29,14 @@ import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
 import me.rerere.rikkahub.data.db.entity.MemoryEntity
 import me.rerere.rikkahub.data.db.entity.MemoryJournalEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
+import me.rerere.rikkahub.data.db.entity.SessionEventEntity
 import me.rerere.rikkahub.data.db.entity.WorkflowEntity
 import me.rerere.rikkahub.data.db.entity.WorkflowExecutionRecordEntity
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.db.migrations.Migration_16_17
 import me.rerere.rikkahub.data.db.migrations.Migration_22_23
 import me.rerere.rikkahub.data.db.migrations.Migration_8_9
+import me.rerere.rikkahub.data.db.migrations.Migration_35_36
 import me.rerere.rikkahub.utils.JsonInstant
 
 @Database(
@@ -49,11 +52,12 @@ import me.rerere.rikkahub.utils.JsonInstant
         FolderEntity::class,
         WorkflowEntity::class,
         WorkflowExecutionRecordEntity::class,
+        SessionEventEntity::class,
         GroupEntity::class,
         GroupRunEntity::class,
         GroupMessageEntity::class,
     ],
-    version = 35,
+    version = 36,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -73,6 +77,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 21, to = 22),
         AutoMigration(from = 22, to = 23, spec = Migration_22_23::class),
         AutoMigration(from = 23, to = 24),
+        AutoMigration(from = 35, to = 36, spec = Migration_35_36::class),
     ]
 )
 @TypeConverters(TokenUsageConverter::class)
@@ -96,6 +101,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun workflowDao(): WorkflowDAO
 
     abstract fun workflowExecutionRecordDao(): WorkflowExecutionRecordDAO
+
+    abstract fun sessionEventDao(): SessionEventDAO
 
     abstract fun groupDao(): GroupDAO
 }

@@ -22,7 +22,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import me.rerere.androidvm.R
 import me.rerere.androidvm.VmCatalog
 import me.rerere.androidvm.VmEngineType
 import me.rerere.androidvm.VmImage
@@ -48,16 +50,16 @@ fun VmCreateDialog(
                     selected?.let { vm.createFromImage(it, name) }
                     onDismiss()
                 },
-            ) { Text("创建") }
+            ) { Text(stringResource(R.string.vm_create_confirm)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
-        title = { Text("新建虚拟机") },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.vm_create_cancel)) } },
+        title = { Text(stringResource(R.string.vm_create_title)) },
         text = {
             Column {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("名称（可选）") },
+                    label = { Text(stringResource(R.string.vm_create_name_hint)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -80,7 +82,11 @@ fun VmCreateDialog(
                                 onClick = { selected = image },
                             )
                             Column(Modifier.padding(start = 8.dp)) {
-                                val tag = if (image.engineType == VmEngineType.ANDROID) "Android" else "Linux"
+                                val tag = when (image.engineType) {
+                                    VmEngineType.ANDROID -> stringResource(R.string.vm_engine_android)
+                                    VmEngineType.GUEST_ROM -> stringResource(R.string.vm_engine_guest)
+                                    VmEngineType.LINUX -> stringResource(R.string.vm_engine_linux)
+                                }
                                 Text("${image.systemLabel}  ·  $tag", style = MaterialTheme.typography.bodyLarge)
                                 Text(
                                     "${image.description}  ·  约 ${image.sizeHintMb}MB",

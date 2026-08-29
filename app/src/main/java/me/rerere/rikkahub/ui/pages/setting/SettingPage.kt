@@ -164,6 +164,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         headlineContent = { Text("全局提示词") },
                     )
                     item(
+                        onClick = { navController.navigate(Screen.SettingExtensions) },
+                        leadingContent = { Icon(HugeIcons.Package, null) },
+                        supportingContent = { Text("AI 全能控制：保活 / 悬浮球 / 自主执行 / 无障碍等能力集中管理") },
+                        headlineContent = { Text("功能扩展") },
+                    )
+                    item(
                         onClick = { navController.navigate(Screen.SettingAgent) },
                         leadingContent = { Icon(HugeIcons.Brain02, null) },
                         supportingContent = { Text("安装与管理 Gemini CLI、Codex CLI、Claude Code CLI 等编码智能体") },
@@ -188,16 +194,16 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         headlineContent = { Text(stringResource(R.string.setting_page_assistant)) },
                     )
                     item(
-                        onClick = { navController.navigate(Screen.Extensions) },
-                        leadingContent = { Icon(HugeIcons.Package, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_extensions_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_extensions)) },
-                    )
-                    item(
                         onClick = { navController.navigate(Screen.AndroidVms) },
                         leadingContent = { Icon(HugeIcons.Bash, null) },
                         supportingContent = { Text(stringResource(R.string.vm_page_entry_desc)) },
                         headlineContent = { Text(stringResource(R.string.vm_page_title)) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.Extensions) },
+                        leadingContent = { Icon(HugeIcons.Package, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_extensions_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_extensions)) },
                     )
                 }
             }

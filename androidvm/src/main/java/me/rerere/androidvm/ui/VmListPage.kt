@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.collectAsState
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Smartphone
@@ -43,6 +44,7 @@ import com.composables.icons.lucide.Plus
 import me.rerere.androidvm.VmEngineType
 import me.rerere.androidvm.VmInstance
 import me.rerere.androidvm.VmVM
+import me.rerere.androidvm.R
 import me.rerere.androidvm.navigation.VmNavigator
 
 /**
@@ -56,7 +58,7 @@ fun VmListPage(vm: VmVM, navigator: VmNavigator) {
     var showCreate by remember { mutableStateOf(false) }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("虚拟机") }) },
+        topBar = { TopAppBar(title = { Text(stringResource(R.string.vm_list_title)) }) },
         floatingActionButton = {
             FloatingActionButton(onClick = { showCreate = true }) {
                 Icon(Lucide.Plus, contentDescription = null)
@@ -66,7 +68,7 @@ fun VmListPage(vm: VmVM, navigator: VmNavigator) {
     ) { padding ->
         if (vm.instances.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("还没有虚拟机，点击右下角创建", color = MaterialTheme.colorScheme.outline)
+                Text(stringResource(R.string.vm_list_empty_hint), color = MaterialTheme.colorScheme.outline)
             }
         } else {
             LazyColumn(

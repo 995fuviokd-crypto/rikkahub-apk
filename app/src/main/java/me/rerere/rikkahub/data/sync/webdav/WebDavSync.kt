@@ -15,6 +15,7 @@ import me.rerere.rikkahub.data.datastore.migration.SettingsJsonMigrator
 import me.rerere.rikkahub.data.datastore.migration.SettingsJsonSanitizer
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.DatabaseDowngrade
+import me.rerere.rikkahub.data.db.RestoreStaging
 import me.rerere.rikkahub.utils.fileSizeToString
 import java.io.File
 import java.io.FileInputStream
@@ -208,8 +209,6 @@ class WebDavSync(
     private suspend fun restoreFromBackupFile(backupFile: File, config: WebDavConfig) = withContext(Dispatchers.IO) {
         Log.i(TAG, "restoreFromBackupFile: Starting restore from ${backupFile.absolutePath}")
 
-        var databaseClosed = false
-
         ZipInputStream(FileInputStream(backupFile)).use { zipIn ->
             var entry: ZipEntry?
             while (zipIn.nextEntry.also { entry = it } != null) {
@@ -234,40 +233,19 @@ class WebDavSync(
 
                         "rikka_hub.db", "rikka_hub-wal", "rikka_hub-shm" -> {
                             if (config.items.contains(WebDavConfig.BackupItem.DATABASE)) {
-                                if (!databaseClosed) {
-                                    closeDatabase()
-                                    databaseClosed = true
+                                // 数据库条目先写入暂存区并标记待应用；不直接覆盖正在使用的
+                                // 数据库文件（会导致已打开连接失效、进程内协程闪退），
+                                // 由下次冷启动时在 Room 构建前统一应用
+                                val stagingDir = RestoreStaging.stagingDir(context).apply { mkdirs() }
+                                val stagedFile = File(stagingDir, zipEntry.name)
+                                FileOutputStream(stagedFile).use { outputStream ->
+                                    zipIn.copyTo(outputStream)
                                 }
-
-                                val dbFile = when (zipEntry.name) {
-                                    "rikka_hub.db" -> context.getDatabasePath("rikka_hub")
-                                    "rikka_hub-wal" -> File(
-                                        context.getDatabasePath("rikka_hub").parentFile,
-                                        "rikka_hub-wal"
-                                    )
-
-                                    "rikka_hub-shm" -> File(
-                                        context.getDatabasePath("rikka_hub").parentFile,
-                                        "rikka_hub-shm"
-                                    )
-
-                                    else -> null
-                                }
-
-                                dbFile?.let { targetFile ->
-                                    Log.i(
-                                        TAG,
-                                        "restoreFromBackupFile: Restoring ${zipEntry.name} to ${targetFile.absolutePath}"
-                                    )
-                                    targetFile.parentFile?.mkdirs()
-                                    FileOutputStream(targetFile).use { outputStream ->
-                                        zipIn.copyTo(outputStream)
-                                    }
-                                    Log.i(
-                                        TAG,
-                                        "restoreFromBackupFile: Restored ${zipEntry.name} (${targetFile.length()} bytes)"
-                                    )
-                                }
+                                RestoreStaging.markPending(context)
+                                Log.i(
+                                    TAG,
+                                    "restoreFromBackupFile: Staged ${zipEntry.name} (${stagedFile.length()} bytes)"
+                                )
                             }
                         }
 
@@ -430,15 +408,6 @@ class WebDavSync(
             Log.i(TAG, "checkpointDatabase: WAL checkpoint completed")
         } catch (e: Exception) {
             Log.e(TAG, "checkpointDatabase: Failed to checkpoint database", e)
-        }
-    }
-
-    private fun closeDatabase() {
-        try {
-            appDatabase.close()
-            Log.i(TAG, "closeDatabase: Database closed")
-        } catch (e: Exception) {
-            Log.e(TAG, "closeDatabase: Failed to close database", e)
         }
     }
 

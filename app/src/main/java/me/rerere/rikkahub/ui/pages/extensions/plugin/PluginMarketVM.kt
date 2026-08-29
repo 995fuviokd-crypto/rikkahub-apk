@@ -453,8 +453,6 @@ class PluginMarketVM(
     private val _dshUpdated = MutableStateFlow("")
     val dshUpdated = _dshUpdated.asStateFlow()
 
-    private var dshSortByStars = true
-
     /** 拉取 DSH 插件市场列表（实时 feed，失败自动降级 README 解析） */
     fun loadDshMarket() {
         if (_dshLoading.value) return
@@ -463,9 +461,7 @@ class PluginMarketVM(
             _dshError.value = null
             dshMarketDataSource.fetchList()
                 .onSuccess { list ->
-                    dshSortByStars = true
                     _dshEntries.value = list.plugins
-                        .sortedWith(compareByDescending<DshMarketPlugin> { it.stars }.thenBy { it.name })
                     _dshCategories.value = list.categories
                     _dshUpdated.value = list.updated
                 }
@@ -474,9 +470,34 @@ class PluginMarketVM(
         }
     }
 
-    /** 安装 DSH 市场条目：GitHub 仓库转换为可迁移能力插件（技能/工具定义/npm CLI 工作区命令） */
+    /** 安装 DSH 市场条目：优先走 feed 的 npm tarball 直链（快且稳），否则回退 GitHub 仓库转换 */
     fun installDshMarketEntry(entry: DshMarketPlugin) {
-        installDsh(entry.repoRef, downloadingKey = "dsh-${entry.repoRef}")
+        if (entry.hasTarball) {
+            viewModelScope.launch {
+                installMutex.withLock {
+                    if (_downloadingId.value != null) return@withLock
+                    _downloadingId.value = "dsh-${entry.repoRef}"
+                }
+                _notice.value = null
+                dshPluginAdapter.fetchTarballAsZip(entry.tarball!!)
+                    .onSuccess { bytes ->
+                        pluginManager.installZip(bytes)
+                            .onSuccess { info ->
+                                autoEnablePlugin(info.id)
+                                _notice.value = "已安装并启用 ${info.name}（DSH 插件）"
+                            }
+                            .onFailure { _notice.value = "安装失败: ${it.message}" }
+                    }
+                    .onFailure {
+                        _notice.value = "tarball 直链获取失败，回退仓库转换: ${it.message}"
+                        installDsh(entry.repoRef, downloadingKey = "dsh-${entry.repoRef}")
+                    }
+                _downloadingId.value = null
+                refreshInstalled()
+            }
+        } else {
+            installDsh(entry.repoRef, downloadingKey = "dsh-${entry.repoRef}")
+        }
     }
 
     /** 从 DeepSeek Harness（DSH）插件仓库地址安装：github:owner/repo#ref 自动转换为可迁移能力插件 */

@@ -83,6 +83,7 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.service.ChatError
+import me.rerere.rikkahub.service.resolveAutoCompressThreshold
 import me.rerere.rikkahub.ui.components.ai.ChatAttachmentPickerActions
 import me.rerere.rikkahub.ui.components.ai.ChatInput
 import me.rerere.rikkahub.ui.components.ai.FilesPicker
@@ -130,6 +131,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val enableWebSearch by vm.enableWebSearch.collectAsStateWithLifecycle()
     val errors by vm.errors.collectAsStateWithLifecycle()
     val compressingConversations by vm.compressingConversations.collectAsStateWithLifecycle()
+    val reconnectAttempts by vm.reconnectAttempts.collectAsStateWithLifecycle()
     val agentPermissionPrompts by vm.agentPermissionPrompts.collectAsStateWithLifecycle()
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -233,6 +235,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     bigScreen = true,
                     errors = errors,
                     isCompressing = conversation.id in compressingConversations,
+                    reconnectAttempts = reconnectAttempts[conversation.id] ?: 0,
                     onDismissError = { vm.dismissError(it) },
                     onClearAllErrors = { vm.clearAllErrors() },
                 )
@@ -266,6 +269,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     bigScreen = false,
                     errors = errors,
                     isCompressing = conversation.id in compressingConversations,
+                    reconnectAttempts = reconnectAttempts[conversation.id] ?: 0,
                     onDismissError = { vm.dismissError(it) },
                     onClearAllErrors = { vm.clearAllErrors() },
                 )
@@ -354,6 +358,7 @@ private fun ChatPageContent(
     currentChatModel: Model?,
     errors: List<ChatError>,
     isCompressing: Boolean = false,
+    reconnectAttempts: Int = 0,
     onDismissError: (Uuid) -> Unit,
     onClearAllErrors: () -> Unit,
 ) {
@@ -565,6 +570,7 @@ private fun ChatPageContent(
                 hazeState = hazeState,
                 errors = errors,
                 isCompressing = isCompressing,
+                reconnectAttempts = reconnectAttempts,
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
                 onRegenerate = {
@@ -701,12 +707,12 @@ private fun ChatFilesPickerSheet(
             onShowInjectionSheetChange = { showInjectionSheet = it },
             showAutoCompressDialog = showAutoCompressDialog,
             onShowAutoCompressDialogChange = { showAutoCompressDialog = it },
-            onAutoCompressSettings = { enabled, thresholdTokens, keepRecent ->
+            onAutoCompressSettings = { enabled, contextPercent, maxMode ->
                 vm.updateSettings(
                     setting.copy(
                         autoCompressEnabled = enabled,
-                        autoCompressThresholdTokens = thresholdTokens,
-                        autoCompressKeepRecent = keepRecent,
+                        autoCompressContextPercent = contextPercent,
+                        autoCompressMaxMode = maxMode,
                     )
                 )
             },
@@ -798,8 +804,9 @@ private fun TopBar(
                             )
                         )
                     }
-                    if (settings.autoCompressEnabled) {
-                        val threshold = settings.autoCompressThresholdTokens
+                    if (settings.autoCompressEnabled && model != null) {
+                        // 阈值按当前模型上下文窗口动态计算（与 ChatService 同一规则）
+                        val threshold = resolveAutoCompressThreshold(model, settings)
                         // 估算放到后台协程，避免流式输出时每次消息变化都在 UI 线程全量遍历
                         val conversationTokens by produceState(
                             initialValue = 0,

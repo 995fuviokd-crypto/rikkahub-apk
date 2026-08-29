@@ -29,6 +29,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // jcenter 已关闭，补国内镜像以解析 Bcore 的 free_reflection / sandhook 等 jcenter 时代坐标
+        maven("https://maven.aliyun.com/repository/public")
         maven("https://jitpack.io")
         mavenLocal()
     }
