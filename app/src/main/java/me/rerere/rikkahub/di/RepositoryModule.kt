@@ -140,7 +140,11 @@ val repositoryModule = module {
     }
 
     single {
-        me.rerere.rikkahub.data.plugin.PluginManager(get(), get())
+        me.rerere.rikkahub.data.plugin.PluginConfigRepository(get())
+    }
+
+    single {
+        me.rerere.rikkahub.data.plugin.PluginManager(get(), get(), get())
     }
 
     // Cordis 内核与插件桥接：供 agent-loop（阶段 5）与面板壳（阶段 7）使用
@@ -166,6 +170,14 @@ val repositoryModule = module {
         me.rerere.rikkahub.data.cordis.HostSessionsSeam()
     }
 
+    // 宿主事件总线：缓冲 AppEventBus 上的可感知事件，供面板 JS 增量轮询
+    single {
+        me.rerere.rikkahub.data.plugin.CordisHostEventBus(
+            get(),
+            get(),
+        )
+    }
+
     single<me.rerere.rikkahub.data.cordis.CordisHost> {
         me.rerere.rikkahub.data.cordis.CordisHost(
             llm = get(),
@@ -185,7 +197,23 @@ val repositoryModule = module {
     }
 
     single {
-        me.rerere.rikkahub.data.plugin.CordisPluginBridge(get(), null, get())
+        val executor = me.rerere.rikkahub.data.plugin.CordisJsExecutor(get(), get())
+        me.rerere.rikkahub.data.plugin.CordisPluginBridge(
+            get(),
+            { pluginId, toolName, args -> executor(pluginId, toolName, args) },
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+        )
+    }
+
+    // DSH/脚本插件运行时协调者：把已启用插件同步进 CordisKernel 并热插拔
+    single {
+        me.rerere.rikkahub.data.plugin.CordisRuntimeHost(
+            get(), get(), get(), get(), get()
+        )
     }
 
     single<me.rerere.rikkahub.data.script.ScriptChatBridge> {

@@ -15,6 +15,9 @@ interface GroupDAO {
     @Query("SELECT * FROM groups ORDER BY updated_at DESC")
     fun listGroups(): Flow<List<GroupEntity>>
 
+    @Query("SELECT * FROM groups WHERE schedule_cron IS NOT NULL AND schedule_cron != ''")
+    suspend fun listScheduledGroups(): List<GroupEntity>
+
     @Query("SELECT * FROM groups WHERE id = :id")
     suspend fun getGroup(id: String): GroupEntity?
 

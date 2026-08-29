@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
@@ -50,6 +51,7 @@ import me.rerere.rikkahub.data.ai.transformers.onGenerationFinish
 import me.rerere.rikkahub.data.ai.transformers.transforms
 import me.rerere.rikkahub.data.ai.transformers.visualTransforms
 import me.rerere.rikkahub.data.ai.agent.AcpRuntime
+import me.rerere.rikkahub.data.ai.subagent.SubagentRunTracker
 import me.rerere.rikkahub.data.ai.tools.buildMemoryTools
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -109,6 +111,8 @@ class GenerationHandler(
     private val memoryRepo: MemoryRepository,
     private val acpRuntime: AcpRuntime? = null,
     private val workspaceRepository: me.rerere.rikkahub.data.repository.WorkspaceRepository? = null,
+    private val subagentTracker: SubagentRunTracker? = null,
+    private val planTracker: me.rerere.rikkahub.data.ai.plan.PlanTracker? = null,
 ) {
     fun generateText(
         settings: Settings,
@@ -130,6 +134,8 @@ class GenerationHandler(
         sideEffectRecorder: SideEffectRecorder? = null,
         extraSystemPrompts: List<String> = emptyList(),
     ): Flow<GenerationChunk> = flow {
+        subagentTracker?.beginGeneration()
+        planTracker?.reset()
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
 
@@ -456,6 +462,8 @@ class GenerationHandler(
             )
         }
 
+    }.onCompletion {
+        subagentTracker?.endGeneration()
     }.flowOn(Dispatchers.IO)
 
     /**
@@ -790,7 +798,6 @@ class GenerationHandler(
             )
         ) + nonTextParts
     }
-
 }
 
 /**

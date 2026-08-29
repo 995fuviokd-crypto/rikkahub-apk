@@ -69,6 +69,7 @@ import me.rerere.rikkahub.data.ai.TranslationHandler
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.createConversationTools
 import me.rerere.rikkahub.data.ai.subagent.createBuiltInSubagentTools
+import me.rerere.rikkahub.data.ai.plan.buildPlanTool
 import me.rerere.ai.provider.AgentPlatform
 import me.rerere.ai.provider.AgentSubagentConfig
 import me.rerere.rikkahub.data.ai.tools.createImageGenerationTools
@@ -322,6 +323,8 @@ class ChatService(
     private val workflowRunner: WorkflowRunner,
     private val pluginManager: me.rerere.rikkahub.data.plugin.PluginManager,
     private val genMediaRepository: GenMediaRepository,
+    val subagentRunTracker: me.rerere.rikkahub.data.ai.subagent.SubagentRunTracker,
+    val planTracker: me.rerere.rikkahub.data.ai.plan.PlanTracker,
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
@@ -996,6 +999,7 @@ class ChatService(
                                     generationHandler = generationHandler,
                                     assistant = assistant,
                                     parentModel = model,
+                                    runTracker = subagentRunTracker,
                                 )
                             )
                         }
@@ -1011,6 +1015,7 @@ class ChatService(
                                 if (settings.globalToolScripts) add(LocalToolOption.Scripts)
                                 if (settings.globalToolAccessibility) add(LocalToolOption.Accessibility)
                                 if (settings.globalToolPowerManagement) add(LocalToolOption.PowerManagement)
+                                if (settings.globalToolTermux) add(LocalToolOption.Termux)
                             }
                         )
                     )
@@ -1051,6 +1056,8 @@ class ChatService(
                             )
                         )
                     }
+                    // 内置计划工具：让模型用结构化任务清单维护长任务进度（对标 TodoWrite）
+                    add(buildPlanTool(planTracker))
                 },
             ).onCompletion { cause ->
                 // 可能被取消了，或者意外结束，兜底更新

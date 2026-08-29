@@ -29,6 +29,7 @@ class GroupEditorVM(
     val name = MutableStateFlow("")
     val members = MutableStateFlow<List<GroupMember>>(emptyList())
     val orchestratorId = MutableStateFlow<String?>(null)
+    val scheduleCron = MutableStateFlow<String?>(null)
     val loading = MutableStateFlow(true)
     val saved = MutableStateFlow(false)
 
@@ -47,6 +48,7 @@ class GroupEditorVM(
                 name.value = group.name
                 members.value = group.members
                 orchestratorId.value = group.orchestratorId
+                scheduleCron.value = group.scheduleCron
             }
             loading.value = false
         }
@@ -93,6 +95,7 @@ class GroupEditorVM(
                 name = name.value,
                 members = members.value,
                 orchestratorId = orchestratorId.value,
+                scheduleCron = scheduleCron.value?.takeIf { it.isNotBlank() },
             )
         )
         saved.value = true

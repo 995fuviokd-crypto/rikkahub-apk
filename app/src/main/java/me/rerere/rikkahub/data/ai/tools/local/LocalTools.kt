@@ -45,6 +45,8 @@ class LocalTools(
 
     val scriptTool by lazy { buildScriptTool(pluginManager, scriptRuntime, settingsStore) }
 
+    val termuxTools by lazy { buildTermuxTools(context) }
+
     fun getTools(options: List<LocalToolOption>): List<Tool> {
         val tools = mutableListOf<Tool>()
         if (options.contains(LocalToolOption.JavascriptEngine)) {
@@ -89,6 +91,9 @@ class LocalTools(
         }
         if (options.contains(LocalToolOption.SystemControl)) {
             tools.addAll(systemControlTools.tools)
+        }
+        if (options.contains(LocalToolOption.Termux)) {
+            tools.addAll(termuxTools)
         }
         return tools
     }

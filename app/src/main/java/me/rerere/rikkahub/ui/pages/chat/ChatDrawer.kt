@@ -491,6 +491,36 @@ fun ChatDrawerContent(
                 }
             }
 
+            // 记忆库入口：权限管理下方
+            Surface(
+                onClick = { navController.navigate(Screen.MemoryLibrary) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.Sparkles,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = "记忆库",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+
             // 插件侧边栏入口（sidebarActions）
             val sidebarPluginManager: me.rerere.rikkahub.data.plugin.PluginManager = koinInject()
             me.rerere.rikkahub.ui.pages.extensions.plugin.PluginExtensionsCard(

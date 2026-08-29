@@ -27,6 +27,7 @@ import me.rerere.rikkahub.ui.pages.extensions.group.GroupListVM
 import me.rerere.rikkahub.ui.pages.extensions.permission.PermissionVM
 import me.rerere.rikkahub.ui.pages.setting.SettingVM
 import me.rerere.rikkahub.ui.pages.setting.SettingAgentVM
+import me.rerere.rikkahub.ui.pages.memory.MemoryLibraryVM
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerVM
 import me.rerere.rikkahub.ui.pages.translator.TranslatorVM
 import org.koin.core.module.dsl.viewModel
@@ -51,6 +52,11 @@ val viewModelModule = module {
     viewModelOf(::ChatDrawerVM)
     viewModelOf(::SettingVM)
     viewModelOf(::SettingAgentVM)
+    viewModel {
+        MemoryLibraryVM(
+            memoryRepository = get(),
+        )
+    }
     viewModelOf(::DebugVM)
     viewModelOf(::HistoryVM)
     viewModelOf(::AssistantVM)

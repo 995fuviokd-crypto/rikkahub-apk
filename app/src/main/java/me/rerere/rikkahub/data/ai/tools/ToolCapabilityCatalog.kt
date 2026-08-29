@@ -28,6 +28,7 @@ object ToolCapabilityCatalog {
         ToolCapabilityEntry("本地工具", "电源管理", "电池信息与忽略电池优化", LocalToolOption.PowerManagement),
         ToolCapabilityEntry("本地工具", "ADB/Root", "通过无障碍模拟执行 ADB 与 shell 命令", LocalToolOption.Adb),
         ToolCapabilityEntry("本地工具", "脚本市场", "执行脚本市场脚本与 ToolPkg 插件导出的工具", LocalToolOption.Scripts),
+        ToolCapabilityEntry("本地工具", "Termux 桥接", "在真实 Termux Linux 环境执行命令（需 Termux 应用与 allow-external-apps）", LocalToolOption.Termux),
         ToolCapabilityEntry(
             "全能控制",
             "系统控制（全能权限）",

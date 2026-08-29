@@ -772,6 +772,7 @@
   <string name="setting_model_page_enable_ocr_desc">模型不支援圖片時，自動用視覺模型把圖片轉成文字描述</string>
   <string name="setting_model_page_ocr_model">OCR 模型</string>
   <string name="setting_model_page_ocr_model_desc">用於圖片光學字元辨識的模型</string>
+  <string name="setting_model_page_ocr_model_auto">自動（回退快速模型）</string>
   <string name="setting_model_page_ocr_prompt_vars">變數：圖片資料：{images}</string>
   <string name="setting_model_page_prompt">提示詞</string>
   <string name="setting_model_page_reset_to_default">重置為預設值</string>
@@ -1338,6 +1339,13 @@
   <string name="setting_update_reminder_pause_days">%1$d 天</string>
   <string name="setting_update_reminder_resume_now">立即恢復</string>
   <string name="reasoning_max">最大</string>
+  <string name="reasoning_desc_off">關閉思考：回應最快，不消耗推理 Token</string>
+  <string name="reasoning_desc_auto">自動：由模型自行決定思考深度</string>
+  <string name="reasoning_desc_low">低：快速回答，少量思考</string>
+  <string name="reasoning_desc_medium">中：速度與深度均衡</string>
+  <string name="reasoning_desc_high">高：更深入的推理，適合複雜任務</string>
+  <string name="reasoning_desc_xhigh">超高：徹底的多步推理</string>
+  <string name="reasoning_desc_max">最大：最深思考，最慢且消耗最多</string>
   <string name="add_self_hosted_model_models_title">模型列表</string>
   <string name="add_self_hosted_model_no_models">尚未設定模型，請至少新增一個以便在模型列表中選用。</string>
   <string name="add_self_hosted_model_id_label">模型 ID</string>

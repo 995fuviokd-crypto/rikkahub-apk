@@ -18,6 +18,7 @@ import me.rerere.common.cache.SingleFileCacheStore
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 import java.io.File
@@ -69,7 +70,9 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
                         parts = message.parts.map { part ->
                             when {
                                 part is UIMessagePart.Image && part.url.startsWith("file:") -> {
-                                    UIMessagePart.Text(performOcr(part))
+                                    // 失败时保留图片原样交给主模型（有视觉能力的模型仍可处理）
+                                    val ocrText = runCatching { performOcr(part) }.getOrNull()
+                                    if (ocrText != null) UIMessagePart.Text(ocrText) else part
                                 }
 
                                 else -> part
@@ -91,8 +94,12 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
         }
 
         val settings = get<SettingsStore>().settingsFlow.value
-        val model = settings.findModelById(settings.ocrModelId) ?: return "[Image]"
-        val providerSetting = model.findProvider(settings.providers) ?: return "[Image]"
+        // 模型解析：OCR 专用模型 → 快速模型 → 当前对话模型；全部缺失则抛错走失败分支
+        val model = settings.findModelById(settings.ocrModelId, settings.fastModelId)
+            ?: settings.getCurrentChatModel()
+            ?: error("未配置可用的视觉模型（OCR/快速/对话模型均不可用）")
+        val providerSetting = model.findProvider(settings.providers)
+            ?: error("OCR 模型对应的服务商不存在")
         val provider = get<ProviderManager>().getProviderByType(providerSetting)
         val result = provider.generateText(
             providerSetting = providerSetting,
@@ -109,7 +116,7 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
                 customBody = model.customBodies,
             ),
         )
-        val content = result.message.toText().ifBlank { "[ERROR, OCR failed]" }
+        val content = result.message.toText().ifBlank { error("OCR 模型返回空内容") }
         Log.i(TAG, "performOcr: $content")
         val ocrResult = """
             <image_file_ocr>
@@ -122,6 +129,7 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
         cache.put(part.url, ocrResult)
         return ocrResult
     }.getOrElse {
-        "[ERROR, OCR failed: $it]"
+        Log.w(TAG, "performOcr failed: $it")
+        throw it
     }
 }

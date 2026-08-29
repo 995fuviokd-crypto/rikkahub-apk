@@ -9,6 +9,7 @@ import androidx.room.PrimaryKey
     tableName = "groups",
     indices = [
         Index(value = ["updated_at"]),
+        Index(value = ["schedule_cron"]),
     ],
 )
 data class GroupEntity(
@@ -30,6 +31,8 @@ data class GroupEntity(
     val enableTools: Boolean = true,
     @ColumnInfo("workspace_id")
     val workspaceId: String? = null,
+    @ColumnInfo("schedule_cron")
+    val scheduleCron: String? = null,
     @ColumnInfo("created_at")
     val createdAt: Long,
     @ColumnInfo("updated_at")

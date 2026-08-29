@@ -226,8 +226,13 @@ val dataSourceModule = module {
             memoryRepo = get(),
             acpRuntime = get<me.rerere.rikkahub.data.ai.agent.AcpRuntime>(),
             workspaceRepository = get<me.rerere.rikkahub.data.repository.WorkspaceRepository>(),
+            subagentTracker = get<me.rerere.rikkahub.data.ai.subagent.SubagentRunTracker>(),
+            planTracker = get<me.rerere.rikkahub.data.ai.plan.PlanTracker>(),
         )
     }
+
+    single { me.rerere.rikkahub.data.ai.subagent.SubagentRunTracker() }
+    single { me.rerere.rikkahub.data.ai.plan.PlanTracker() }
 
     single {
         TranslationHandler(

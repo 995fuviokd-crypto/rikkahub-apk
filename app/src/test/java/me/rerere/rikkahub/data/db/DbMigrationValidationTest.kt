@@ -85,6 +85,19 @@ class DbMigrationValidationTest {
     }
 
     @Test
+    fun migrate_36_to_37() {
+        // 回归测试：v36 升 v37 时 AutoMigration 的 spec 创建 index_groups_schedule_cron，
+        // 实体必须声明该索引，否则迁移后 schema 校验抛 IllegalStateException 闪退。
+        helper.createDatabase("mig36", 36).close()
+        helper.runMigrationsAndValidate(
+            "mig36",
+            37,
+            true,
+            AppDatabase_AutoMigration_36_37_Impl(),
+        )
+    }
+
+    @Test
     fun import_backup_with_new_schema_does_not_crash() {
         // 模拟导入备份：数据库 version 仍为 28，但 workspaces 已含 local_directory_uri 列，
         // 直接 ALTER 会抛 duplicate column name，必须防御性跳过。

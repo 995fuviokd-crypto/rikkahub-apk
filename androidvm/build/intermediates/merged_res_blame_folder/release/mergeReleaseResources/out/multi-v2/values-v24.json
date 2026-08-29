@@ -4,7 +4,7 @@
             "outputFile": "me.rerere.androidvm-mergeReleaseResources-47:/values-v24/values-v24.xml",
             "map": [
                 {
-                    "source": "/root/.gradle/caches/9.5.0/transforms/a1e3c42b67aa6e9b91b5105108b32170/transformed/material-1.14.0/res/values-v24/values-v24.xml",
+                    "source": "/root/.gradle/caches/9.5.0/transforms/8e2f12be6bed6acb77e7c2b588450977/transformed/material-1.14.0/res/values-v24/values-v24.xml",
                     "from": {
                         "startLines": "2,3,4,5,6,12,18,24,30,33,36,39,42",
                         "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4",
@@ -23,7 +23,7 @@
                     }
                 },
                 {
-                    "source": "/root/.gradle/caches/9.5.0/transforms/6023d1fc776d502eab9a60fdf723206a/transformed/appcompat-1.8.0/res/values-v24/values-v24.xml",
+                    "source": "/root/.gradle/caches/9.5.0/transforms/0d0e4f2d87227f7575a434e95a2674c7/transformed/appcompat-1.8.0/res/values-v24/values-v24.xml",
                     "from": {
                         "startLines": "2,3",
                         "startColumns": "4,4",
@@ -38,7 +38,7 @@
             "outputFile": "me.rerere.androidvm-release-49:/values-v24/values-v24.xml",
             "map": [
                 {
-                    "source": "/root/.gradle/caches/9.5.0/transforms/a1e3c42b67aa6e9b91b5105108b32170/transformed/material-1.14.0/res/values-v24/values-v24.xml",
+                    "source": "/root/.gradle/caches/9.5.0/transforms/8e2f12be6bed6acb77e7c2b588450977/transformed/material-1.14.0/res/values-v24/values-v24.xml",
                     "from": {
                         "startLines": "2,3,4,5,6,12,18,24,30,33,36,39,42",
                         "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4",
@@ -57,7 +57,7 @@
                     }
                 },
                 {
-                    "source": "/root/.gradle/caches/9.5.0/transforms/6023d1fc776d502eab9a60fdf723206a/transformed/appcompat-1.8.0/res/values-v24/values-v24.xml",
+                    "source": "/root/.gradle/caches/9.5.0/transforms/0d0e4f2d87227f7575a434e95a2674c7/transformed/appcompat-1.8.0/res/values-v24/values-v24.xml",
                     "from": {
                         "startLines": "2,3",
                         "startColumns": "4,4",

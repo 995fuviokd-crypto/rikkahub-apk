@@ -61,7 +61,7 @@ fun GroupListPage(vm: GroupListVM = koinViewModel()) {
     Scaffold(
         topBar = {
             LargeFlexibleTopAppBar(
-                title = { Text("群组") },
+                title = { Text("任务中心") },
                 navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior,
                 colors = CustomColors.topBarColors,
@@ -186,6 +186,16 @@ private fun GroupCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                val scheduleDesc = me.rerere.rikkahub.data.ai.group.GroupCron.describe(group.scheduleCron)
+                if (scheduleDesc != null) {
+                    Text(
+                        text = "定时：" + scheduleDesc,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             Box {
                 IconButton(onClick = { menuExpanded = true }) {

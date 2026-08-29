@@ -772,6 +772,7 @@
   <string name="setting_model_page_enable_ocr_desc">모델이 이미지를 지원하지 않으면 시각 모델로 이미지를 텍스트 설명으로 자동 변환합니다</string>
   <string name="setting_model_page_ocr_model">OCR 모델</string>
   <string name="setting_model_page_ocr_model_desc">이미지에서 광학 문자 인식에 사용되는 모델</string>
+  <string name="setting_model_page_ocr_model_auto">자동 (빠른 모델 폴백)</string>
   <string name="setting_model_page_ocr_prompt_vars">변수: 이미지 데이터: {images}</string>
   <string name="setting_model_page_prompt">프롬프트</string>
   <string name="setting_model_page_reset_to_default">기본값으로 재설정</string>
@@ -1340,6 +1341,13 @@ mDNS 주소: .local 호스트네임을 사용하며, IP를 몰라도 같은 네�
   <string name="setting_update_reminder_pause_days">%1$d일</string>
   <string name="setting_update_reminder_resume_now">지금 재개</string>
   <string name="reasoning_max">최대</string>
+  <string name="reasoning_desc_off">思考 끄기: 가장 빠른 응답, 추론 토큰 없음</string>
+  <string name="reasoning_desc_auto">자동: 모델이 생각 깊이를 결정</string>
+  <string name="reasoning_desc_low">낮음: 빠른 답변, 최소한의 생각</string>
+  <string name="reasoning_desc_medium">중간: 속도와 깊이의 균형</string>
+  <string name="reasoning_desc_high">높음: 복잡한 작업에 적합한 깊은 추론</string>
+  <string name="reasoning_desc_xhigh">매우 높음: 철저한 다단계 추론</string>
+  <string name="reasoning_desc_max">최대: 가장 깊은 생각, 가장 느리고 많이 소모</string>
   <string name="add_self_hosted_model_models_title">모델 목록</string>
   <string name="add_self_hosted_model_no_models">아직 구성된 모델이 없습니다. 모델 목록에서 선택할 수 있도록 하나 이상 추가하세요.</string>
   <string name="add_self_hosted_model_id_label">모델 ID</string>

@@ -45,15 +45,30 @@ private val ALLOWED_MIME_TYPES = setOf(
 )
 
 private val ALLOWED_FILE_EXTENSIONS = setOf(
-    "txt", "md", "csv", "json", "js", "jsx", "mjs", "cjs",
-    "html", "css", "vue", "svelte", "xml", "agc",
-    "py", "rb", "lua", "sql", "java", "kt", "ts", "tsx",
-    "dart", "php", "swift", "go",
+    // 纯文本/标记
+    "txt", "md", "markdown", "mdx", "csv", "log", "out",
+    "html", "htm", "css", "scss", "less", "styl", "xml",
+    // 代码
+    "json", "js", "jsx", "mjs", "cjs", "ts", "tsx",
+    "py", "rb", "lua", "sql", "java", "kt", "kts", "dart", "php", "swift", "go",
     "bat", "cmd", "ps1", "psm1", "sh", "bash", "zsh", "fish",
-    "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx",
-    "rs", "cs", "markdown", "mdx",
-    "toml", "ini", "env", "gradle", "kts", "properties",
-    "proto", "graphql", "gql", "yml", "yaml"
+    "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx", "rs", "cs",
+    "proto", "graphql", "gql", "yml", "yaml",
+    // 构建/配置
+    "gradle", "toml", "ini", "env", "properties",
+    "mk", "bp", "bazel", "bzl", "rc", "prop", "conf", "cfg", "sums",
+    "patch", "diff", "gitignore", "editorconfig",
+    // Android 相机配置
+    "agc",
+    // 文档
+    "doc", "docx", "xls", "xlsx", "ppt", "pptx", "pdf", "epub", "odt", "rtf",
+    // 归档/固件/安装包
+    "zip", "tar", "gz", "tgz", "xz", "bz2", "7z", "rar", "jar", "war",
+    "apk", "whl", "deb", "rpm", "iso", "img",
+    // 证书/密钥
+    "pem", "crt", "key",
+    // 笔记/数据
+    "ipynb", "db", "sqlite",
 )
 
 fun isAllowedFileType(fileName: String, mime: String): Boolean {

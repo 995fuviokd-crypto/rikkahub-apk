@@ -25,7 +25,8 @@ data class GroupMember(
 )
 
 /**
- * 群组：一组 AI 成员的协作配置。
+ * 群组：一组 AI 成员的协作配置。作为"任务中心"的任务模板，
+ * 可配置定时任务（[scheduleCron]），按 cron 表达式周期触发。
  */
 @Serializable
 data class Group(
@@ -36,6 +37,7 @@ data class Group(
     val orchestratorId: String? = null,
     val createdAt: Long = 0,
     val updatedAt: Long = 0,
+    val scheduleCron: String? = null,
 ) {
     val orchestrator: GroupMember? get() = members.find { it.id == orchestratorId }
 }

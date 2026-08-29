@@ -1,10 +1,10 @@
 [
     {
         "merged": "me.rerere.androidvm-release-49:/layout-sw600dp-v13/mtrl_layout_snackbar.xml",
-        "source": "me.rerere.androidvm-material-1.14.0-25:/layout-sw600dp-v13/mtrl_layout_snackbar.xml"
+        "source": "me.rerere.androidvm-material-1.14.0-27:/layout-sw600dp-v13/mtrl_layout_snackbar.xml"
     },
     {
         "merged": "me.rerere.androidvm-release-49:/layout-sw600dp-v13/design_layout_snackbar.xml",
-        "source": "me.rerere.androidvm-material-1.14.0-25:/layout-sw600dp-v13/design_layout_snackbar.xml"
+        "source": "me.rerere.androidvm-material-1.14.0-27:/layout-sw600dp-v13/design_layout_snackbar.xml"
     }
 ]

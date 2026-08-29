@@ -61,6 +61,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -135,6 +136,7 @@ fun ChatInput(
     onCancelClick: () -> Unit,
     onSendClick: () -> Unit,
     onLongSendClick: () -> Unit,
+    onOpenWebView: (url: String, contentId: String, pluginId: String) -> Unit = { _, _, _ -> },
     stewardModeState: StewardModeState? = null,
     stewardMaxLoops: Int = StewardModeController.DEFAULT_MAX_LOOPS,
     stewardUnlimitedLoops: Boolean = false,
@@ -149,8 +151,10 @@ fun ChatInput(
     onPickVideo: () -> Unit,
     onPickAudio: () -> Unit,
     onPickFile: () -> Unit,
+    planEntries: List<me.rerere.rikkahub.data.ai.plan.PlanTracker.PlanEntry> = emptyList(),
 ) {
     val toaster = LocalToaster.current
+    val context = LocalContext.current
     val assistant = settings.getCurrentAssistant()
     val hazeTintColor = MaterialTheme.colorScheme.surfaceContainerLow
     val inputHazeStyle = HazeBlurStyle.Material3 {
@@ -221,6 +225,7 @@ fun ChatInput(
                 .padding(bottom = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            PlanChipBar(entries = planEntries)
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -250,7 +255,11 @@ fun ChatInput(
                     val pluginActions = remember(settings.enabledPlugins) {
                         pluginManager.enabledActions(settings.enabledPlugins)
                     }
-                    if (pluginActions.isNotEmpty()) {
+                    // 插件输入栏扩展入口（inputBarActions）：prompt 填入输入框，webview 打开插件页面
+                    val inputBarActions = remember(settings.enabledPlugins) {
+                        pluginManager.enabledExtensionActions(settings.enabledPlugins, "inputBar")
+                    }
+                    if (pluginActions.isNotEmpty() || inputBarActions.isNotEmpty()) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -264,6 +273,27 @@ fun ChatInput(
                                         state.setMessageText(
                                             if (current.isBlank()) action.prompt else "$current ${action.prompt}"
                                         )
+                                    },
+                                    label = { Text(action.label) },
+                                )
+                            }
+                            inputBarActions.forEach { action ->
+                                SuggestionChip(
+                                    onClick = {
+                                        me.rerere.rikkahub.ui.pages.extensions.plugin.performExtensionAction(
+                                            action = action,
+                                            pluginManager = pluginManager,
+                                            context = context,
+                                            onOpenWebView = { url, contentId, pluginId ->
+                                                onOpenWebView(url, contentId, pluginId)
+                                            },
+                                        ) { promptAction ->
+                                            val current = state.textContent.text.toString()
+                                            state.setMessageText(
+                                                if (current.isBlank()) promptAction.payload
+                                                else "$current ${promptAction.payload}"
+                                            )
+                                        }
                                     },
                                     label = { Text(action.label) },
                                 )

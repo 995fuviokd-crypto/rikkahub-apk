@@ -12,17 +12,28 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.jsonObject
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.plugin.InstalledPlugin
 import me.rerere.rikkahub.data.plugin.PluginCategories
+import me.rerere.rikkahub.data.plugin.PluginConfigRepository
 import me.rerere.rikkahub.data.plugin.PluginStatus
+import org.koin.compose.koinInject
 
-/** 已安装插件详情对话框：展示元数据、启用开关、卸载。被插件市场页与技能页共用 */
+/** 已安装插件详情对话框：展示元数据、启用开关、配置编辑、卸载。被插件市场页与技能页共用 */
 @Composable
 fun InstalledPluginDetailDialog(
     plugin: InstalledPlugin,
@@ -32,6 +43,11 @@ fun InstalledPluginDetailDialog(
     onDismiss: () -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
+    val scope = rememberCoroutineScope()
+    val settingsStore: SettingsStore = koinInject()
+    val pluginConfigRepository: PluginConfigRepository = koinInject()
+    val settings by settingsStore.settingsFlow.collectAsState()
+    var showConfig by remember { mutableStateOf(false) }
     val info = plugin.info
     val hasCapability = info != null && (
         info.systemPrompt.isNotBlank() ||
@@ -39,7 +55,9 @@ fun InstalledPluginDetailDialog(
             info.hooks.isNotEmpty() ||
             info.extensionPoints.homeActions.isNotEmpty() ||
             info.extensionPoints.settingsActions.isNotEmpty() ||
-            info.extensionPoints.sidebarActions.isNotEmpty()
+            info.extensionPoints.sidebarActions.isNotEmpty() ||
+            info.extensionPoints.chatToolbarActions.isNotEmpty() ||
+            info.extensionPoints.inputBarActions.isNotEmpty()
         )
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -114,6 +132,16 @@ fun InstalledPluginDetailDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (info?.configSchema?.fields?.isNotEmpty() == true && plugin.status != PluginStatus.BROKEN) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        TextButton(onClick = { showConfig = true }) { Text("插件配置") }
+                        Text(
+                            text = "配置保存后立即对新的生成与 Hook 生效",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 if (info != null && plugin.status != PluginStatus.BROKEN) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("启用", style = MaterialTheme.typography.bodyMedium)
@@ -129,4 +157,26 @@ fun InstalledPluginDetailDialog(
             TextButton(onClick = onDismiss) { Text("关闭") }
         },
     )
+
+    if (showConfig && info?.configSchema != null) {
+        PluginConfigDialog(
+            plugin = plugin,
+            currentConfig = settings.pluginConfigs[plugin.id],
+            onSave = { json ->
+                scope.launch {
+                    val merged = runCatching { kotlinx.serialization.json.Json.parseToJsonElement(json).jsonObject }
+                        .getOrNull() ?: return@launch
+                    pluginConfigRepository.saveConfig(plugin.id, merged)
+                    showConfig = false
+                }
+            },
+            onReset = {
+                scope.launch {
+                    pluginConfigRepository.clearConfig(plugin.id)
+                    showConfig = false
+                }
+            },
+            onDismiss = { showConfig = false },
+        )
+    }
 }

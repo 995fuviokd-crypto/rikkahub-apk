@@ -119,6 +119,10 @@ fun GroupEditorPage(
             }
 
             item {
+                SchedulingSection(vm = vm)
+            }
+
+            item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("选择成员", style = MaterialTheme.typography.titleSmall)
                     Text(
@@ -164,6 +168,40 @@ fun GroupEditorPage(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun SchedulingSection(vm: GroupEditorVM) {
+    val cron by vm.scheduleCron.collectAsStateWithLifecycle()
+    val parsed = remember(cron) { cron?.let { me.rerere.rikkahub.data.ai.group.GroupCron.parse(it) } }
+    val description = remember(cron) { me.rerere.rikkahub.data.ai.group.GroupCron.describe(cron) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("定时任务", style = MaterialTheme.typography.titleSmall)
+        Text(
+            text = "可选：填写 cron 表达式后，系统会按计划自动运行此任务。留空则仅手动运行。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = cron ?: "",
+            onValueChange = { vm.scheduleCron.value = it.ifBlank { null } },
+            label = { Text("Cron 表达式（分 时 日 月 周）") },
+            placeholder = { Text("*/30 * * * *") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            isError = cron?.isNotBlank() == true && parsed == null,
+            supportingText = {
+                when {
+                    cron?.isNotBlank() == true && parsed == null ->
+                        Text("格式无效，示例：*/30 * * * *（每 30 分钟）、0 9 * * *（每天 09:00）")
+                    parsed != null && description != null ->
+                        Text("将按计划运行：$description")
+                    else -> Text("支持 5 段：分 时 日 月 周；周 1=周日")
+                }
+            },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        )
     }
 }
 

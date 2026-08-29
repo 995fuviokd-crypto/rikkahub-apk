@@ -101,6 +101,11 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
 
 @Composable
 private fun ModelSettingsPage(settings: Settings, vm: SettingVM, contentPadding: PaddingValues) {
+    val ocrState = rememberModelListState(
+        modelId = settings.ocrModelId,
+        providers = settings.providers,
+        type = ModelType.CHAT,
+    )
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = contentPadding + PaddingValues(horizontal = 16.dp),
@@ -170,31 +175,69 @@ private fun ModelSettingsPage(settings: Settings, vm: SettingVM, contentPadding:
             )
         }
         item {
-            CardGroup(title = { Text(stringResource(R.string.setting_model_page_ocr_group)) }) {
-                item(
-                    headlineContent = { Text(stringResource(R.string.setting_model_page_enable_ocr)) },
-                    supportingContent = { Text(stringResource(R.string.setting_model_page_enable_ocr_desc)) },
-                    trailingContent = {
-                        Switch(
-                            checked = settings.ocrEnabled,
-                            onCheckedChange = {
-                                vm.updateSettings(settings.copy(ocrEnabled = it))
-                            }
+            Column {
+                CardGroup(title = { Text(stringResource(R.string.setting_model_page_ocr_group)) }) {
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_model_page_enable_ocr)) },
+                        supportingContent = { Text(stringResource(R.string.setting_model_page_enable_ocr_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.ocrEnabled,
+                                onCheckedChange = {
+                                    vm.updateSettings(settings.copy(ocrEnabled = it))
+                                }
+                            )
+                        },
+                    )
+                    if (settings.ocrEnabled) {
+                        item(
+                            onClick = { ocrState.open() },
+                            headlineContent = { Text(stringResource(R.string.setting_model_page_ocr_model)) },
+                            trailingContent = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Text(
+                                        text = ocrState.currentModel?.displayName
+                                            ?: stringResource(R.string.setting_model_page_ocr_model_auto),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    if (ocrState.currentModel != null) {
+                                        IconButton(
+                                            onClick = { vm.updateSettings(settings.copy(ocrModelId = null)) },
+                                            modifier = Modifier.size(20.dp),
+                                        ) {
+                                            Icon(HugeIcons.Cancel01, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        }
+                                    } else {
+                                        Icon(
+                                            HugeIcons.ArrowRight01,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                }
+                            },
                         )
-                    },
-                )
+                    }
+                }
+                if (settings.ocrEnabled) {
+                    Text(
+                        text = stringResource(R.string.setting_model_page_ocr_model_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                    )
+                }
             }
-        }
-        if (settings.ocrEnabled) {
-            item {
-                ModelSettingItem(
-                    title = stringResource(R.string.setting_model_page_ocr_model),
-                    description = stringResource(R.string.setting_model_page_ocr_model_desc),
-                    modelId = settings.ocrModelId,
-                    providers = settings.providers,
-                    onSelect = { vm.updateSettings(settings.copy(ocrModelId = it.id)) },
-                )
-            }
+            ModelListSheet(
+                state = ocrState,
+                onSelect = { vm.updateSettings(settings.copy(ocrModelId = it.id)) },
+            )
         }
         item {
             ModelSettingItem(

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Virtual Machine -->
+  <string name="vm_list_title">가상 머신</string>
+  <string name="vm_list_empty_hint">가상 머신이 아직 없습니다. 오른쪽 아래 버튼으로 생성하세요</string>
+  <string name="vm_create_title">새 가상 머신</string>
+  <string name="vm_create_confirm">생성</string>
+  <string name="vm_create_cancel">취소</string>
+  <string name="vm_create_name_hint">이름 (선택)</string>
+  <string name="vm_detail_not_found_title">인스턴스 없음</string>
+  <string name="vm_detail_not_found_body">가상 머신 인스턴스를 찾을 수 없습니다</string>
+  <string name="vm_runtime_env">실행 환경</string>
+  <string name="vm_install_apk">APK 설치</string>
+  <string name="vm_open_terminal">터미널 열기</string>
+  <string name="vm_installed_apps">설치된 앱</string>
+  <string name="vm_no_apps_hint">설치된 앱이 없습니다. 위의 「APK 설치」를 누르세요</string>
+  <string name="vm_launch">실행</string>
+  <string name="vm_virtual_root">가상 Root (su 지원)</string>
+  <string name="vm_virtual_root_desc_android">가상 공간 안에서 가상 su를 제공합니다. 앱에 root가 보입니다 (실제 root 아님)</string>
+  <string name="vm_hide_root">Root 숨기기</string>
+  <string name="vm_hide_root_desc_android">root 기기에서 실행을 거부하는 앱에 root 흔적을 숨깁니다</string>
+  <string name="vm_hide_xposed">Xposed 숨기기</string>
+  <string name="vm_hide_xposed_desc_android">프레임워크를 감지하는 앱에 Xposed 흔적을 숨깁니다</string>
+  <string name="vm_android_only_desc">Android 가상화에서만 지원</string>
+  <string name="vm_magisk_modules">Magisk / 모듈</string>
+  <string name="vm_badge_magisk">Magisk</string>
+  <string name="vm_flash_magisk">Magisk 주입</string>
+  <string name="vm_no_modules_hint">주입된 모듈이 없습니다. 「Magisk 주입」에서 Magisk/Xposed 모듈을 선택하세요</string>
+  <string name="vm_restart_vm">가상 머신 재시작</string>
+  <string name="vm_restart">재시작</string>
+  <string name="vm_floating_window">플로팅 창</string>
+  <string name="vm_floating_window_desc_android">플로팅 창으로 실행</string>
+  <string name="vm_keep_alive">화면 꺼짐 유지</string>
+  <string name="vm_keep_alive_desc_android">백그라운드에서 계속 실행</string>
+  <string name="vm_danger_zone">위험한 작업</string>
+  <string name="vm_delete_instance">인스턴스 삭제</string>
+  <string name="vm_engine_android">Android</string>
+  <string name="vm_engine_linux">Linux</string>
+  <string name="vm_engine_guest">게스트 ROM</string>
+
+  <!-- VM messages -->
+  <string name="vm_msg_launch_failed">실행 실패: %1$s</string>
+  <string name="vm_msg_install_done">설치 완료</string>
+  <string name="vm_msg_install_failed">설치 실패: %1$s</string>
+  <string name="vm_msg_load_modules_failed">모듈 읽기 실패: %1$s</string>
+  <string name="vm_msg_module_flashed">Magisk/모듈 주입 완료: %1$s</string>
+  <string name="vm_msg_flash_failed">주입 실패: %1$s</string>
+  <string name="vm_msg_set_failed">설정 실패: %1$s</string>
+  <string name="vm_msg_module_uninstalled">제거 완료: %1$s</string>
+  <string name="vm_msg_module_enabled">활성화됨: %1$s</string>
+  <string name="vm_msg_module_disabled">비활성화됨: %1$s</string>
+  <string name="vm_msg_uninstall_failed">제거 실패: %1$s</string>
+  <string name="vm_msg_guest_rebooted">게스트를 재시작했습니다. Magisk/모듈이 적용되었습니다</string>
+  <string name="vm_msg_guest_reboot_failed">게스트 재시작 실패: %1$s</string>
+  <string name="vm_msg_space_restarted">가상 공간을 재시작했습니다. Magisk/모듈은 다음 실행부터 적용됩니다</string>
+  <string name="vm_msg_read_apk_failed">APK 읽기 실패: %1$s</string>
+  <string name="vm_msg_read_module_failed">모듈 읽기 실패: %1$s</string>
+</resources>

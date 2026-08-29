@@ -10,9 +10,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
@@ -34,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.adaptive.currentWindowDpSize
+import me.rerere.hugeicons.stroke.Puzzle
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
@@ -47,12 +52,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.collectAsState
 import com.dokar.sonner.ToastType
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
@@ -93,6 +100,7 @@ import me.rerere.rikkahub.ui.components.ai.rememberChatAttachmentPickerActions
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
@@ -103,6 +111,8 @@ import me.rerere.rikkahub.utils.base64Decode
 import me.rerere.rikkahub.utils.isAllowedFileType
 import me.rerere.rikkahub.utils.throttleLatest
 import me.rerere.rikkahub.utils.TokenEstimate
+import me.rerere.rikkahub.utils.ContextBreakdown
+import me.rerere.rikkahub.ui.components.ai.ContextUsageIndicator
 import me.rerere.rikkahub.utils.navigateToChatPage
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -365,6 +375,8 @@ private fun ChatPageContent(
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
     val workspaceRepository: WorkspaceRepository = koinInject()
+    val pluginManager: me.rerere.rikkahub.data.plugin.PluginManager = koinInject()
+    val pageContext = LocalContext.current
     var previewMode by rememberSaveable { mutableStateOf(false) }
     val hazeState = rememberHazeState()
     val assistant = setting.getCurrentAssistant()
@@ -383,6 +395,7 @@ private fun ChatPageContent(
     val stewardUnlimitedLoops by vm.stewardUnlimitedLoops.collectAsStateWithLifecycle()
     val canRecall by vm.canRecall.collectAsStateWithLifecycle()
     val canRedo by vm.canRedo.collectAsStateWithLifecycle()
+    val planEntries by vm.planEntries.collectAsStateWithLifecycle()
 
     // 主工作区取自 effectiveWorkspaceIds 首个(集合优先, 旧单字段回退), 与绑定写入逻辑一致
     val primaryWorkspaceId = assistant.effectiveWorkspaceIds.firstOrNull()
@@ -429,7 +442,33 @@ private fun ChatPageContent(
                     },
                     onRedo = {
                         vm.redoMessage()
-                    }
+                    },
+                    subagentRuns = vm.subagentRuns.collectAsState().value,
+                    onAutoCompressToggle = {
+                        vm.updateSettings(
+                            setting.copy(
+                                autoCompressEnabled = true,
+                            )
+                        )
+                    },
+                    onPluginAction = { action ->
+                        me.rerere.rikkahub.ui.pages.extensions.plugin.performExtensionAction(
+                            action = action,
+                            pluginManager = pluginManager,
+                            context = pageContext,
+                            onOpenWebView = { url, contentId, pluginId ->
+                                navController.navigate(
+                                    Screen.WebView(url = url, contentId = contentId, pluginId = pluginId)
+                                )
+                            },
+                        ) { promptAction ->
+                            // 聊天页内提示词动作：直接填入输入框
+                            val current = inputState.textContent.text.toString()
+                            inputState.setMessageText(
+                                if (current.isBlank()) promptAction.payload else "$current ${promptAction.payload}"
+                            )
+                        }
+                    },
                 )
             },
             bottomBar = {
@@ -441,6 +480,11 @@ private fun ChatPageContent(
                     completionProviders = completionProviders,
                     onCancelClick = {
                         vm.stopGeneration()
+                    },
+                    onOpenWebView = { url, contentId, pluginId ->
+                        navController.navigate(
+                            Screen.WebView(url = url, contentId = contentId, pluginId = pluginId)
+                        )
                     },
                     enableSearch = enableWebSearch,
                     onUpdateSearchMode = { mode ->
@@ -555,6 +599,7 @@ private fun ChatPageContent(
                     onPickVideo = attachmentPickerActions.onPickVideo,
                     onPickAudio = attachmentPickerActions.onPickAudio,
                     onPickFile = attachmentPickerActions.onPickFile,
+                    planEntries = planEntries,
                 )
             },
             containerColor = Color.Transparent,
@@ -750,6 +795,9 @@ private fun TopBar(
     canRedo: Boolean,
     onRecall: () -> Unit,
     onRedo: () -> Unit,
+    subagentRuns: me.rerere.rikkahub.data.ai.subagent.SubagentRunTracker.TrackerState,
+    onAutoCompressToggle: () -> Unit,
+    onPluginAction: (me.rerere.rikkahub.data.plugin.PluginExtensionAction) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
@@ -804,7 +852,7 @@ private fun TopBar(
                             )
                         )
                     }
-                    if (settings.autoCompressEnabled && model != null) {
+                    if (model != null) {
                         // 阈值按当前模型上下文窗口动态计算（与 ChatService 同一规则）
                         val threshold = resolveAutoCompressThreshold(model, settings)
                         // 估算放到后台协程，避免流式输出时每次消息变化都在 UI 线程全量遍历
@@ -816,26 +864,28 @@ private fun TopBar(
                                 TokenEstimate.estimateConversationTokens(conversation)
                             }
                         }
-                        val progress = if (threshold > 0) {
-                            (conversationTokens.toFloat() / threshold).coerceIn(0f, 1f)
-                        } else {
-                            0f
+                        // 分类占比：工具定义/系统提示词在 UI 层无法精确获取，此处展示会话内类别
+                        val breakdown = remember(
+                            conversation.messageNodes,
+                            conversation.compression,
+                            conversationTokens,
+                        ) {
+                            ContextBreakdown.estimate(conversation = conversation)
                         }
-                        Column(
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 2.dp)
+                                .padding(top = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            LinearProgressIndicator(
-                                progress = { progress },
-                                modifier = Modifier.fillMaxWidth(0.6f),
-                            )
-                            Text(
-                                text = "$conversationTokens / $threshold",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontSize = 8.sp,
-                                ),
-                                color = LocalContentColor.current.copy(if (progress >= 1f) 1f else 0.65f),
+                            ContextUsageIndicator(
+                                tokens = conversationTokens,
+                                threshold = threshold,
+                                breakdown = breakdown,
+                                subagentState = subagentRuns,
+                                onToggleAutoCompress = {
+                                    onAutoCompressToggle()
+                                },
                             )
                         }
                     }
@@ -843,6 +893,32 @@ private fun TopBar(
             }
         },
         actions = {
+            // 插件聊天页入口（chatToolbarActions）：下拉菜单列出全部扩展动作
+            val pluginManager: me.rerere.rikkahub.data.plugin.PluginManager = koinInject()
+            val chatToolbarActions = remember(settings.enabledPlugins) {
+                pluginManager.enabledExtensionActions(settings.enabledPlugins, "chatToolbar")
+            }
+            if (chatToolbarActions.isNotEmpty()) {
+                var showPluginMenu by remember { mutableStateOf(false) }
+                IconButton(onClick = { showPluginMenu = true }) {
+                    Icon(HugeIcons.Puzzle, "Plugin Actions")
+                }
+                DropdownMenu(
+                    expanded = showPluginMenu,
+                    onDismissRequest = { showPluginMenu = false },
+                ) {
+                    chatToolbarActions.forEach { action ->
+                        DropdownMenuItem(
+                            text = { Text(action.label) },
+                            onClick = {
+                                showPluginMenu = false
+                                onPluginAction(action)
+                            },
+                        )
+                    }
+                }
+            }
+
             IconButton(
                 onClick = {
                     onClickMenu()

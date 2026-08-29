@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Virtual Machine -->
+  <string name="vm_list_title">Virtual Machine</string>
+  <string name="vm_list_empty_hint">No virtual machines yet. Tap the button below to create one.</string>
+  <string name="vm_create_title">New Virtual Machine</string>
+  <string name="vm_create_confirm">Create</string>
+  <string name="vm_create_cancel">Cancel</string>
+  <string name="vm_create_name_hint">Name (optional)</string>
+  <string name="vm_detail_not_found_title">Instance Not Found</string>
+  <string name="vm_detail_not_found_body">Virtual machine instance not found.</string>
+  <string name="vm_runtime_env">Runtime Environment</string>
+  <string name="vm_install_apk">Install APK</string>
+  <string name="vm_open_terminal">Open Terminal</string>
+  <string name="vm_installed_apps">Installed Apps</string>
+  <string name="vm_no_apps_hint">No apps installed yet. Tap “Install APK” above.</string>
+  <string name="vm_launch">Launch</string>
+  <string name="vm_virtual_root">Virtual Root (su support)</string>
+  <string name="vm_virtual_root_desc_android">Provides virtual su inside the virtual space; apps see root (not real root).</string>
+  <string name="vm_hide_root">Hide Root</string>
+  <string name="vm_hide_root_desc_android">Hides root traces from apps that refuse to run on rooted devices.</string>
+  <string name="vm_hide_xposed">Hide Xposed</string>
+  <string name="vm_hide_xposed_desc_android">Hides the Xposed framework from apps that detect it.</string>
+  <string name="vm_android_only_desc">Only supported by Android virtualization</string>
+  <string name="vm_magisk_modules">Magisk / Modules</string>
+  <string name="vm_badge_magisk">Magisk</string>
+  <string name="vm_flash_magisk">Flash Magisk</string>
+  <string name="vm_no_modules_hint">No modules flashed yet. Tap “Flash Magisk” to select a Magisk/Xposed module.</string>
+  <string name="vm_restart_vm">Restart Virtual Machine</string>
+  <string name="vm_restart">Restart</string>
+  <string name="vm_floating_window">Floating Window</string>
+  <string name="vm_floating_window_desc_android">Runs the VM in a floating window.</string>
+  <string name="vm_keep_alive">Keep Awake (Screen Off)</string>
+  <string name="vm_keep_alive_desc_android">Keeps running in the background.</string>
+  <string name="vm_danger_zone">Danger Zone</string>
+  <string name="vm_delete_instance">Delete Instance</string>
+  <string name="vm_engine_android">Android</string>
+  <string name="vm_engine_linux">Linux</string>
+  <string name="vm_engine_guest">Guest ROM</string>
+
+  <!-- VM messages -->
+  <string name="vm_msg_launch_failed">Launch failed: %1$s</string>
+  <string name="vm_msg_install_done">Install complete</string>
+  <string name="vm_msg_install_failed">Install failed: %1$s</string>
+  <string name="vm_msg_load_modules_failed">Failed to load modules: %1$s</string>
+  <string name="vm_msg_module_flashed">Magisk/module flashed: %1$s</string>
+  <string name="vm_msg_flash_failed">Failed to flash: %1$s</string>
+  <string name="vm_msg_set_failed">Failed to set: %1$s</string>
+  <string name="vm_msg_module_uninstalled">Uninstalled: %1$s</string>
+  <string name="vm_msg_module_enabled">Enabled: %1$s</string>
+  <string name="vm_msg_module_disabled">Disabled: %1$s</string>
+  <string name="vm_msg_uninstall_failed">Failed to uninstall: %1$s</string>
+  <string name="vm_msg_guest_rebooted">Guest rebooted; Magisk/modules applied.</string>
+  <string name="vm_msg_guest_reboot_failed">Failed to reboot guest: %1$s</string>
+  <string name="vm_msg_space_restarted">Virtual space restarted; Magisk/modules apply on next app launch.</string>
+  <string name="vm_msg_read_apk_failed">Failed to read APK: %1$s</string>
+  <string name="vm_msg_read_module_failed">Failed to read module: %1$s</string>
+</resources>

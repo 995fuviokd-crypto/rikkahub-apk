@@ -37,6 +37,7 @@ import me.rerere.rikkahub.data.db.migrations.Migration_16_17
 import me.rerere.rikkahub.data.db.migrations.Migration_22_23
 import me.rerere.rikkahub.data.db.migrations.Migration_8_9
 import me.rerere.rikkahub.data.db.migrations.Migration_35_36
+import me.rerere.rikkahub.data.db.migrations.Migration_36_37
 import me.rerere.rikkahub.utils.JsonInstant
 
 @Database(
@@ -57,7 +58,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         GroupRunEntity::class,
         GroupMessageEntity::class,
     ],
-    version = 36,
+    version = 37,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -78,6 +79,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 22, to = 23, spec = Migration_22_23::class),
         AutoMigration(from = 23, to = 24),
         AutoMigration(from = 35, to = 36, spec = Migration_35_36::class),
+        AutoMigration(from = 36, to = 37, spec = Migration_36_37::class),
     ]
 )
 @TypeConverters(TokenUsageConverter::class)

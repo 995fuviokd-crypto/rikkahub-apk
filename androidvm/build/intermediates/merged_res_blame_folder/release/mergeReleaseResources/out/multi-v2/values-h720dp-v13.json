@@ -4,7 +4,7 @@
             "outputFile": "me.rerere.androidvm-release-49:/values-h720dp-v13/values-h720dp-v13.xml",
             "map": [
                 {
-                    "source": "/root/.gradle/caches/9.5.0/transforms/6023d1fc776d502eab9a60fdf723206a/transformed/appcompat-1.8.0/res/values-h720dp-v13/values-h720dp-v13.xml",
+                    "source": "/root/.gradle/caches/9.5.0/transforms/0d0e4f2d87227f7575a434e95a2674c7/transformed/appcompat-1.8.0/res/values-h720dp-v13/values-h720dp-v13.xml",
                     "from": {
                         "startLines": "2",
                         "startColumns": "4",
@@ -19,7 +19,7 @@
             "outputFile": "me.rerere.androidvm-mergeReleaseResources-47:/values-h720dp-v13/values-h720dp-v13.xml",
             "map": [
                 {
-                    "source": "/root/.gradle/caches/9.5.0/transforms/6023d1fc776d502eab9a60fdf723206a/transformed/appcompat-1.8.0/res/values-h720dp-v13/values-h720dp-v13.xml",
+                    "source": "/root/.gradle/caches/9.5.0/transforms/0d0e4f2d87227f7575a434e95a2674c7/transformed/appcompat-1.8.0/res/values-h720dp-v13/values-h720dp-v13.xml",
                     "from": {
                         "startLines": "2",
                         "startColumns": "4",

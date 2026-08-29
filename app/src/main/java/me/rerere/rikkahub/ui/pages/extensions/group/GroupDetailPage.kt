@@ -250,6 +250,23 @@ private fun GroupInfoCard(group: Group) {
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
+            val parsed = group.scheduleCron?.let { me.rerere.rikkahub.data.ai.group.GroupCron.parse(it) }
+            if (group.scheduleCron?.isNotBlank() == true) {
+                val desc = me.rerere.rikkahub.data.ai.group.GroupCron.describe(group.scheduleCron)
+                val next = parsed?.let { me.rerere.rikkahub.data.ai.group.GroupCron.nextRun(it) }
+                Text(
+                    text = "定时任务：${desc ?: group.scheduleCron}" +
+                        (next?.let { "  ·  下次运行 ${it.monthValue}月${it.dayOfMonth}日 ${it.hour.toString().padStart(2, '0')}:${it.minute.toString().padStart(2, '0')}" } ?: ""),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+            } else {
+                Text(
+                    text = "未配置定时任务，仅手动运行",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             group.members.forEach { member ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

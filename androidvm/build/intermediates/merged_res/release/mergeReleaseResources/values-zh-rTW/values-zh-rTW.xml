@@ -237,4 +237,56 @@
     <string msgid="5946805113151406391" name="template_percent">"百分之 <xliff:g id="PERCENTAGE">%1$d</xliff:g>。"</string>
     <string msgid="3765533235322692011" name="tooltip_description">"工具提示"</string>
     <string msgid="3124740595719787496" name="tooltip_label">"顯示工具提示"</string>
+    <string name="vm_android_only_desc">僅 Android 虛擬化支援</string>
+    <string name="vm_badge_magisk">Magisk</string>
+    <string name="vm_create_cancel">取消</string>
+    <string name="vm_create_confirm">建立</string>
+    <string name="vm_create_name_hint">名稱（選填）</string>
+    <string name="vm_create_title">新建虛擬機</string>
+    <string name="vm_danger_zone">危險操作</string>
+    <string name="vm_delete_instance">刪除實例</string>
+    <string name="vm_detail_not_found_body">找不到該虛擬機實例</string>
+    <string name="vm_detail_not_found_title">實例不存在</string>
+    <string name="vm_engine_android">Android</string>
+    <string name="vm_engine_guest">客機 ROM</string>
+    <string name="vm_engine_linux">Linux</string>
+    <string name="vm_flash_magisk">刷入 Magisk</string>
+    <string name="vm_floating_window">懸浮窗小窗</string>
+    <string name="vm_floating_window_desc_android">以懸浮窗形式執行</string>
+    <string name="vm_hide_root">隱藏 Root</string>
+    <string name="vm_hide_root_desc_android">向拒絕在已 root 裝置上執行的苛刻應用隱藏 root 痕跡</string>
+    <string name="vm_hide_xposed">隱藏 Xposed</string>
+    <string name="vm_hide_xposed_desc_android">向偵測到框架的應用隱藏 Xposed 特徵</string>
+    <string name="vm_install_apk">安裝 APK</string>
+    <string name="vm_installed_apps">已安裝應用</string>
+    <string name="vm_keep_alive">螢幕關閉保活</string>
+    <string name="vm_keep_alive_desc_android">背景持續執行</string>
+    <string name="vm_launch">啟動</string>
+    <string name="vm_list_empty_hint">還沒有虛擬機，點擊右下角建立</string>
+    <string name="vm_list_title">虛擬機</string>
+    <string name="vm_magisk_modules">Magisk / 模組</string>
+    <string name="vm_msg_flash_failed">刷入失敗：%1$s</string>
+    <string name="vm_msg_guest_reboot_failed">重新啟動客機失敗：%1$s</string>
+    <string name="vm_msg_guest_rebooted">客機已重新啟動，Magisk/模組已生效</string>
+    <string name="vm_msg_install_done">安裝完成</string>
+    <string name="vm_msg_install_failed">安裝失敗：%1$s</string>
+    <string name="vm_msg_launch_failed">啟動失敗：%1$s</string>
+    <string name="vm_msg_load_modules_failed">讀取模組失敗：%1$s</string>
+    <string name="vm_msg_module_disabled">已停用：%1$s</string>
+    <string name="vm_msg_module_enabled">已啟用：%1$s</string>
+    <string name="vm_msg_module_flashed">Magisk/模組刷入完成：%1$s</string>
+    <string name="vm_msg_module_uninstalled">已解除安裝：%1$s</string>
+    <string name="vm_msg_read_apk_failed">讀取 APK 失敗：%1$s</string>
+    <string name="vm_msg_read_module_failed">讀取模組失敗：%1$s</string>
+    <string name="vm_msg_set_failed">設定失敗：%1$s</string>
+    <string name="vm_msg_space_restarted">虛擬空間已重新啟動，Magisk/模組將於下次啟動應用時生效</string>
+    <string name="vm_msg_uninstall_failed">解除安裝失敗：%1$s</string>
+    <string name="vm_no_apps_hint">尚未安裝應用，點擊上方「安裝 APK」</string>
+    <string name="vm_no_modules_hint">尚未刷入模組，點擊「刷入 Magisk」選擇 Magisk/Xposed 模組</string>
+    <string name="vm_open_terminal">開啟終端機</string>
+    <string name="vm_restart">重新啟動</string>
+    <string name="vm_restart_vm">重新啟動虛擬機</string>
+    <string name="vm_runtime_env">執行環境</string>
+    <string name="vm_virtual_root">虛擬 Root（su 支援）</string>
+    <string name="vm_virtual_root_desc_android">在虛擬空間內提供虛擬 su，應用可見 root（非真 root）</string>
 </resources>

@@ -3,6 +3,9 @@ package me.rerere.rikkahub.data.plugin
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
@@ -10,6 +13,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -29,7 +33,44 @@ import java.util.zip.ZipInputStream
 open class PluginManager(
     private val context: Context,
     private val scriptRuntime: ScriptRuntime,
+    private val pluginConfigStore: PluginConfigRepository? = null,
 ) {
+    /** 插件目录文件变化广播（本地 DIY 插件保存/替换 zip 后触发），订阅方刷新已安装列表实现热重载 */
+    private val _directoryEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val directoryEvents: SharedFlow<Unit> = _directoryEvents.asSharedFlow()
+
+    private var fileObserver: android.os.FileObserver? = null
+
+    init {
+        startDirectoryWatch()
+    }
+
+    /**
+ * 顶层监听插件目录：新增/删除/替换插件目录时广播事件用于刷新列表。
+ * 插件内容层面的改动（plugin.json/脚本）由 loadInfo/脚本读取每次读磁盘天然热生效，
+ * 无需目录级监听；顶层变化即可覆盖 DIY 推包、市场安装/卸载等全部列表刷新场景。
+ */
+    private fun startDirectoryWatch() {
+        try {
+            val dir = getPluginsDir()
+            if (!dir.exists()) return
+            val watchMask = android.os.FileObserver.CLOSE_WRITE or
+                android.os.FileObserver.CREATE or
+                android.os.FileObserver.DELETE or
+                android.os.FileObserver.MOVED_TO or
+                android.os.FileObserver.MOVED_FROM
+            val observer = object : android.os.FileObserver(dir.absolutePath, watchMask) {
+                override fun onEvent(event: Int, path: String?) {
+                    _directoryEvents.tryEmit(Unit)
+                }
+            }
+            observer.startWatching()
+            fileObserver = observer
+        } catch (e: Throwable) {
+            Log.w(TAG, "startDirectoryWatch failed", e)
+        }
+    }
+
     open fun getPluginsDir(): File {
         val dir = context.filesDir.resolve(PLUGIN_DIR_NAME)
         if (!dir.exists()) dir.mkdirs()
@@ -124,7 +165,7 @@ open class PluginManager(
                             pluginDir = getPluginDir(id),
                             pluginId = id,
                             hookName = hook,
-                            payloadJson = current.toString(),
+                            payloadJson = payloadForPlugin(current, id).toString(),
                         )
                     }.onFailure { e ->
                         Log.w(TAG, "dispatchHook $hook/$id failed", e)
@@ -158,16 +199,39 @@ open class PluginManager(
         return dispatchHook(enabledPlugins = enabledPluginIds, hook = hook, payload = payload)
     }
 
+    /**
+     * 为单个插件构造 Hook 负载：把该插件的当前配置（合并默认值）注入顶层 config 字段，
+     * 供插件脚本按 `ctx.config.<key>` 读取。无配置时原样返回。
+     */
+    private fun payloadForPlugin(payload: JsonObject, pluginId: String): JsonObject {
+        val configText = pluginConfigStore?.resolvedConfigJson(loadInfo(pluginId))?.takeIf { it != "{}" }
+            ?: return payload
+        val parsed = runCatching { Json.parseToJsonElement(configText) }.getOrNull() ?: return payload
+        return buildJsonObject {
+            payload.forEach { (k, v) -> put(k, v) }
+            put("config", parsed)
+        }
+    }
+
     private val enabledPluginIds: Set<String>
         get() = listPlugins().filter { it.status == PluginStatus.ENABLED }.map { it.id }.toSet()
 
-    /** 已启用插件的系统提示文本列表（顺序按插件 id 稳定） */
-    fun enabledSystemPrompts(enabledPlugins: Set<String>): List<String> {        if (enabledPlugins.isEmpty()) return emptyList()
+    /** 已启用插件的系统提示文本列表（顺序按插件 id 稳定）。
+     *  声明了 config schema 的插件附加当前配置（合并默认值），让 AI 实时感知用户配置变更。 */
+    fun enabledSystemPrompts(enabledPlugins: Set<String>): List<String> {
+        if (enabledPlugins.isEmpty()) return emptyList()
         return enabledPlugins
             .sorted()
             .mapNotNull { loadInfo(it) }
             .filter { it.systemPrompt.isNotBlank() }
-            .map { it.systemPrompt }
+            .map { info ->
+                val configText = pluginConfigStore?.resolvedConfigJson(info)?.takeIf { it != "{}" }
+                if (configText != null) {
+                    info.systemPrompt + "\n\n<插件配置 ${info.id}>：$configText\n</插件配置>"
+                } else {
+                    info.systemPrompt
+                }
+            }
     }
 
     /** 已启用插件中是否包含 脚本/ToolPkg 插件（存在脚本目录且含 JS 文件） */
@@ -223,6 +287,8 @@ open class PluginManager(
                     "settings" -> info.extensionPoints.settingsActions
                     "home" -> info.extensionPoints.homeActions
                     "sidebar" -> info.extensionPoints.sidebarActions
+                    "chatToolbar" -> info.extensionPoints.chatToolbarActions
+                    "inputBar" -> info.extensionPoints.inputBarActions
                     else -> emptyList()
                 }
             }

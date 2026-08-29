@@ -4,7 +4,7 @@
             "outputFile": "me.rerere.androidvm-release-49:/values-h480dp-v13/values-h480dp-v13.xml",
             "map": [
                 {
-                    "source": "/root/.gradle/caches/9.5.0/transforms/a1e3c42b67aa6e9b91b5105108b32170/transformed/material-1.14.0/res/values-h480dp-v13/values-h480dp-v13.xml",
+                    "source": "/root/.gradle/caches/9.5.0/transforms/8e2f12be6bed6acb77e7c2b588450977/transformed/material-1.14.0/res/values-h480dp-v13/values-h480dp-v13.xml",
                     "from": {
                         "startLines": "2,3,4,5",
                         "startColumns": "4,4,4,4",
@@ -19,7 +19,7 @@
             "outputFile": "me.rerere.androidvm-mergeReleaseResources-47:/values-h480dp-v13/values-h480dp-v13.xml",
             "map": [
                 {
-                    "source": "/root/.gradle/caches/9.5.0/transforms/a1e3c42b67aa6e9b91b5105108b32170/transformed/material-1.14.0/res/values-h480dp-v13/values-h480dp-v13.xml",
+                    "source": "/root/.gradle/caches/9.5.0/transforms/8e2f12be6bed6acb77e7c2b588450977/transformed/material-1.14.0/res/values-h480dp-v13/values-h480dp-v13.xml",
                     "from": {
                         "startLines": "2,3,4,5",
                         "startColumns": "4,4,4,4",

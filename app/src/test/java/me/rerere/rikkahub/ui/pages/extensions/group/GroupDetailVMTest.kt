@@ -44,6 +44,9 @@ private class FakeGroupDAO : GroupDAO {
     override fun listGroups(): Flow<List<GroupEntity>> =
         groupsState.map { m -> m.values.sortedByDescending { it.updatedAt } }
 
+    override suspend fun listScheduledGroups(): List<GroupEntity> =
+        groups.values.filter { !it.scheduleCron.isNullOrBlank() }
+
     override suspend fun getGroup(id: String): GroupEntity? = groups[id]
 
     override fun getGroupFlow(id: String): Flow<GroupEntity?> =

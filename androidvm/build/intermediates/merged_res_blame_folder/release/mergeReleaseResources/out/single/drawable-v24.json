@@ -1,50 +1,50 @@
 [
     {
         "merged": "me.rerere.androidvm-release-49:/drawable-v24/m3_focus_ring_framework_button_background.xml",
-        "source": "me.rerere.androidvm-material-1.14.0-25:/drawable-v24/m3_focus_ring_framework_button_background.xml"
+        "source": "me.rerere.androidvm-material-1.14.0-27:/drawable-v24/m3_focus_ring_framework_button_background.xml"
     },
     {
         "merged": "me.rerere.androidvm-release-49:/drawable-v24/m3_focus_ring_action_bar_item_background.xml",
-        "source": "me.rerere.androidvm-material-1.14.0-25:/drawable-v24/m3_focus_ring_action_bar_item_background.xml"
+        "source": "me.rerere.androidvm-material-1.14.0-27:/drawable-v24/m3_focus_ring_action_bar_item_background.xml"
     },
     {
         "merged": "me.rerere.androidvm-release-49:/drawable-v24/m3_focus_ring_toolbar_selectable_item_background_borderless.xml",
-        "source": "me.rerere.androidvm-material-1.14.0-25:/drawable-v24/m3_focus_ring_toolbar_selectable_item_background_borderless.xml"
+        "source": "me.rerere.androidvm-material-1.14.0-27:/drawable-v24/m3_focus_ring_toolbar_selectable_item_background_borderless.xml"
     },
     {
         "merged": "me.rerere.androidvm-release-49:/drawable-v24/m3_focus_ring_list_selector_background.xml",
-        "source": "me.rerere.androidvm-material-1.14.0-25:/drawable-v24/m3_focus_ring_list_selector_background.xml"
+        "source": "me.rerere.androidvm-material-1.14.0-27:/drawable-v24/m3_focus_ring_list_selector_background.xml"
     },
     {
         "merged": "me.rerere.androidvm-release-49:/drawable-v24/m3_focus_ring_item_background.xml",
-        "source": "me.rerere.androidvm-material-1.14.0-25:/drawable-v24/m3_focus_ring_item_background.xml"
+        "source": "me.rerere.androidvm-material-1.14.0-27:/drawable-v24/m3_focus_ring_item_background.xml"
     },
     {
         "merged": "me.rerere.androidvm-release-49:/drawable-v24/m3_focus_ring_framework_checkbox_background.xml",
-        "source": "me.rerere.androidvm-material-1.14.0-25:/drawable-v24/m3_focus_ring_framework_checkbox_background.xml"
+        "source": "me.rerere.androidvm-material-1.14.0-27:/drawable-v24/m3_focus_ring_framework_checkbox_background.xml"
     },
     {
         "merged": "me.rerere.androidvm-release-49:/drawable-v24/m3_focus_ring_control_background.xml",
-        "source": "me.rerere.androidvm-material-1.14.0-25:/drawable-v24/m3_focus_ring_control_background.xml"
+        "source": "me.rerere.androidvm-material-1.14.0-27:/drawable-v24/m3_focus_ring_control_background.xml"
     },
     {
         "merged": "me.rerere.androidvm-release-49:/drawable-v24/m3_focus_ring_toolbar_action_bar_item_background.xml",
-        "source": "me.rerere.androidvm-material-1.14.0-25:/drawable-v24/m3_focus_ring_toolbar_action_bar_item_background.xml"
+        "source": "me.rerere.androidvm-material-1.14.0-27:/drawable-v24/m3_focus_ring_toolbar_action_bar_item_background.xml"
     },
     {
         "merged": "me.rerere.androidvm-release-49:/drawable-v24/m3_focus_ring_framework_button_background_shape.xml",
-        "source": "me.rerere.androidvm-material-1.14.0-25:/drawable-v24/m3_focus_ring_framework_button_background_shape.xml"
+        "source": "me.rerere.androidvm-material-1.14.0-27:/drawable-v24/m3_focus_ring_framework_button_background_shape.xml"
     },
     {
         "merged": "me.rerere.androidvm-release-49:/drawable-v24/m3_focus_ring_item_background_borderless.xml",
-        "source": "me.rerere.androidvm-material-1.14.0-25:/drawable-v24/m3_focus_ring_item_background_borderless.xml"
+        "source": "me.rerere.androidvm-material-1.14.0-27:/drawable-v24/m3_focus_ring_item_background_borderless.xml"
     },
     {
         "merged": "me.rerere.androidvm-release-49:/drawable-v24/m3_focus_ring_toolbar_selectable_item_background.xml",
-        "source": "me.rerere.androidvm-material-1.14.0-25:/drawable-v24/m3_focus_ring_toolbar_selectable_item_background.xml"
+        "source": "me.rerere.androidvm-material-1.14.0-27:/drawable-v24/m3_focus_ring_toolbar_selectable_item_background.xml"
     },
     {
         "merged": "me.rerere.androidvm-release-49:/drawable-v24/m3_focus_ring_framework_button_background_borderless.xml",
-        "source": "me.rerere.androidvm-material-1.14.0-25:/drawable-v24/m3_focus_ring_framework_button_background_borderless.xml"
+        "source": "me.rerere.androidvm-material-1.14.0-27:/drawable-v24/m3_focus_ring_framework_button_background_borderless.xml"
     }
 ]

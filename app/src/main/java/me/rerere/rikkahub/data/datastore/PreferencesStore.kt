@@ -125,6 +125,9 @@ class SettingsStore(
         val GLOBAL_TOOL_SCRIPTS = booleanPreferencesKey("global_tool_scripts")
         val GLOBAL_TOOL_ACCESSIBILITY = booleanPreferencesKey("global_tool_accessibility")
         val GLOBAL_TOOL_POWER_MANAGEMENT = booleanPreferencesKey("global_tool_power_management")
+        val GLOBAL_TOOL_TERMUX = booleanPreferencesKey("global_tool_termux")
+        // 插件配置：插件 id -> 配置对象 JSON 文本（声明 config schema 的插件由用户编辑，热生效）
+        val PLUGIN_CONFIGS = stringPreferencesKey("plugin_configs")
 
         // 消息撤回
         val RECALL_SEGMENTED = booleanPreferencesKey("recall_segmented")
@@ -247,7 +250,7 @@ class SettingsStore(
                 translatePrompt = preferences[TRANSLATION_PROMPT] ?: DEFAULT_TRANSLATION_PROMPT,
                 translateThinkingBudget = preferences[TRANSLATE_THINKING_BUDGET] ?: 0,
                 suggestionPrompt = preferences[SUGGESTION_PROMPT] ?: DEFAULT_SUGGESTION_PROMPT,
-                ocrModelId = preferences[OCR_MODEL]?.let { Uuid.parse(it) } ?: Uuid.random(),
+                ocrModelId = preferences[OCR_MODEL]?.takeIf { it.isNotBlank() }?.let { Uuid.parse(it) },
                 ocrPrompt = preferences[OCR_PROMPT] ?: DEFAULT_OCR_PROMPT,
                 ocrEnabled = preferences[OCR_ENABLED] ?: true,
                 compressModelId = preferences[COMPRESS_MODEL]?.let { Uuid.parse(it) } ?: DEFAULT_AUTO_MODEL_ID,
@@ -267,6 +270,7 @@ class SettingsStore(
                 globalToolScripts = preferences[GLOBAL_TOOL_SCRIPTS] ?: false,
                 globalToolAccessibility = preferences[GLOBAL_TOOL_ACCESSIBILITY] ?: false,
                 globalToolPowerManagement = preferences[GLOBAL_TOOL_POWER_MANAGEMENT] ?: false,
+                globalToolTermux = preferences[GLOBAL_TOOL_TERMUX] ?: false,
                 recallSegmented = preferences[RECALL_SEGMENTED] ?: false,
                 recallBoundaryPunctuation = preferences[RECALL_BOUNDARY_PUNCTUATION] ?: "。！？～",
                 recallRollbackEnabled = preferences[RECALL_ROLLBACK_ENABLED] ?: true,
@@ -351,6 +355,9 @@ class SettingsStore(
                 enabledPlugins = preferences[ENABLED_PLUGINS]?.let {
                     runCatching { JsonInstant.decodeFromString<Set<String>>(it) }.getOrDefault(emptySet())
                 } ?: emptySet(),
+                pluginConfigs = preferences[PLUGIN_CONFIGS]?.let {
+                    runCatching { JsonInstant.decodeFromString<Map<String, String>>(it) }.getOrDefault(emptyMap())
+                } ?: emptyMap(),
                 pluginMarketRepo = preferences[PLUGIN_MARKET_REPO]
                     ?.takeIf { it != Settings.LEGACY_BROKEN_MARKET_REPO }
                     ?: Settings.DEFAULT_PLUGIN_MARKET_REPO,
@@ -494,7 +501,7 @@ class SettingsStore(
             preferences[TRANSLATION_PROMPT] = settings.translatePrompt
             preferences[TRANSLATE_THINKING_BUDGET] = settings.translateThinkingBudget
             preferences[SUGGESTION_PROMPT] = settings.suggestionPrompt
-            preferences[OCR_MODEL] = settings.ocrModelId.toString()
+            preferences[OCR_MODEL] = settings.ocrModelId?.toString() ?: ""
             preferences[OCR_PROMPT] = settings.ocrPrompt
             preferences[OCR_ENABLED] = settings.ocrEnabled
             preferences[COMPRESS_MODEL] = settings.compressModelId.toString()
@@ -518,6 +525,7 @@ class SettingsStore(
             preferences[GLOBAL_TOOL_SCRIPTS] = settings.globalToolScripts
             preferences[GLOBAL_TOOL_ACCESSIBILITY] = settings.globalToolAccessibility
             preferences[GLOBAL_TOOL_POWER_MANAGEMENT] = settings.globalToolPowerManagement
+            preferences[GLOBAL_TOOL_TERMUX] = settings.globalToolTermux
             preferences[RECALL_SEGMENTED] = settings.recallSegmented
             preferences[RECALL_BOUNDARY_PUNCTUATION] = settings.recallBoundaryPunctuation
             preferences[RECALL_ROLLBACK_ENABLED] = settings.recallRollbackEnabled
@@ -574,6 +582,7 @@ class SettingsStore(
             preferences[AUTONOMOUS_EXECUTION_ENABLED] = settings.autonomousExecutionEnabled
             preferences[KEEP_ALIVE_ENABLED] = settings.keepAliveEnabled
             preferences[ENABLED_PLUGINS] = JsonInstant.encodeToString(settings.enabledPlugins)
+            preferences[PLUGIN_CONFIGS] = JsonInstant.encodeToString(settings.pluginConfigs)
             preferences[PLUGIN_MARKET_REPO] = settings.pluginMarketRepo
             preferences[GITHUB_TOKEN] = settings.githubToken
             preferences[TAVERN_IMPORTED_KEYS] = settings.tavernImportedKeys
@@ -695,7 +704,7 @@ data class Settings(
     val enableSuggestion: Boolean = true,
     val suggestionModelId: Uuid? = null,
     val suggestionPrompt: String = DEFAULT_SUGGESTION_PROMPT,
-    val ocrModelId: Uuid = Uuid.random(),
+    val ocrModelId: Uuid? = null,
     val ocrPrompt: String = DEFAULT_OCR_PROMPT,
     val ocrEnabled: Boolean = true,
     val compressModelId: Uuid = Uuid.random(),
@@ -760,6 +769,8 @@ data class Settings(
     val globalToolAccessibility: Boolean = false,
     // AI 全能控制：全局电源管理开关（对所有助手生效，与助手自身的 localTools 取并集）
     val globalToolPowerManagement: Boolean = false,
+    // AI 全能控制：全局 Termux 桥接开关（对所有助手生效，与助手自身的 localTools 取并集）
+    val globalToolTermux: Boolean = false,
     // 消息撤回：范围（true=分段截断，false=整条）、边界标点、副作用回滚、撤回后告知 AI
     val recallSegmented: Boolean = false,
     val recallBoundaryPunctuation: String = "。！？～",
@@ -777,6 +788,9 @@ data class Settings(
     val autonomousExecutionEnabled: Boolean = true,
     // 插件市场：已启用插件 id 集合；插件启用后注入 systemPrompt 并显示快捷操作
     val enabledPlugins: Set<String> = emptySet(),
+    // 插件配置：声明了 config schema（plugin.json "config"）的插件，用户编辑后的配置对象 JSON 文本（按插件 id）。
+    // 写入后 settingsFlow 立即发射，ChatService 下一轮生成与 Hook 链实时读取 → 配置热生效，无需重启会话。
+    val pluginConfigs: Map<String, String> = emptyMap(),
     // 插件市场索引仓库（owner/repo，根目录放 plugins.json）
     val pluginMarketRepo: String = DEFAULT_PLUGIN_MARKET_REPO,
     // 内置「插件包制作技能」默认启用残留的一次性清理标记（旧版本自动启用过，新版本仅预置不启用）

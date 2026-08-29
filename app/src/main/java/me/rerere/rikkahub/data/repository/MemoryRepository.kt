@@ -36,6 +36,7 @@ class MemoryRepository(private val memoryDAO: MemoryDAO, private val database: A
         conversationId = conversationId,
         updatedAt = updatedAt,
         score = score,
+        assistantId = assistantId,
     )
 
     private fun RecallItem.toModel() = AssistantMemory(
@@ -48,6 +49,7 @@ class MemoryRepository(private val memoryDAO: MemoryDAO, private val database: A
         conversationId = conversationId,
         updatedAt = updatedAt,
         score = score,
+        assistantId = "",
     )
 
     // ---- 旧 API（兼容现有 UI，返回 durable 记忆） ----
@@ -66,6 +68,13 @@ class MemoryRepository(private val memoryDAO: MemoryDAO, private val database: A
 
     fun getGlobalMemoriesFlow(): Flow<List<AssistantMemory>> =
         getMemoriesOfAssistantFlow(GLOBAL_MEMORY_ID)
+
+    /** 全部 durable 记忆（跨助手，全局记忆库视图）。 */
+    fun getAllMemoriesFlow(): Flow<List<AssistantMemory>> =
+        memoryDAO.getAllMemoriesFlow().map { entities -> entities.map { it.toModel() } }
+
+    suspend fun getAllMemories(): List<AssistantMemory> =
+        memoryDAO.getAllMemories().map { it.toModel() }
 
     suspend fun getGlobalMemories(): List<AssistantMemory> =
         getMemoriesOfAssistant(GLOBAL_MEMORY_ID)

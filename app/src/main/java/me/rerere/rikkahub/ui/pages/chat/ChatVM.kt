@@ -108,6 +108,14 @@ class ChatVM(
             .getGenerationJobStateFlow(_conversationId)
             .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    val subagentRuns: StateFlow<me.rerere.rikkahub.data.ai.subagent.SubagentRunTracker.TrackerState> =
+        chatService.subagentRunTracker.state
+            .stateIn(viewModelScope, SharingStarted.Eagerly, me.rerere.rikkahub.data.ai.subagent.SubagentRunTracker.TrackerState())
+
+    val planEntries: StateFlow<List<me.rerere.rikkahub.data.ai.plan.PlanTracker.PlanEntry>> =
+        chatService.planTracker.state
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
     val processingStatus: StateFlow<String?> =
         chatService
             .getProcessingStatusFlow(_conversationId)

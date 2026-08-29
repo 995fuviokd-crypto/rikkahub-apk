@@ -592,6 +592,13 @@
   <string name="reasoning_medium">Medium</string>
   <string name="reasoning_medium_desc">The model will use more reasoning to answer questions.</string>
   <string name="reasoning_max">Max</string>
+  <string name="reasoning_desc_off">Thinking off: fastest response, no reasoning tokens</string>
+  <string name="reasoning_desc_auto">Auto: the model decides how much to think</string>
+  <string name="reasoning_desc_low">Low: quick answers, minimal thinking</string>
+  <string name="reasoning_desc_medium">Medium: balanced speed and depth</string>
+  <string name="reasoning_desc_high">High: deeper reasoning for complex tasks</string>
+  <string name="reasoning_desc_xhigh">Extra high: thorough multi-step reasoning</string>
+  <string name="reasoning_desc_max">Max: deepest thinking, slowest and most expensive</string>
   <string name="reasoning_off">Off</string>
   <string name="reasoning_off_desc">Turn off reasoning functionality, the model will directly answer questions.</string>
   <string name="reasoning_picker_hint">Not all models support depth adjustment. Refer to the model and provider documentation.</string>
@@ -867,6 +874,7 @@
   <string name="setting_model_page_enable_ocr_desc">When the model does not support images, automatically convert images to text descriptions using a vision model</string>
   <string name="setting_model_page_ocr_model">OCR Model</string>
   <string name="setting_model_page_ocr_model_desc">Model used for optical character recognition on images</string>
+  <string name="setting_model_page_ocr_model_auto">Auto (fast model fallback)</string>
   <string name="setting_model_page_ocr_prompt_vars">Variables: Image data: {images}</string>
   <string name="setting_model_page_prompt">Prompt</string>
   <string name="setting_model_page_reset_to_default">Reset to default</string>
@@ -950,6 +958,8 @@
   <string name="setting_extensions_accessibility_desc">Enable accessibility-based system automation (tap/scroll/input) for all assistants</string>
   <string name="setting_extensions_power_management">Power Management</string>
   <string name="setting_extensions_power_management_desc">Battery info and ignore battery optimizations for all assistants</string>
+  <string name="setting_extensions_termux">Termux Bridge</string>
+  <string name="setting_extensions_termux_desc">Let the AI run commands in the real Termux Linux environment for all assistants (requires Termux app + allow-external-apps)</string>
   <string name="setting_extensions_keep_alive">Background Keep-alive</string>
   <string name="setting_page_general_settings">General Settings</string>
   <string name="setting_page_interaction_notification_settings">Interaction &amp;amp; Notifications</string>
@@ -1422,6 +1432,8 @@
   <string name="assistant_page_local_tools_power_management_title">Power Management</string>
   <string name="assistant_page_local_tools_power_management_desc">Let the AI check battery status and guide you to exempt this app from battery restrictions for better background keep-alive</string>
   <string name="assistant_page_local_tools_battery_permission_required">Please allow this app to ignore battery optimizations for better background keep-alive</string>
+  <string name="assistant_page_local_tools_termux_title">Termux Bridge</string>
+  <string name="assistant_page_local_tools_termux_desc">Let the AI run commands in your real Termux Linux environment (requires Termux app, allow-external-apps=true and storage access)</string>
   <string name="accessibility_service_label">RikkaHub Accessibility</string>  <string name="accessibility_service_summary">Allows the AI to control your phone: open apps, tap screen elements, adjust volume, and navigate</string>
   <string name="accessibility_service_description">When enabled, RikkaHub can read the current screen and simulate taps, swipes, and system navigation so the AI assistant can control your phone on your behalf. Only used when you ask the assistant to control the device.</string>
   <string name="chat_message_tool_calendar_query">Query calendar events</string>

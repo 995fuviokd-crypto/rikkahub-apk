@@ -823,6 +823,7 @@
   <string name="setting_model_page_enable_ocr_desc">模型不支持图片时，自动用视觉模型把图片转成文字描述</string>
   <string name="setting_model_page_ocr_model">OCR 模型</string>
   <string name="setting_model_page_ocr_model_desc">用于图像光学字符识别的模型</string>
+  <string name="setting_model_page_ocr_model_auto">自动（回退快速模型）</string>
   <string name="setting_model_page_ocr_prompt_vars">变量：图像数据：{images}</string>
   <string name="setting_model_page_prompt">提示词</string>
   <string name="setting_model_page_reset_to_default">重置为默认</string>
@@ -1375,6 +1376,13 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="setting_update_reminder_pause_days">%1$d 天</string>
   <string name="setting_update_reminder_resume_now">立即恢复</string>
   <string name="reasoning_max">最大</string>
+  <string name="reasoning_desc_off">关闭思考：响应最快，不消耗推理 Token</string>
+  <string name="reasoning_desc_auto">自动：由模型自行决定思考深度</string>
+  <string name="reasoning_desc_low">低：快速回答，少量思考</string>
+  <string name="reasoning_desc_medium">中：速度与深度均衡</string>
+  <string name="reasoning_desc_high">高：更深入的推理，适合复杂任务</string>
+  <string name="reasoning_desc_xhigh">超高：彻底的多步推理</string>
+  <string name="reasoning_desc_max">最大：最深思考，最慢且消耗最多</string>
   <string name="setting_self_hosted_group">自托管模型</string>
   <string name="add_self_hosted_model">添加自托管模型</string>
   <string name="add_self_hosted_model_desc">配置自定义 OpenAI 兼容接口</string>

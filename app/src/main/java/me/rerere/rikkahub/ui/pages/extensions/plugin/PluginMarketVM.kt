@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -135,6 +136,12 @@ class PluginMarketVM(
                         refreshInstalled()
                     }
                 }
+        }
+        // 本地 DIY 插件目录热重载：往 plugins/ 写入/替换插件后防抖刷新已安装列表，无需手动操作
+        viewModelScope.launch {
+            pluginManager.directoryEvents
+                .debounce(500)
+                .collect { refreshInstalled() }
         }
     }
 

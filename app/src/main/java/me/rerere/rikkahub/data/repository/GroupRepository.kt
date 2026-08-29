@@ -17,6 +17,7 @@ import me.rerere.rikkahub.data.model.GroupRun
 import me.rerere.rikkahub.data.model.GroupSummary
 import me.rerere.rikkahub.data.model.MessageKind
 import me.rerere.rikkahub.data.model.RunStatus
+import me.rerere.rikkahub.data.ai.group.GroupCron
 import me.rerere.rikkahub.data.ai.group.GroupStore
 import me.rerere.rikkahub.utils.JsonInstant
 import kotlin.uuid.Uuid
@@ -25,6 +26,10 @@ class GroupRepository(
     private val dao: GroupDAO,
 ) : GroupStore {
     fun listGroups(): Flow<List<Group>> = dao.listGroups().map { list -> list.map { it.toGroup() } }
+
+    /** 配置了有效定时任务的群组（供 GroupScheduler 轮询） */
+    suspend fun listScheduledGroups(): List<Group> =
+        dao.listScheduledGroups().map { it.toGroup() }.filter { it.scheduleCron?.let { cron -> GroupCron.parse(cron) != null } == true }
 
     /**
      * 会话列表群组分区数据源：每个群组的最新运行状态 + 最新消息预览，实时更新。
@@ -74,6 +79,7 @@ class GroupRepository(
             mode = group.mode.name,
             membersJson = JsonInstant.encodeToString(group.members),
             orchestratorId = group.orchestratorId,
+            scheduleCron = group.scheduleCron,
             createdAt = if (group.createdAt > 0) group.createdAt else now,
             updatedAt = now,
         )
@@ -167,6 +173,7 @@ private fun GroupEntity.toGroup(): Group {
         mode = runCatching { GroupMode.valueOf(mode) }.getOrDefault(GroupMode.ORCHESTRATOR_WORKER),
         members = members,
         orchestratorId = orchestratorId,
+        scheduleCron = scheduleCron,
         createdAt = createdAt,
         updatedAt = updatedAt,
     )

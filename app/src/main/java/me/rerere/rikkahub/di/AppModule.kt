@@ -120,6 +120,8 @@ val appModule = module {
             workflowRunner = get(),
             pluginManager = get(),
             genMediaRepository = get(),
+            subagentRunTracker = get(),
+            planTracker = get(),
         )
     }
 
@@ -147,6 +149,14 @@ val appModule = module {
             scope = get(),
             runner = get(),
             repository = get(),
+        )
+    }
+
+    single {
+        me.rerere.rikkahub.data.ai.group.GroupScheduler(
+            scope = get(),
+            repository = get(),
+            runner = get<GroupRunner>(),
         )
     }
 

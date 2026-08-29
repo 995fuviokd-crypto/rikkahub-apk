@@ -81,6 +81,7 @@ data class AssistantMemory(
     val conversationId: String? = null,
     val updatedAt: Long = 0L,
     val score: Float = 0f,
+    val assistantId: String = "",
 )
 
 @Serializable

@@ -47,6 +47,7 @@ fun createBuiltInSubagentTools(
     assistant: Assistant,
     parentModel: Model,
     depth: Int = 0,
+    runTracker: SubagentRunTracker? = null,
 ): List<Tool> {
     if (!config.enabled) return emptyList()
     return listOf(
@@ -90,6 +91,7 @@ fun createBuiltInSubagentTools(
                     parentModel = parentModel,
                     depth = depth,
                     args = args,
+                    runTracker = runTracker,
                 )
             },
         )
@@ -104,11 +106,13 @@ private suspend fun executeDelegation(
     parentModel: Model,
     depth: Int,
     args: kotlinx.serialization.json.JsonElement,
+    runTracker: SubagentRunTracker? = null,
 ): List<UIMessagePart> {
     val prompt = (args as? JsonObject)?.get("prompt")?.let { (it as? JsonPrimitive)?.content }
     if (prompt.isNullOrBlank()) {
         return listOf(UIMessagePart.Text("Error: missing prompt"))
     }
+    val description = (args as? JsonObject)?.get("description")?.let { (it as? JsonPrimitive)?.content }
 
     // 深度上限检查：到顶后 fail loud（与 DSH 一致，工具可见但拒绝执行）
     if (depth >= config.maxDepth) {
@@ -130,8 +134,15 @@ private suspend fun executeDelegation(
         enableRecentChatsReference = false,
     )
 
-    return try {
-        val chunks = generationHandler.generateText(
+    // 子代理追踪：登记本次委派（模型/描述/深度），结束或失败时更新
+    val runId = runTracker?.recordStart(
+        model = childModel,
+        prompt = description?.takeIf { it.isNotBlank() } ?: prompt,
+        depth = depth,
+    )
+
+    val chunks = try {
+        generationHandler.generateText(
             settings = settings,
             model = childModel,
             messages = listOf(
@@ -152,31 +163,35 @@ private suspend fun executeDelegation(
                             assistant = assistant,
                             parentModel = childModel,
                             depth = depth + 1,
+                            runTracker = runTracker,
                         )
                     )
                 }
             },
             maxSteps = SUBAGENT_MAX_STEPS,
         ).last()
-
-        val finalMessages = (chunks as? GenerationChunk.Messages)?.messages.orEmpty()
-        val finalText = finalMessages
-            .lastOrNull { it.role == me.rerere.ai.core.MessageRole.ASSISTANT }
-            ?.parts
-            ?.filterIsInstance<UIMessagePart.Text>()
-            ?.joinToString("\n") { it.text }
-            ?.trim()
-            .orEmpty()
-
-        if (finalText.isBlank()) {
-            listOf(UIMessagePart.Text("Error: 子代理未产出有效结果"))
-        } else {
-            listOf(UIMessagePart.Text(finalText))
-        }
     } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+        runTracker?.recordEnd(runId.orEmpty(), success = false)
         throw e
     } catch (e: Exception) {
+        runTracker?.recordEnd(runId.orEmpty(), success = false)
         Log.e(TAG, "delegate_subagent failed", e)
-        listOf(UIMessagePart.Text("Error: 子代理执行失败 - ${e.message}"))
+        return listOf(UIMessagePart.Text("Error: 子代理执行失败 - ${e.message}"))
+    }
+    runTracker?.recordEnd(runId.orEmpty(), success = true)
+
+    val finalMessages = (chunks as? GenerationChunk.Messages)?.messages.orEmpty()
+    val finalText = finalMessages
+        .lastOrNull { it.role == me.rerere.ai.core.MessageRole.ASSISTANT }
+        ?.parts
+        ?.filterIsInstance<UIMessagePart.Text>()
+        ?.joinToString("\n") { it.text }
+        ?.trim()
+        .orEmpty()
+
+    return if (finalText.isBlank()) {
+        listOf(UIMessagePart.Text("Error: 子代理未产出有效结果"))
+    } else {
+        listOf(UIMessagePart.Text(finalText))
     }
 }

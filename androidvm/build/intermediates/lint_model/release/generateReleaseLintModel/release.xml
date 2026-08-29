@@ -27,6 +27,6 @@
       type="MAIN"
       applicationId="me.rerere.androidvm"
       generatedSourceFolders="build/generated/ap_generated_sources/release/out"
-      desugaredMethodsFiles="/root/.gradle/caches/9.5.0/transforms/05290b43de00c888d0724fa4cf345a30/transformed/D8BackportedDesugaredMethods.txt">
+      desugaredMethodsFiles="/root/.gradle/caches/9.5.0/transforms/03d2e2a113408de2e7e9a95906a14464/transformed/D8BackportedDesugaredMethods.txt">
   </artifact>
 </variant>

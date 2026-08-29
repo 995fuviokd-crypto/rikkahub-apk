@@ -7,7 +7,7 @@
     proguardFiles="build/intermediates/default_proguard_files/global/proguard-android-optimize.txt-9.3.1"
     consumerProguardFiles="consumer-rules.pro"
     partialResultsDir="build/intermediates/lint_vital_partial_results/release/lintVitalAnalyzeRelease/out"
-    desugaredMethodsFiles="/root/.gradle/caches/9.5.0/transforms/05290b43de00c888d0724fa4cf345a30/transformed/D8BackportedDesugaredMethods.txt">
+    desugaredMethodsFiles="/root/.gradle/caches/9.5.0/transforms/03d2e2a113408de2e7e9a95906a14464/transformed/D8BackportedDesugaredMethods.txt">
   <buildFeatures/>
   <sourceProviders>
     <sourceProvider
@@ -27,6 +27,6 @@
       type="MAIN"
       applicationId="me.rerere.androidvm"
       generatedSourceFolders="build/generated/ap_generated_sources/release/out"
-      desugaredMethodsFiles="/root/.gradle/caches/9.5.0/transforms/05290b43de00c888d0724fa4cf345a30/transformed/D8BackportedDesugaredMethods.txt">
+      desugaredMethodsFiles="/root/.gradle/caches/9.5.0/transforms/03d2e2a113408de2e7e9a95906a14464/transformed/D8BackportedDesugaredMethods.txt">
   </artifact>
 </variant>

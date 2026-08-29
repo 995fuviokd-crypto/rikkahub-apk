@@ -616,6 +616,10 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.Permissions> {
                                 PermissionPage()
                             }
+
+                            entry<Screen.MemoryLibrary> {
+                                me.rerere.rikkahub.ui.pages.memory.MemoryLibraryPage()
+                            }
                         }
                     )
                     AnimatedVisibility(
@@ -832,6 +836,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object Groups : Screen
+
+    @Serializable
+    data object MemoryLibrary : Screen
 
     @Serializable
     data class GroupEditor(val id: String?) : Screen

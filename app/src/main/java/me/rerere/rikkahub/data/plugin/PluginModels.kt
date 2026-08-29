@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.data.plugin
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 /** 插件元数据（plugin.json），位于插件包根目录 */
 @Serializable
@@ -34,7 +36,60 @@ data class PluginInfo(
      * 也支持"安装到工作区"预装（全局安装后 npx 直接命中本地, 无需每次联网解析）。
      */
     val npmPackages: List<String> = emptyList(),
+    /**
+     * 插件配置声明（对标 DSH 用户层配置热更新）。
+     * plugin.json 中 key 为 "config"（见 [PluginConfigSchema]）。
+     * 声明后市场页/技能页已安装详情渲染配置表单，编辑结果保存到
+     * settings.pluginConfigs；由于宿主每轮生成实时读取 settings，
+     * 配置变更立即作用于 systemPrompt 注入与 Hook 链，无需重建会话。
+     */
+    @SerialName("config")
+    val configSchema: PluginConfigSchema? = null,
 )
+
+/**
+ * 插件配置声明（plugin.json 的 "config" 字段）。
+ * 对标 DSH 插件：bundle 声明配置 schema，用户可按需覆盖，宿主读取时实时合并默认值。
+ */
+@Serializable
+data class PluginConfigSchema(
+    /** 配置字段（按声明顺序渲染表单） */
+    val fields: List<PluginConfigField> = emptyList(),
+)
+
+/** 单个配置字段定义 */
+@Serializable
+data class PluginConfigField(
+    /** 配置项 key（JSON 中的键名） */
+    val key: String,
+    /** 展示名，缺省用 key */
+    val label: String = "",
+    /** 控件类型：[PluginConfigField.TYPE_*]，缺省 text */
+    val type: String = TYPE_TEXT,
+    /** 字段说明（渲染为辅助文本） */
+    val description: String = "",
+    /** 是否必填（保存时为空值则提示） */
+    val required: Boolean = false,
+    /** 默认值（JSON 元素）：text/textarea/number/select 为字符串，bool 为 true/false，multi 为 JSON 数组 */
+    val default: JsonElement? = null,
+    /** select / multi 的候选选项 */
+    val options: List<String> = emptyList(),
+    /** secret 等输入框的占位/提示文本 */
+    val placeholder: String = "",
+) {
+    companion object {
+        const val TYPE_TEXT = "text"
+        const val TYPE_TEXTAREA = "textarea"
+        const val TYPE_NUMBER = "number"
+        const val TYPE_BOOL = "bool"
+        const val TYPE_SELECT = "select"
+        const val TYPE_MULTI = "multi"
+        const val TYPE_SECRET = "secret"
+
+        /** 需要用户输入文本的控件类型（其余为选择类） */
+        val TEXTUAL = setOf(TYPE_TEXT, TYPE_TEXTAREA, TYPE_NUMBER, TYPE_SECRET)
+    }
+}
 
 @Serializable
 data class PluginAction(
@@ -90,6 +145,10 @@ data class PluginExtensionPoints(
     val homeActions: List<PluginExtensionAction> = emptyList(),
     /** 侧边栏入口 */
     val sidebarActions: List<PluginExtensionAction> = emptyList(),
+    /** 聊天页顶部栏入口（下拉菜单形式） */
+    val chatToolbarActions: List<PluginExtensionAction> = emptyList(),
+    /** 聊天输入栏入口（提示词填入输入框，webview 打开插件页面） */
+    val inputBarActions: List<PluginExtensionAction> = emptyList(),
 )
 
 @Serializable
