@@ -259,7 +259,7 @@
   <string name="chat_message_tool_search_web">Search web: %1$s</string>
   <string name="chat_message_tool_submit">Submit</string>
   <string name="chat_page_cancel">Cancel</string>
-  <string name="chat_page_check_title_model_settings">Check title model settings</string>
+    <string name="chat_page_check_fast_model_settings">Check fast model settings</string>
   <string name="chat_page_clear_all_errors">Clear all</string>
   <string name="chat_page_compress_not_enough_messages">Not enough messages to compress. Reduce the number of messages to keep or add more messages.</string>
   <string name="chat_page_auto_compress_title">Auto Compress</string>
@@ -862,7 +862,7 @@
   <string name="setting_model_page_chat_model_desc">Global default chat model</string>
   <string name="setting_model_page_compress_model">Compress Model</string>
   <string name="setting_model_page_fast_model">Fast Model</string>
-  <string name="setting_model_page_fast_model_desc">Model for fast or background tasks, also used as fallback for title and suggestion models when not set</string>
+    <string name="setting_model_page_fast_model_desc">Model used for titles, chat suggestions, and other fast or background tasks</string>
   <string name="setting_model_page_compress_model_desc">Model for compressing conversation history</string>
   <string name="setting_model_page_memory_model">Memory Model</string>
   <string name="setting_model_page_memory_model_desc">Model for memory summary and vector embedding. Leave empty to follow the chat model</string>
