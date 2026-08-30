@@ -1214,6 +1214,7 @@
   <string name="stats_page_launch_count">App Launch Count</string>
   <string name="stats_page_output_tokens">Output Tokens</string>
   <string name="stats_page_title">Statistics</string>
+  <string name="stats_page_recent_activity">Recent Activity (30 days)</string>
   <string name="stats_page_total_conversations">Total Conversations</string>
   <string name="stats_page_total_messages">Total Messages</string>
   <string name="stop">Stop</string>
@@ -1480,6 +1481,7 @@
   <string name="memory_target_general">Scratch</string>
   <string name="memory_filter_all">All</string>
   <string name="memory_search_hint">Search memories</string>
+  <string name="memory_view_mode_toggle">Toggle list / graph view</string>
   <string name="memory_target_label">Target</string>
   <string name="memory_summary_label">Summary (optional)</string>
   <string name="memory_manage_desc">Durable memories are shared across conversations; scratch memories stay local to one conversation.</string>

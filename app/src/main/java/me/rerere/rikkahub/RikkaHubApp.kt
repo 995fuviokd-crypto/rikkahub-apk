@@ -131,12 +131,13 @@ class RikkaHubApp : Application() {
             }
         }
 
-        // 启动任务中心定时调度器（守护协程，每分钟检查 cron 触发的群组任务）
-        get<AppScope>().launch(Dispatchers.Default) {
-            runCatching { get<GroupScheduler>().start() }.onFailure {
-                Log.e(TAG, "start GroupScheduler failed", it)
-            }
-        }
+        // 群组功能入口已收敛（详见抽屉移除），后台 cron 调度器不再随 App 启动自动运行，
+        // 避免隐藏调度继续消耗资源；数据库层保留以免破坏 v31_32→v37 迁移链与既有数据。
+        // get<AppScope>().launch(Dispatchers.Default) {
+        //     runCatching { get<GroupScheduler>().start() }.onFailure {
+        //         Log.e(TAG, "start GroupScheduler failed", it)
+        //     }
+        // }
 
         // 启动 DSH/脚本插件运行时协调者：把已启用插件同步进 CordisKernel 并热插拔
         get<AppScope>().launch(Dispatchers.Default) {

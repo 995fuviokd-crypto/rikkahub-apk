@@ -25,6 +25,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,6 +57,13 @@ fun VmListPage(vm: VmVM, navigator: VmNavigator) {
     val progress by vm.progress.collectAsState()
     val installingId = vm.installingId.value
     var showCreate by remember { mutableStateOf(false) }
+
+    LaunchedEffect(vm.message.value) {
+        vm.message.value?.let {
+            snackbar.showSnackbar(it)
+            vm.message.value = null
+        }
+    }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text(stringResource(R.string.vm_list_title)) }) },

@@ -76,8 +76,9 @@ class VmVM(
                 }
                 _progress.value = _progress.value + (instance.id to 1f)
             } catch (e: Throwable) {
-                // 安装失败保留实例，UI 可重试
+                // 安装失败保留实例，UI 可重试；同时把原因透传给用户
                 e.printStackTrace()
+                message.value = context.getString(R.string.vm_msg_provision_failed, instance.name, e.message ?: e.javaClass.simpleName)
             } finally {
                 installingId.value = null
             }

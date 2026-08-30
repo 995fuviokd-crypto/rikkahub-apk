@@ -225,6 +225,14 @@ class AcpEnvironmentManager(
     }
 
     /**
+     * 仅执行离线 Node.js 安装（供 DevTool 卡片复用）：从 APK assets 解压内置运行时到 rootfs，
+     * 完全离线、不依赖网络。返回是否成功；失败由调用方回退到 apt/apk 在线安装。
+     */
+    suspend fun installNodeOfflineOnly(root: String): Boolean = withContext(Dispatchers.IO) {
+        runCatching { installNodeOffline(root) { } }.getOrDefault(false)
+    }
+
+    /**
      * 优先使用 APK 内置的离线 Node.js 运行时, 从 assets 解压进 rootfs 的 /opt/nodejs,
      * 并配置 npm 国内镜像与 PATH。完全离线, 不依赖网络。返回是否成功。
      */

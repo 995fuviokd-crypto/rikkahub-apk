@@ -1136,6 +1136,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="stats_page_launch_count">应用启动次数</string>
   <string name="stats_page_output_tokens">输出 Token</string>
   <string name="stats_page_title">统计</string>
+  <string name="stats_page_recent_activity">近期活跃（近 30 天）</string>
   <string name="stats_page_total_conversations">总对话数</string>
   <string name="stats_page_total_messages">总消息数</string>
   <string name="stop">停止</string>
@@ -1401,6 +1402,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="memory_target_general">临时</string>
   <string name="memory_filter_all">全部</string>
   <string name="memory_search_hint">搜索记忆</string>
+  <string name="memory_view_mode_toggle">切换列表 / 图谱视图</string>
   <string name="memory_target_label">作用域</string>
   <string name="memory_summary_label">摘要（可选）</string>
   <string name="memory_manage_desc">持久记忆跨会话共享；临时记忆仅存于单个会话。</string>

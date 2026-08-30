@@ -40,6 +40,7 @@
 
   <!-- VM messages -->
   <string name="vm_msg_launch_failed">启动失败：%1$s</string>
+  <string name="vm_msg_provision_failed">%1$s 初始化失败：%2$s</string>
   <string name="vm_msg_install_done">安装完成</string>
   <string name="vm_msg_install_failed">安装失败：%1$s</string>
   <string name="vm_msg_load_modules_failed">读取模块失败：%1$s</string>

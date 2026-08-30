@@ -72,7 +72,7 @@ import com.composables.icons.lucide.Lucide
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.Store02
-import me.rerere.hugeicons.stroke.UserGroup
+import me.rerere.hugeicons.stroke.Brain02
 import me.rerere.hugeicons.stroke.Shield01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Folder01
@@ -294,10 +294,6 @@ fun ChatDrawerContent(
                 conversations = conversations,
                 conversationJobs = conversationJobs.keys,
                 listState = conversationListState,
-                groups = drawerVm.groups.collectAsStateWithLifecycle().value,
-                onGroupClick = {
-                    navController.navigate(Screen.GroupDetail(it.id))
-                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
@@ -329,7 +325,7 @@ fun ChatDrawerContent(
                 }
             )
 
-            // 扩展功能折叠组：工作流 / 插件市场 / 群组 / 权限管理
+            // 扩展功能折叠组：工作流 / 插件市场 / 子代理 / 权限管理 / 记忆库
             Surface(
                 onClick = { extensionsExpanded = !extensionsExpanded },
                 modifier = Modifier
@@ -431,9 +427,9 @@ fun ChatDrawerContent(
                 }
             }
 
-            // 群组入口：插件市场下方
+            // 子代理入口：插件市场下方（Agent 模式管理，含子代理委派引擎配置与运行状态）
             Surface(
-                onClick = { navController.navigate(Screen.Groups) },
+                onClick = { navController.navigate(Screen.SettingAgent) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 4.dp),
@@ -448,20 +444,20 @@ fun ChatDrawerContent(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Icon(
-                        imageVector = HugeIcons.UserGroup,
+                        imageVector = HugeIcons.Brain02,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = "群组",
+                        text = "子代理",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
             }
 
-            // 权限管理入口：群组下方
+            // 权限管理入口：子代理下方
             Surface(
                 onClick = { navController.navigate(Screen.Permissions) },
                 modifier = Modifier

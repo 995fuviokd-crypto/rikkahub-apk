@@ -40,6 +40,7 @@
 
   <!-- VM messages -->
   <string name="vm_msg_launch_failed">Launch failed: %1$s</string>
+  <string name="vm_msg_provision_failed">Setup failed for %1$s: %2$s</string>
   <string name="vm_msg_install_done">Install complete</string>
   <string name="vm_msg_install_failed">Install failed: %1$s</string>
   <string name="vm_msg_load_modules_failed">Failed to load modules: %1$s</string>

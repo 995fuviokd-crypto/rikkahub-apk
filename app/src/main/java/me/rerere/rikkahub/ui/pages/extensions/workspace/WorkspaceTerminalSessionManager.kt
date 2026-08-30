@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import me.rerere.rikkahub.AppScope
 import java.util.concurrent.atomic.AtomicLong
 
@@ -179,23 +180,27 @@ class WorkspaceTerminalSessionManager internal constructor(
             true
         } else {
             try {
-                withContext(Dispatchers.IO) {
-                    if (!workspaceRootfsReady(appContext, root)) {
-                        false
-                    } else {
-                        prepareWorkspaceTerminalSession(
-                            context = appContext,
-                            root = root,
-                            androidLocalAccess = androidLocalAccess,
-                            localDirectoryUri = localDirectoryUri,
-                        )
-                        true
+                // 准备阶段(PRoot 修补 / 本地目录同步)加超时: 卡住时不再让 isCreating 永久占用,
+                // 页面能回到可重试状态, 而不是一直停留在"正在加载"
+                withTimeout(PREPARE_TIMEOUT_MS) {
+                    withContext(Dispatchers.IO) {
+                        if (!workspaceRootfsReady(appContext, root)) {
+                            false
+                        } else {
+                            prepareWorkspaceTerminalSession(
+                                context = appContext,
+                                root = root,
+                                androidLocalAccess = androidLocalAccess,
+                                localDirectoryUri = localDirectoryUri,
+                            )
+                            true
+                        }
                     }
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
-                Log.e(TAG, "Failed to prepare terminal for workspace $root", error)
+                Log.w(TAG, "Prepare terminal for workspace $root failed or timed out: ${error.message}")
                 false
             }
         }
@@ -203,7 +208,11 @@ class WorkspaceTerminalSessionManager internal constructor(
         if (!prepared) {
             updateState(root) {
                 it.copy(
-                    readiness = WorkspaceTerminalReadiness.NotInstalled,
+                    readiness = if (workspaceRootfsReady(appContext, root)) {
+                        WorkspaceTerminalReadiness.Loading
+                    } else {
+                        WorkspaceTerminalReadiness.NotInstalled
+                    },
                     isCreating = false,
                 )
             }
@@ -276,6 +285,9 @@ class WorkspaceTerminalSessionManager internal constructor(
 
     private companion object {
         const val TAG = "WorkspaceTerminalManager"
+
+        /** 终端会话准备(PRoot 修补/本地目录同步)超时: 超时后回到可重试状态, 避免永久"正在加载" */
+        const val PREPARE_TIMEOUT_MS = 60_000L
     }
 }
 

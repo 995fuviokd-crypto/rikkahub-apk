@@ -90,6 +90,7 @@ val viewModelModule = module {
             id = it.get(),
             repository = get(),
             terminalSessionManager = get(),
+            acpEnvironmentManager = get(),
         )
     }
     viewModelOf(::WorkflowListVM)

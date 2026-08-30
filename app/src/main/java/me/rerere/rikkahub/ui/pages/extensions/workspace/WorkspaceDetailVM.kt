@@ -28,6 +28,7 @@ class WorkspaceDetailVM(
     private val id: String,
     private val repository: WorkspaceRepository,
     private val terminalSessionManager: WorkspaceTerminalSessionManager,
+    private val acpEnvironmentManager: me.rerere.rikkahub.data.ai.agent.AcpEnvironmentManager,
 ) : ViewModel() {
     private val _state = MutableStateFlow(WorkspaceDetailState())
     val state = _state.asStateFlow()
@@ -363,6 +364,26 @@ class WorkspaceDetailVM(
         val script = tool.installScript
         if (script != null) {
             return executeScriptWithRetry(workspaceId, tool, script, version)
+        }
+        // Node.js: 优先使用 APK 内置离线运行时(assets/offline/node), 彻底免去联网安装失败
+        if (tool.id == "nodejs") {
+            val root = _state.value.workspace?.root
+            if (root != null) {
+                val offlineOk = runCatching { acpEnvironmentManager.installNodeOfflineOnly(root) }.getOrDefault(false)
+                if (offlineOk) {
+                    // 离线解压后软链到 /usr/local/bin, 校验 node/npm 可用
+                    val verify = runCatching {
+                        repository.executeCommand(
+                            workspaceId,
+                            "command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 && echo __OK__ || echo __NO__",
+                        )
+                    }.getOrNull()
+                    if (verify?.exitCode == 0 && verify.stdout.contains("__OK__")) {
+                        return true to null
+                    }
+                }
+                // 离线不可用时回退到 apt/apk（错误仅在联网路径也失败时返回）
+            }
         }
         // apt/apk 包安装：OpenJDK 根据所选版本渲染包名
         val resolvedPackage = if (tool.id == "openjdk") {

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -22,12 +23,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -35,6 +38,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,6 +54,8 @@ import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Download02
+import me.rerere.hugeicons.stroke.Grid02
+import me.rerere.hugeicons.stroke.HierarchySquare08
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Sparkles
@@ -73,6 +79,7 @@ fun MemoryLibraryPage(vm: MemoryLibraryVM = koinViewModel()) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var menuExpanded by remember { mutableStateOf(false) }
+    var graphMode by rememberSaveable { mutableStateOf(false) }
 
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
@@ -102,6 +109,12 @@ fun MemoryLibraryPage(vm: MemoryLibraryVM = koinViewModel()) {
                 title = { Text(stringResource(R.string.assistant_page_tab_memory)) },
                 navigationIcon = { BackButton() },
                 actions = {
+                    IconButton(onClick = { graphMode = !graphMode }) {
+                        Icon(
+                            imageVector = if (graphMode) HugeIcons.Grid02 else HugeIcons.HierarchySquare08,
+                            contentDescription = stringResource(R.string.memory_view_mode_toggle),
+                        )
+                    }
                     Box {
                         IconButton(onClick = { menuExpanded = true }) {
                             Icon(HugeIcons.MoreVertical, contentDescription = null)
@@ -154,67 +167,179 @@ fun MemoryLibraryPage(vm: MemoryLibraryVM = koinViewModel()) {
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = CustomColors.topBarColors.containerColor,
     ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item {
-                MemorySummaryCard(
-                    total = memories.size,
-                    globalCount = vm.filtered.value.count { it.assistantId == me.rerere.rikkahub.data.repository.MemoryRepository.GLOBAL_MEMORY_ID },
-                )
-            }
+        var selectedMemory by remember { mutableStateOf<AssistantMemory?>(null) }
 
-            item {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { vm.searchQuery.value = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text(stringResource(R.string.memory_search_hint)) },
-                    leadingIcon = { Icon(HugeIcons.Search01, null, modifier = Modifier.size(20.dp)) },
-                    singleLine = true,
-                )
-            }
-
-            item {
-                Row(
+        if (selectedMemory != null) {
+            val detail = selectedMemory!!
+            ModalBottomSheet(
+                onDismissRequest = { selectedMemory = null },
+                containerColor = MaterialTheme.colorScheme.surface,
+            ) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    FilterChip(
-                        selected = selectedTarget == null,
-                        onClick = { vm.selectedTarget.value = null },
-                        label = { Text(stringResource(R.string.memory_filter_all)) },
-                    )
-                    vm.targets().forEach { target ->
-                        FilterChip(
-                            selected = selectedTarget == target.name,
-                            onClick = { vm.selectedTarget.value = target.name },
-                            label = { Text(targetLabel(target)) },
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Surface(
+                            shape = MaterialTheme.shapes.small,
+                            color = targetColor(rememberMemoryTarget(detail)).copy(alpha = 0.15f),
+                            contentColor = targetColor(rememberMemoryTarget(detail)),
+                        ) {
+                            Text(
+                                text = targetLabel(rememberMemoryTarget(detail)),
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                        }
+                        if (detail.assistantId == me.rerere.rikkahub.data.repository.MemoryRepository.GLOBAL_MEMORY_ID) {
+                            Surface(
+                                shape = MaterialTheme.shapes.small,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                contentColor = MaterialTheme.colorScheme.primary,
+                            ) {
+                                Text(
+                                    text = "全局",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                )
+                            }
+                        }
+                        Text(text = " #${detail.id}", style = MaterialTheme.typography.titleMedium)
+                    }
+                    detail.summary?.takeIf { it.isNotBlank() }?.let { summary ->
+                        Text(
+                            text = summary,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                    Text(
+                        text = detail.content,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = formatTimestamp(detail.updatedAt),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = {
+                            vm.delete(detail)
+                            selectedMemory = null
+                        }) {
+                            Icon(HugeIcons.Delete01, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.size(4.dp))
+                            Text(stringResource(R.string.assistant_page_delete))
+                        }
                     }
                 }
             }
+        }
 
-            if (memories.isEmpty()) {
-                item {
-                    Text(
-                        text = "暂无记忆。开启助手的记忆功能并对话后，系统会在这里沉淀长期记忆。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 8.dp),
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+        ) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { vm.searchQuery.value = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                placeholder = { Text(stringResource(R.string.memory_search_hint)) },
+                leadingIcon = { Icon(HugeIcons.Search01, null, modifier = Modifier.size(20.dp)) },
+                singleLine = true,
+            )
+
+            Spacer(Modifier.size(8.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(
+                    selected = selectedTarget == null,
+                    onClick = { vm.selectedTarget.value = null },
+                    label = { Text(stringResource(R.string.memory_filter_all)) },
+                )
+                vm.targets().forEach { target ->
+                    FilterChip(
+                        selected = selectedTarget == target.name,
+                        onClick = { vm.selectedTarget.value = target.name },
+                        label = { Text(targetLabel(target)) },
                     )
                 }
             }
 
-            items(memories, key = { it.id }) { memory ->
-                MemoryLibraryItem(
-                    memory = memory,
-                    onDelete = { vm.delete(memory) },
-                )
+            Spacer(Modifier.size(12.dp))
+
+            if (graphMode) {
+                if (memories.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = "暂无记忆。开启助手的记忆功能并对话后，系统会在这里沉淀长期记忆。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(bottom = 88.dp),
+                    ) {
+                        MemoryGraphCanvas(
+                            memories = memories,
+                            onOpenNode = { selectedMemory = it },
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    item {
+                        MemorySummaryCard(
+                            total = memories.size,
+                            globalCount = vm.filtered.value.count { it.assistantId == me.rerere.rikkahub.data.repository.MemoryRepository.GLOBAL_MEMORY_ID },
+                        )
+                    }
+
+                    if (memories.isEmpty()) {
+                        item {
+                            Text(
+                                text = "暂无记忆。开启助手的记忆功能并对话后，系统会在这里沉淀长期记忆。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp),
+                            )
+                        }
+                    }
+
+                    items(memories, key = { it.id }) { memory ->
+                        MemoryLibraryItem(
+                            memory = memory,
+                            onDelete = { vm.delete(memory) },
+                        )
+                    }
+                }
             }
         }
     }

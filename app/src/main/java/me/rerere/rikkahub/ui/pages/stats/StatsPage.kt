@@ -27,6 +27,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LargeFlexibleTopAppBar
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -110,6 +111,65 @@ fun StatsPage(vm: StatsVM = koinViewModel()) {
                     StatsGrid(
                         stats = stats,
                         modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                }
+                item {
+                    RecentActivityCard(
+                        conversationsPerDay = stats.conversationsPerDay,
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecentActivityCard(conversationsPerDay: Map<LocalDate, Int>, modifier: Modifier = Modifier) {
+    val today = LocalDate.now()
+    val days = (29 downTo 0).map { today.minusDays(it.toLong()) }
+    val counts = days.map { date -> date to (conversationsPerDay[date] ?: 0) }
+    val maxCount = (counts.maxOfOrNull { it.second } ?: 1).coerceAtLeast(1)
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CustomColors.cardColorsOnSurfaceContainer,
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.stats_page_recent_activity),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            counts.forEach { (date, count) ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = date.month.getDisplayName(TextStyle.SHORT, Locale.getDefault()) + " " + date.dayOfMonth,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.width(64.dp),
+                    )
+                    LinearProgressIndicator(
+                        progress = { count.toFloat() / maxCount },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(8.dp)
+                            .clip(MaterialTheme.shapes.extraSmall),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    )
+                    Text(
+                        text = count.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.width(32.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.End,
                     )
                 }
             }
