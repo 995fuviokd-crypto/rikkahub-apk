@@ -1440,4 +1440,6 @@
     <string name="vm_install_downloading">正在下載系統 rootfs</string>
     <string name="vm_install_extracting">正在解壓縮檔案（%1$d 個項目）</string>
     <string name="vm_install_installed">系統安裝成功</string>
+  <string name="setting_page_preferences_network_auto_retry">自動重試</string>
+  <string name="setting_page_preferences_network_auto_retry_desc">發生網路錯誤時自動重試模型請求，最多重試 3 次。</string>
 </resources>

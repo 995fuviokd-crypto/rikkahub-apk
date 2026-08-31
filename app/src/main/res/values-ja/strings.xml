@@ -1442,4 +1442,6 @@ mDNSアドレス: .localホスト名を使用し、IPを知らなくても同じ
   <string name="vm_install_downloading">システム rootfs をダウンロード中</string>
   <string name="vm_install_extracting">ファイルを展開中（%1$d エントリ）</string>
   <string name="vm_install_installed">システムのインストールが完了しました</string>
+  <string name="setting_page_preferences_network_auto_retry">自動再試行</string>
+  <string name="setting_page_preferences_network_auto_retry_desc">ネットワークエラー時、モデルリクエストを最大3回再試行します。</string>
 </resources>

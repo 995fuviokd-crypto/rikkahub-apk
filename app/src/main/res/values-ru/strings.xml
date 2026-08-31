@@ -1442,4 +1442,6 @@
     <string name="vm_install_downloading">Загрузка системы rootfs</string>
     <string name="vm_install_extracting">Извлечение файлов (%1$d элементов)</string>
     <string name="vm_install_installed">Система успешно установлена</string>
+  <string name="setting_page_preferences_network_auto_retry">Автоповтор</string>
+  <string name="setting_page_preferences_network_auto_retry_desc">Повторять запросы модели до 3 раз при сетевых ошибках.</string>
 </resources>

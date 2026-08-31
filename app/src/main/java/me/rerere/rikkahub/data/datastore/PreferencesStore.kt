@@ -825,6 +825,7 @@ data class NetworkSetting(
     val proxyUrl: String = "",
     val proxyUsername: String = "",
     val proxyPassword: String = "",
+    val enableAutoRetry: Boolean = true,
 )
 
 @Serializable

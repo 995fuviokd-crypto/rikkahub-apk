@@ -1442,4 +1442,6 @@ mDNS 주소: .local 호스트네임을 사용하며, IP를 몰라도 같은 네�
     <string name="vm_install_downloading">시스템 rootfs 다운로드 중</string>
     <string name="vm_install_extracting">파일 압축 해제 중 (%1$d개 항목)</string>
     <string name="vm_install_installed">시스템 설치 완료</string>
+  <string name="setting_page_preferences_network_auto_retry">자동 재시도</string>
+  <string name="setting_page_preferences_network_auto_retry_desc">네트워크 오류 발생 시 모델 요청을 최대 3회 재시도합니다.</string>
 </resources>
