@@ -3,4 +3,5 @@
 	url = https://github.com/material-foundation/material-color-utilities.git
 [submodule "third_party/BlackBox"]
 	path = third_party/BlackBox
-	url = https://gitee.com/dingzhuangjian/BlackBox.git
+	url = https://github.com/995fuviokd-crypto/BlackBox.git
+	branch = compileSdk35
