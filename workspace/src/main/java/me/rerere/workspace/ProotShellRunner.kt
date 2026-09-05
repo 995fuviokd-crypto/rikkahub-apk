@@ -88,6 +88,9 @@ class ProotShellRunner(
             }
         }
 
+        // 动态选择 shell: bash 优先(Ubuntu/Debian), 缺失时回退 /bin/sh(Alpine busybox ash)。
+        // 命令模板(set -f / cd -- / eval "$2")均为 POSIX 语法, 两种 shell 语义一致
+        val shell = if (File(context.linuxDir, "bin/bash").isFile) "bin/bash" else "bin/sh"
         command += listOf(
             "/usr/bin/env",
             "-i",
@@ -100,12 +103,12 @@ class ProotShellRunner(
             "CI=true",
             "NO_COLOR=1",
             "PAGER=cat",
-            "/bin/bash",
+            "/$shell",
             "-l",
             "-c",
             // 命令通过位置参数传入, 避免含 shell 元字符的用户输入被二次解释;
             // set -f 禁用路径展开(glob), 防止通配符误触文件系统;
-            // eval "$2" 对命令文本只求值一次, 等价于 bash -c "$cmd"
+            // eval "$2" 对命令文本只求值一次, 等价于 sh -c "$cmd"
             "set -f && cd -- \"\$1\" && eval \"\$2\"",
             "rikkahub",
             context.prootCwd(),

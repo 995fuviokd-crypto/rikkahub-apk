@@ -37,11 +37,11 @@ class RootfsInstaller(
             } catch (e: InterruptedException) {
                 throw e
             } catch (e: Exception) {
-                // GitHub 直连失败（被墙/超时）时自动走 gh-proxy 镜像重试一次
-                val proxied = githubProxyUrl(url)
-                if (proxied == null) throw e
-                println("Rootfs direct download failed (${e.message}), retrying via gh-proxy")
-                download(proxied, archive, onProgress)
+                // 直连失败（被墙/超时/断流）时按域名映射表自动切换国内镜像重试一次：
+                // github.com/githubusercontent.com -> gh-proxy；cdimage.ubuntu.com -> 清华 TUNA
+                val mirrored = mirrorFallbackUrl(url) ?: throw e
+                println("Rootfs direct download failed (${e.message}), retrying via ${mirrored.second}")
+                download(mirrored.first, archive, onProgress)
             }
             extractTar(archive, stagingDir, format, onProgress)
             check(linuxDir.deleteRecursively()) { "Failed to clean up old rootfs: ${linuxDir.absolutePath}" }
@@ -441,15 +441,30 @@ class RootfsInstaller(
 
         /** gh-proxy 镜像前缀：GitHub 资源直连失败时的下载加速兜底 */
         private const val GH_PROXY_PREFIX = "https://gh-proxy.com/"
+
+        /** 清华 TUNA 的 ubuntu-cdimage 镜像根：cdimage.ubuntu.com 的完整国内镜像 */
+        private const val TUNA_UBUNTU_CDIMAGE_PREFIX =
+            "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cdimage/"
+        private const val UBUNTU_CDIMAGE_HOST = "cdimage.ubuntu.com"
     }
 
-    /** GitHub 链接返回镜像代理地址；其余链接返回 null（不适用代理） */
-    private fun githubProxyUrl(url: String): String? {
+    /**
+     * 下载源直连失败时的国内镜像回退表。
+     * 返回 (镜像 URL, 镜像名) 便于日志与进度提示；无匹配映射时返回 null。
+     */
+    internal fun mirrorFallbackUrl(url: String): Pair<String, String>? {
         val host = runCatching { URL(url).host }.getOrNull() ?: return null
-        return if (host.endsWith("github.com") || host.endsWith("githubusercontent.com")) {
-            GH_PROXY_PREFIX + url
-        } else {
-            null
+        return when {
+            host.endsWith("github.com") || host.endsWith("githubusercontent.com") ->
+                GH_PROXY_PREFIX + url to "gh-proxy"
+
+            host == UBUNTU_CDIMAGE_HOST -> {
+                // https://cdimage.ubuntu.com/<path> -> https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cdimage/<path>
+                val path = url.removePrefix("https://$UBUNTU_CDIMAGE_HOST").removePrefix("http://$UBUNTU_CDIMAGE_HOST")
+                (TUNA_UBUNTU_CDIMAGE_PREFIX + path.trimStart('/')) to "TUNA ubuntu-cdimage"
+            }
+
+            else -> null
         }
     }
 }

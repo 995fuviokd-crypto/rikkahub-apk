@@ -22,6 +22,7 @@ import me.rerere.workspace.WorkspaceManager
 import me.rerere.workspace.WorkspaceShellStatus
 import me.rerere.workspace.WorkspaceStorageArea
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import kotlin.uuid.Uuid
@@ -49,9 +50,15 @@ class WorkspaceRepository(
                 continue
             }
             val statusName = workspace.shellStatus
-            if ((statusName == WorkspaceShellStatus.READY.name || statusName == WorkspaceShellStatus.INSTALLING.name)
-                && !manager.hasRootfs(workspace.root)
-            ) {
+            if (statusName == WorkspaceShellStatus.INSTALLING.name) {
+                // INSTALLING 是纯瞬态: 安装协程随进程存活, 进程重启后不可能仍在安装。
+                // 若不重置(例如解压中途被杀且 bin/sh 已解出), 状态会永久停留在 INSTALLING,
+                // UI 永久显示"安装中"且禁用重试 — 统一回落到 DISABLED 让用户重装(重装幂等自愈)
+                Log.w(TAG, "Stale INSTALLING status, resetting to DISABLED: id=${workspace.id}, root=${workspace.root}")
+                updateShellState(workspace.id, WorkspaceShellStatus.DISABLED.name)
+                continue
+            }
+            if (statusName == WorkspaceShellStatus.READY.name && !manager.hasRootfs(workspace.root)) {
                 Log.w(TAG, "Rootfs missing, resetting shell status: id=${workspace.id}")
                 updateShellState(workspace.id, WorkspaceShellStatus.DISABLED.name)
             }
@@ -78,6 +85,35 @@ class WorkspaceRepository(
         manager.ensureWorkspace(workspace.root)
         dao.upsert(workspace)
         return workspace
+    }
+
+    /**
+     * 为外部系统(androidvm 的 Linux 容器实例)确保工作区登记存在(幂等)。
+     *
+     * 与 [create] 的差异: id 由调用方指定(= VM 实例 id, root 同步对齐, 终端据此可打开);
+     * 重名不抛异常而是自动追加后缀消解。目录只建骨架, rootfs 由调用方安装。
+     */
+    suspend fun ensureLinkedWorkspace(id: String, name: String): WorkspaceEntity = withContext(Dispatchers.IO) {
+        dao.getById(id)?.let { return@withContext it }
+        val base = name.trim().ifBlank { "VM" }
+        var finalName = base
+        var suffix = 1
+        while (isNameTaken(finalName, excludeId = id)) {
+            finalName = "$base ($suffix)"
+            suffix++
+        }
+        val now = System.currentTimeMillis()
+        val workspace = WorkspaceEntity(
+            id = id,
+            name = finalName,
+            root = id,
+            createdAt = now,
+            updatedAt = now,
+            lastAccessAt = null,
+        )
+        manager.ensureWorkspace(workspace.root)
+        dao.upsert(workspace)
+        workspace
     }
 
     suspend fun rename(id: String, name: String): Boolean {
@@ -184,6 +220,7 @@ class WorkspaceRepository(
             runInterruptible(Dispatchers.IO) {
                 rootfsInstaller.install(workspace.root, url, onProgress)
             }
+            ensureBaseShell(workspace)
             updateShellState(workspace, WorkspaceShellStatus.READY.name)
             return true
         } catch (e: CancellationException) {
@@ -201,6 +238,35 @@ class WorkspaceRepository(
             updateShellState(workspace, WorkspaceShellStatus.BROKEN.name)
             throw e
         }
+    }
+
+    /**
+     * Alpine 系 rootfs(minirootfs 仅 busybox ash)安装后自动补装 bash:
+     * 大量脚本(工具安装/自检/AI 生成的命令)默认 bash 语法, 缺失时静默劣化。
+     * 失败不阻塞安装结果(READY 不回退): bash 可后续在工具页手动补装,
+     * ProotShellRunner 已做 /bin/sh 回退, 无 bash 也能执行 POSIX 命令。
+     */
+    private suspend fun ensureBaseShell(workspace: WorkspaceEntity) {
+        runCatching {
+            val linuxDir = manager.linuxDir(workspace.root)
+            val hasBash = File(linuxDir, "bin/bash").isFile
+            val isAlpine = File(linuxDir, "etc/apk").isDirectory
+            if (!hasBash && isAlpine) {
+                val result = manager.executeCommand(
+                    root = workspace.root,
+                    command = "apk add --no-cache -q bash",
+                    timeoutMillis = 120_000,
+                )
+                if (result.exitCode == 0) {
+                    Log.i(TAG, "Alpine rootfs: bash installed for workspace ${workspace.id}")
+                } else {
+                    Log.w(
+                        TAG,
+                        "Alpine rootfs: bash install failed (exit=${result.exitCode}): ${result.stderr.take(200)}"
+                    )
+                }
+            }
+        }.onFailure { Log.w(TAG, "ensureBaseShell failed for ${workspace.id}", it) }
     }
 
     suspend fun listFiles(
@@ -433,6 +499,13 @@ class WorkspaceRepository(
 
     private suspend fun restoreShellState(workspace: WorkspaceEntity) {
         updateShellState(workspace.id, workspace.shellStatus)
+    }
+
+    /** 外部系统(VM Linux 容器)装完 rootfs 后标记 shell 就绪 */
+    suspend fun markShellReady(id: String) {
+        if (dao.getById(id) != null) {
+            updateShellState(id, WorkspaceShellStatus.READY.name)
+        }
     }
 
     private suspend fun updateShellState(

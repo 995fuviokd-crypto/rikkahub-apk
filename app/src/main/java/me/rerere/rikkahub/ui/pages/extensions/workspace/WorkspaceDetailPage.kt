@@ -721,6 +721,22 @@ private fun DevToolRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            // 安装中的实时进度(apt/apk 最新输出行), 让长时间下载/解包不再是黑盒转圈
+            if (state.installing) {
+                state.progress?.let { line ->
+                    Text(
+                        text = line,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                } ?: Text(
+                    text = stringResource(R.string.workspace_detail_installing),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         Spacer(Modifier.size(8.dp))
         when {
@@ -1254,4 +1270,4 @@ internal fun String.toShellStatusLabel(): String = when (this) {
 }
 
 private const val DEFAULT_ROOTFS_URL =
-    "https://cdimage.ubuntu.com/ubuntu-base/releases/25.10/release/ubuntu-base-25.10-base-arm64.tar.gz"
+    "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cdimage/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.4-base-arm64.tar.gz"

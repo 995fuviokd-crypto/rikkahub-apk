@@ -30,8 +30,10 @@ class WorkspaceVM(
         viewModelScope.launch {
             _installProgress.value = null
             _installError.value = null
+            var created: WorkspaceEntity? = null
             runCatching {
                 val workspace = repository.create(name)
+                created = workspace
                 if (!imageUrl.isNullOrBlank()) {
                     repository.installRootfs(workspace.id, imageUrl) { progress ->
                         _installProgress.value = progress
@@ -40,6 +42,11 @@ class WorkspaceVM(
             }.onFailure { e ->
                 if (e !is CancellationException) {
                     _installError.value = e.message ?: "Installation failed"
+                    // 镜像安装失败时清理刚创建的工作区, 避免列表积累残缺记录;
+                    // 用户重试会新建干净工作区, 而非在半成品上叠加
+                    created?.let { workspace ->
+                        runCatching { repository.delete(workspace.id) }
+                    }
                 }
             }.onSuccess {
                 _installProgress.value = null

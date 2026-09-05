@@ -2,6 +2,7 @@ package me.rerere.workspace
 
 import android.util.Log
 import java.io.File
+import java.io.RandomAccessFile
 import java.nio.file.Files
 
 class RootfsPatcher {
@@ -35,20 +36,8 @@ class RootfsPatcher {
         nameservers: List<String>,
     ) {
         val resolvConf = File(etcDir, "resolv.conf")
-        val shouldWrite = when {
-            Files.isSymbolicLink(resolvConf.toPath()) -> true
-            !resolvConf.exists() -> true
-            !resolvConf.isFile -> true
-            else -> resolvConf.readText()
-                .lineSequence()
-                .filter { it.trimStart().startsWith("nameserver ") }
-                .none { line ->
-                    val server = line.trim().removePrefix("nameserver").trim()
-                    server.isNotBlank() && server !in LOCAL_RESOLVERS
-                }
-        }
-        if (!shouldWrite) return
-
+        // 总是重写: 镜像自带的 resolv.conf 可能指向构建环境的内网 DNS(已失效),
+        // 且系统 DNS 会随网络切换变化, 每次 patch 都应刷新为当前可用的解析器
         if (resolvConf.exists() || Files.isSymbolicLink(resolvConf.toPath())) {
             resolvConf.delete()
         }
@@ -411,8 +400,9 @@ class RootfsPatcher {
     /** rikkahub.sh 模板版本标记: 内容演进时递增, 触发已安装 rootfs 的模板升级 */
     private val SHELL_ENV_VERSION_MARKER = "rk-ext:2"
 
+    // shebang 用 /bin/sh: Alpine minirootfs 无 bash, 脚本内容为 POSIX 语法, 两种 shell 行为一致
     private val DOCTOR_SCRIPT = """
-        #!/bin/bash
+        #!/bin/sh
         # RikkaHub workspace self-check (usage: rk-doctor)
         PASS=0; FAIL=0
         ok()  { echo "[PASS] ${'$'}1"; PASS=${'$'}((PASS+1)); }
@@ -493,19 +483,82 @@ class RootfsPatcher {
         val etcDir = File(linuxDir, "etc/apt")
         if (!etcDir.isDirectory) return
 
-        // 1) 传统 sources.list（单文件）
-        patchOneLineSource(File(etcDir, "sources.list"))
+        val oneLineFiles = (
+            listOf(File(etcDir, "sources.list")) +
+                File(etcDir, "sources.list.d").takeIf { it.isDirectory }
+                    ?.listFiles { f -> f.isFile && f.name.endsWith(".list") }.orEmpty()
+            ).filter { it.isFile }
+        val deb822Files = File(etcDir, "sources.list.d").takeIf { it.isDirectory }
+            ?.listFiles { f -> f.isFile && f.name.endsWith(".sources") }.orEmpty()
+            .filter { it.isFile }
 
-        // 2) sources.list.d/*.list（传统单行格式）
-        val listDir = File(etcDir, "sources.list.d")
-        if (listDir.isDirectory) {
-            listDir.listFiles { f -> f.isFile && f.name.endsWith(".list") }
-                ?.forEach { patchOneLineSource(it) }
-
-            // 3) *.sources（Deb822 格式, Ubuntu 24.04+ 默认）
-            listDir.listFiles { f -> f.isFile && f.name.endsWith(".sources") }
-                ?.forEach { patchDeb822Source(it) }
+        // Ubuntu arm64 必须走 ubuntu-ports 档案(TUNA 的 ubuntu/ 只含 amd64/i386);
+        // EOL 版本(如 25.10 questing)的包已从 ports 下架, 仅 old-releases 保留主套件快照
+        val arch = detectRootfsArch(linuxDir)
+        val ubuntuPath = if (arch == "x86_64" || arch == "x86") "ubuntu" else "ubuntu-ports"
+        val eolUbuntu = (oneLineFiles + deb822Files).any { hasEolUbuntuSuite(it) }
+        // 最小 rootfs(如 ubuntu-base)可能没装 ca-certificates, apt 走 https 会证书校验失败;
+        // 探测到可信 CA 捆绑才用 https, 否则镜像统一走 http
+        val scheme = if (hasTrustedCaBundle(linuxDir)) "https" else "http"
+        // old-releases 直连上游(TUNA 的 ubuntu-old-releases 镜像不全, 实测缺 oracular/mantic 等);
+        // 上游 old-releases.ubuntu.com 含全部架构(含 arm64)且 http/https 均可用
+        val ubuntuBase = if (eolUbuntu) {
+            "$scheme://old-releases.ubuntu.com/ubuntu/"
+        } else {
+            "$scheme://$TUNA_HOST/$ubuntuPath/"
         }
+
+        oneLineFiles.forEach { patchOneLineSource(it, ubuntuBase, eolUbuntu) }
+        deb822Files.forEach { patchDeb822Source(it, ubuntuBase, eolUbuntu) }
+    }
+
+    /** 是否具备可信 CA 捆绑(ca-certificates 包); 缺失时 apt https 会证书校验失败 */
+    private fun hasTrustedCaBundle(linuxDir: File): Boolean =
+        File(linuxDir, "usr/share/ca-certificates").isDirectory &&
+            (File(linuxDir, "etc/ssl/certs/ca-certificates.crt").exists() ||
+                File(linuxDir, "etc/ssl/certs").isDirectory)
+
+    /** 从 rootfs 内 ELF 二进制的 e_machine 字段探测架构; 失败兜底 arm64(Android 设备主流) */
+    private fun detectRootfsArch(linuxDir: File): String {
+        for (rel in ARCH_SNIFF_BINARIES) {
+            val file = runCatching { File(linuxDir, rel).canonicalFile }.getOrDefault(File(linuxDir, rel))
+            if (!file.isFile || file.length() < 20L) continue
+            val machine = runCatching {
+                RandomAccessFile(file, "r").use { raf ->
+                    val header = ByteArray(20)
+                    if (raf.read(header) != 20) return@use -1
+                    if ((header[0].toInt() and 0xff) != 0x7f ||
+                        (header[1].toInt() and 0xff) != 0x45 ||
+                        (header[2].toInt() and 0xff) != 0x4c ||
+                        (header[3].toInt() and 0xff) != 0x46
+                    ) {
+                        return@use -1
+                    }
+                    (header[18].toInt() and 0xff) or ((header[19].toInt() and 0xff) shl 8)
+                }
+            }.getOrDefault(-1)
+            when (machine) {
+                183 -> return "arm64"
+                62 -> return "x86_64"
+                40 -> return "arm"
+                3, 8 -> return "x86"
+            }
+        }
+        return "arm64"
+    }
+
+    /** 文件内任一 Ubuntu 套件基名命中 EOL 名单即视为 EOL 版本源 */
+    private fun hasEolUbuntuSuite(file: File): Boolean {
+        val text = file.readText()
+        val suites = if (file.extension == "sources") {
+            text.lineSequence()
+                .filter { it.trimStart().startsWith("Suites:") }
+                .flatMap { it.trim().removePrefix("Suites:").trim().split(WHITESPACE_REGEX) }
+                .toList()
+        } else {
+            APT_SOURCE_LINE_REGEX.findAll(text).map { it.groupValues[3] }.toList()
+        }
+        return suites.any { it.substringBefore('-') in EOL_UBUNTU_CODENAMES }
     }
 
     private fun ensureApkMirror(linuxDir: File) {
@@ -523,14 +576,10 @@ class RootfsPatcher {
         }
     }
 
-    private fun patchOneLineSource(file: File) {
-        if (!file.isFile) return
+    private fun patchOneLineSource(file: File, ubuntuBase: String, eolUbuntu: Boolean) {
         val text = file.readText()
-        if (text.contains("mirrors")) return
-        val patched = text.replace(ONE_LINE_SOURCE_REGEX) { m ->
-            val prefix = m.groupValues[1]
-            val distro = m.groupValues[2]
-            "$prefix https://mirrors.tuna.tsinghua.edu.cn/$distro/ "
+        val patched = rewriteTextPreserveNewline(text) { line ->
+            rewriteOneLineSource(line, ubuntuBase, eolUbuntu)
         }
         if (patched != text) {
             file.writeText(patched)
@@ -538,27 +587,78 @@ class RootfsPatcher {
         }
     }
 
-    private fun patchDeb822Source(file: File) {
-        if (!file.isFile) return
+    /** 逐行重写; lineSequence 按 split 语义保留行尾空元素, joinToString 可完整还原行尾换行 */
+    private fun rewriteTextPreserveNewline(text: String, transform: (String) -> String): String =
+        text.lineSequence().joinToString("\n") { transform(it) }
+
+    /** 单行源重写: EOL 的 pocket 套件(updates/security/backports)在 old-releases 不存在, 整行注释掉 */
+    private fun rewriteOneLineSource(line: String, ubuntuBase: String, eolUbuntu: Boolean): String {
+        val m = APT_SOURCE_LINE_REGEX.find(line) ?: return line
+        val uri = m.groupValues[2]
+        val suite = m.groupValues[3]
+        val isUbuntu = isUbuntuHost(uri)
+        if (isUbuntu && eolUbuntu && suite.contains('-') && suite.substringBefore('-') in EOL_UBUNTU_CODENAMES) {
+            return "# $line"
+        }
+        val newUri = rewriteAptUri(uri, ubuntuBase, eolUbuntu) ?: return line
+        return line.replaceRange(m.groups[2]!!.range, newUri)
+    }
+
+    private fun patchDeb822Source(file: File, ubuntuBase: String, eolUbuntu: Boolean) {
         val text = file.readText()
-        if (text.contains("mirrors")) return
-        val patched = text.replace(DEB822_URIS_REGEX) { m ->
-            val uris = m.groupValues[1]
-            val patchedUris = uris.split(WHITESPACE_REGEX).joinToString(" ") { uri ->
-                val trimmed = uri.trim()
-                when {
-                    trimmed.contains("debian") ->
-                        trimmed.replace(DEBIAN_ARCHIVE_REGEX, "https://mirrors.tuna.tsinghua.edu.cn/debian/")
-                    trimmed.contains("ubuntu") ->
-                        trimmed.replace(UBUNTU_ARCHIVE_REGEX, "https://mirrors.tuna.tsinghua.edu.cn/ubuntu/")
-                    else -> trimmed
+        val patched = rewriteTextPreserveNewline(text) { line ->
+            when {
+                line.trimStart().startsWith("URIs:") -> {
+                    val uris = line.trim().removePrefix("URIs:").trim().split(WHITESPACE_REGEX)
+                    val newUris = uris.joinToString(" ") { rewriteAptUri(it, ubuntuBase, eolUbuntu) ?: it }
+                    if (newUris == uris.joinToString(" ")) line else "URIs: $newUris"
                 }
+                eolUbuntu && line.trimStart().startsWith("Suites:") -> {
+                    val suites = line.trim().removePrefix("Suites:").trim().split(WHITESPACE_REGEX)
+                    val kept = suites.filter {
+                        it.substringBefore('-') !in EOL_UBUNTU_CODENAMES || !it.contains('-')
+                    }.ifEmpty { suites.map { it.substringBefore('-') }.distinct() }
+                    if (kept == suites) line else "Suites: ${kept.joinToString(" ")}"
+                }
+                else -> line
             }
-            "URIs: $patchedUris"
         }
         if (patched != text) {
             file.writeText(patched)
             Log.i(TAG, "Patched apt Deb822 source: ${file.name}")
+        }
+    }
+
+    private fun isUbuntuHost(uri: String): Boolean {
+        val host = uri.substringAfter("://", "").substringBefore('/').lowercase()
+        return host in OFFICIAL_UBUNTU_HOSTS || (host == TUNA_HOST && uri.contains("ubuntu"))
+    }
+
+    /**
+     * apt 源 URI 重写引擎, 返回 null 表示保持原样:
+     * - Ubuntu/Debian 官方域名换 TUNA 对应镜像(arm64 走 ubuntu-ports; EOL 走 ubuntu-old-releases)
+     * - 修正历史误 patch(arm64 源曾被写到 amd64 档案 /ubuntu/)
+     * - 用户自配镜像域名(mirrors.*)尊重不动
+     */
+    private fun rewriteAptUri(uri: String, ubuntuBase: String, eolUbuntu: Boolean): String? {
+        val schemeEnd = uri.indexOf("://")
+        if (schemeEnd <= 0) return null
+        val rest = uri.substring(schemeEnd + 3)
+        val host = rest.substringBefore('/').lowercase()
+        val path = "/" + rest.substringAfter('/', "").trimEnd('/')
+        val targetPath = "/" + ubuntuBase.substringAfter("://").substringAfter('/').trimEnd('/')
+        return when {
+            host in OFFICIAL_UBUNTU_HOSTS -> ubuntuBase
+            host in OFFICIAL_DEBIAN_HOSTS -> ubuntuBase.substringBefore("://") + "://$TUNA_HOST/debian/"
+            host == TUNA_HOST -> when {
+                path == targetPath -> null
+                (path == "/ubuntu" || path == "/ubuntu-ports") && eolUbuntu -> ubuntuBase
+                path == "/ubuntu" && targetPath == "/ubuntu-ports" -> ubuntuBase
+                path == "/ubuntu-ports" && targetPath == "/ubuntu" -> ubuntuBase
+                else -> null
+            }
+            host.contains("mirror") -> null
+            else -> null
         }
     }
 
@@ -573,29 +673,54 @@ class RootfsPatcher {
         private const val TAG = "RootfsPatcher"
         private const val MAX_DNS_SERVERS = 3
         private const val DEFAULT_HOSTNAME = "localhost"
-        private val WHITESPACE_REGEX = Regex("\\s+")
-        private val LOCAL_RESOLVERS = setOf(
-            "127.0.0.1",
-            "127.0.0.53",
-            "::1",
+        private const val TUNA_HOST = "mirrors.tuna.tsinghua.edu.cn"
+
+        /** Ubuntu 官方 apt 域名(arm64 镜像源指向 ports.ubuntu.com) */
+        private val OFFICIAL_UBUNTU_HOSTS = setOf(
+            "archive.ubuntu.com",
+            "security.ubuntu.com",
+            "ports.ubuntu.com",
+            "old-releases.ubuntu.com",
         )
+        private val OFFICIAL_DEBIAN_HOSTS = setOf(
+            "deb.debian.org",
+            "security.debian.org",
+        )
+
+        /**
+         * 已从 ports 下架、仅存于 old-releases 的 Ubuntu 代号(2026-09 实测; LTS 不在其中)。
+         * 注意: EOL 日期与实际迁移不同步——questing(25.10)/plucky(25.04) 虽已停止支持,
+         * 但 ports 上仍在, 故不列入, 否则会被错误重定向到 old-releases 而 404。
+         */
+        private val EOL_UBUNTU_CODENAMES = setOf(
+            "oracular", // 24.10
+            "mantic",   // 23.10
+            "lunar",    // 23.04
+            "kinetic",  // 22.10
+            "impish",   // 21.10
+            "hirsute",  // 21.04
+            "groovy",   // 20.10
+        )
+
+        /** 架构探测候选: 依序尝试, 第一个可读 ELF 的二进制生效 */
+        private val ARCH_SNIFF_BINARIES = listOf(
+            "bin/sh",
+            "bin/busybox",
+            "usr/bin/env",
+            "usr/bin/apt-get",
+            "usr/bin/dpkg",
+            "usr/bin/python3",
+            "bin/mount",
+        )
+        private val WHITESPACE_REGEX = Regex("\\s+")
         private val DEFAULT_DNS_SERVERS = listOf(
             "223.5.5.5",
             "1.1.1.1",
             "8.8.8.8",
         )
-        private val ONE_LINE_SOURCE_REGEX = Regex(
-            """(deb|deb-src)\s+https?://[^\s]+(debian|ubuntu)[^\s]*\s+"""
-        )
-        private val DEB822_URIS_REGEX = Regex(
-            """URIs:\s+(.+)""",
+        private val APT_SOURCE_LINE_REGEX = Regex(
+            "^(deb|deb-src)\\s+(\\S+)\\s+(\\S+)",
             setOf(RegexOption.MULTILINE),
-        )
-        private val DEBIAN_ARCHIVE_REGEX = Regex(
-            """https?://[^\s]*debian[^\s]*"""
-        )
-        private val UBUNTU_ARCHIVE_REGEX = Regex(
-            """https?://[^\s]*ubuntu[^\s]*"""
         )
         private val APK_REPO_REGEX = Regex(
             """https?://[^\s]*alpinelinux\.org/alpine/([^\s]*)"""

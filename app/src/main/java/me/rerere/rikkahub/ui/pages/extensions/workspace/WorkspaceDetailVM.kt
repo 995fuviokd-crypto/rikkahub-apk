@@ -29,6 +29,9 @@ class WorkspaceDetailVM(
     private val repository: WorkspaceRepository,
     private val terminalSessionManager: WorkspaceTerminalSessionManager,
     private val acpEnvironmentManager: me.rerere.rikkahub.data.ai.agent.AcpEnvironmentManager,
+    // 批量安装走 App 级作用域: 离开详情页不中断安装,
+    // 避免中途杀掉 apt 导致 dpkg 锁残留、后续所有安装永久失败
+    private val appScope: me.rerere.rikkahub.AppScope,
 ) : ViewModel() {
     private val _state = MutableStateFlow(WorkspaceDetailState())
     val state = _state.asStateFlow()
@@ -244,7 +247,8 @@ class WorkspaceDetailVM(
     private val _devToolsChecking = MutableStateFlow(false)
     val devToolsChecking = _devToolsChecking.asStateFlow()
 
-    private val _devToolsInstallingAll = MutableStateFlow(false)
+    // 批量安装状态由进程级注册表承载: 离开页面后旧 VM 销毁, 重进页面新 VM 仍能看到后台批量安装进行中
+    private val _devToolsInstallingAll = DevToolsInstallRegistry.batchRunningFlow(id)
     val devToolsInstallingAll = _devToolsInstallingAll.asStateFlow()
 
     /** 检测开发工具安装状态：对每个工具执行 command -v <cmd> */
@@ -279,14 +283,19 @@ class WorkspaceDetailVM(
                 .filter { it.startsWith("FOUND:") }
                 .mapNotNull { it.removePrefix("FOUND:").trim().takeIf { it.isNotEmpty() } }
                 .toSet()
+            val installingNow = DevToolsInstallRegistry.installingToolsFlow(workspace.id).value
             val detected = current.map { state ->
-                state.copy(
-                    checking = false,
-                    // 多条命令共用同一检测命令（如 nodejs 用 "node" 检测但包内含 npm）时，
-                    // 只要其中任意一条命令存在即视为已安装
-                    installed = state.tool.command.split(" ").any { it in found },
-                    error = null,
-                )
+                when {
+                    // 后台(AppScope)仍在安装中的工具: 保持 installing 展示, 半装状态 command -v 必然缺失, 不能据此判未装
+                    state.tool.id in installingNow -> state.copy(checking = false, installing = true, error = null)
+                    else -> state.copy(
+                        checking = false,
+                        // 多条命令共用同一检测命令（如 nodejs 用 "node" 检测但包内含 npm）时，
+                        // 只要其中任意一条命令存在即视为已安装
+                        installed = state.tool.command.split(" ").any { it in found },
+                        error = null,
+                    )
+                }
             }
             _devTools.value = detected
             _devToolsChecking.value = false
@@ -299,25 +308,48 @@ class WorkspaceDetailVM(
     fun installDevTool(id: String) {
         val workspace = _state.value.workspace ?: return
         if (workspace.shellStatus != WorkspaceShellStatus.READY.name) return
-        viewModelScope.launch {
-            _devTools.update { list ->
-                list.map { if (it.tool.id == id) it.copy(installing = true, error = null) else it }
-            }
-            val tool = _devTools.value.find { it.tool.id == id } ?: return@launch
-            val result = executeToolInstall(workspace.id, tool.tool, tool.selectedVersion)
-            _devTools.update { list ->
-                list.map {
-                    if (it.tool.id == id) {
-                        it.copy(
-                            installing = false,
-                            installed = result.first,
-                            error = result.second,
-                        )
-                    } else it
+        // 注册表防重入: 后台批量安装/单装仍在进行时, 重复点击直接忽略, 避免并发 apt 撞锁
+        if (DevToolsInstallRegistry.isToolInstalling(workspace.id, id)) return
+        DevToolsInstallRegistry.markInstalling(workspace.id, id)
+        // AppScope: 离开页面安装继续; 状态更新对已销毁 VM 无害(StateFlow 仍可写)
+        appScope.launch {
+            try {
+                _devTools.update { list ->
+                    list.map {
+                        if (it.tool.id == id) {
+                            it.copy(installing = true, error = null, progress = null)
+                        } else it
+                    }
                 }
+                val tool = _devTools.value.find { it.tool.id == id } ?: return@launch
+                val result = executeToolInstall(workspace.id, tool.tool, tool.selectedVersion) { chunk ->
+                    latestProgressLine(chunk)?.let { line ->
+                        _devTools.update { list ->
+                            list.map { if (it.tool.id == id) it.copy(progress = line) else it }
+                        }
+                    }
+                }
+                _devTools.update { list ->
+                    list.map {
+                        if (it.tool.id == id) {
+                            it.copy(
+                                installing = false,
+                                installed = result.first,
+                                error = result.second,
+                                progress = null,
+                            )
+                        } else it
+                    }
+                }
+            } finally {
+                DevToolsInstallRegistry.markInstallDone(workspace.id, id)
             }
         }
     }
+
+    /** 从命令输出块中提取最后一行非空文本作为进度摘要(兼容回车进度条刷新) */
+    private fun latestProgressLine(chunk: String): String? =
+        chunk.split('\n', '\r').lastOrNull { it.isNotBlank() }?.trim()?.take(120)?.takeIf { it.isNotEmpty() }
 
     /** 选择某个工具要安装的版本（仅支持可选版本的工具） */
     fun selectDevToolVersion(id: String, version: String) {
@@ -330,29 +362,76 @@ class WorkspaceDetailVM(
     fun installAllDevTools() {
         val workspace = _state.value.workspace ?: return
         if (workspace.shellStatus != WorkspaceShellStatus.READY.name) return
-        if (_devToolsInstallingAll.value) return
-        viewModelScope.launch {
-            _devToolsInstallingAll.value = true
-            val missing = _devTools.value.filter { !it.installed && !it.installing }
-            if (missing.isNotEmpty()) {
-                for (state in missing) {
-                    _devTools.update { list ->
-                        list.map {
-                            if (it.tool.id == state.tool.id) it.copy(installing = true, error = null) else it
+        // CAS 防重入: 注册表流跨 VM 实例共享, 重进页面后重复点击也不会并发起跑两批安装
+        if (!_devToolsInstallingAll.compareAndSet(expect = false, update = true)) return
+        // AppScope: 批量安装可达数十分钟, 离开页面必须继续跑,
+        // 中途杀进程会留下 dpkg 锁导致后续全部安装失败
+        appScope.launch {
+            try {
+                val installingNow = DevToolsInstallRegistry.installingToolsFlow(workspace.id).value
+                val missing = _devTools.value.filter { !it.installed && it.tool.id !in installingNow }
+                if (missing.isNotEmpty()) {
+                    // 批量前统一刷新一次包索引(apt update ~30-60s), 成功后单工具安装跳过 update,
+                    // 避免逐工具重复 update 拖慢整体; apk 无此概念(索引随 add 拉取), 命令天然幂等
+                    val indexFresh = refreshPackageIndexOnce(workspace.id)
+                    for (state in missing) {
+                        DevToolsInstallRegistry.markInstalling(workspace.id, state.tool.id)
+                        _devTools.update { list ->
+                            list.map {
+                                if (it.tool.id == state.tool.id) {
+                                    it.copy(installing = true, error = null, progress = null)
+                                } else it
+                            }
                         }
-                    }
-                    val (ok, error) = executeToolInstall(workspace.id, state.tool, state.selectedVersion)
-                    _devTools.update { list ->
-                        list.map {
-                            if (it.tool.id == state.tool.id) {
-                                it.copy(installing = false, installed = ok, error = error)
-                            } else it
+                        val (ok, error) = executeToolInstall(
+                            workspace.id,
+                            state.tool,
+                            state.selectedVersion,
+                            skipIndexRefresh = indexFresh,
+                        ) { chunk ->
+                            latestProgressLine(chunk)?.let { line ->
+                                _devTools.update { list ->
+                                    list.map {
+                                        if (it.tool.id == state.tool.id) it.copy(progress = line) else it
+                                    }
+                                }
+                            }
                         }
+                        _devTools.update { list ->
+                            list.map {
+                                if (it.tool.id == state.tool.id) {
+                                    it.copy(
+                                        installing = false,
+                                        installed = ok,
+                                        error = error,
+                                        progress = null,
+                                    )
+                                } else it
+                            }
+                        }
+                        DevToolsInstallRegistry.markInstallDone(workspace.id, state.tool.id)
                     }
                 }
+            } finally {
+                _devToolsInstallingAll.value = false
             }
-            _devToolsInstallingAll.value = false
         }
+    }
+
+    /** 批量安装前的包索引刷新: apt 系刷新索引并返回是否成功(成功则单工具安装可跳过 update); apk 系无需(add 自带) */
+    private suspend fun refreshPackageIndexOnce(workspaceId: String): Boolean {
+        val result = runCatching {
+            repository.executeCommand(
+                workspaceId,
+                buildString {
+                    append("if command -v apt-get >/dev/null 2>&1; then ")
+                    append(staleLockCleanup())
+                    append("apt-get update -qq -o Acquire::Retries=3 >/dev/null 2>&1 && echo __IDX_OK__ || echo __IDX_NO__; else echo __IDX_NO__; fi")
+                },
+                timeoutMillis = 180_000,
+            )
+        }.getOrNull()
+        return result?.exitCode == 0 && result.stdout.contains("__IDX_OK__")
     }
 
     /** 执行安装命令：优先自定义脚本，否则走 apt/apk；失败自动重试；返回 (是否成功, 错误信息) */
@@ -360,10 +439,12 @@ class WorkspaceDetailVM(
         workspaceId: String,
         tool: DevToolDef,
         version: String?,
+        skipIndexRefresh: Boolean = false,
+        onOutput: ((String) -> Unit)? = null,
     ): Pair<Boolean, String?> {
         val script = tool.installScript
         if (script != null) {
-            return executeScriptWithRetry(workspaceId, tool, script, version)
+            return executeScriptWithRetry(workspaceId, tool, script, version, onOutput)
         }
         // Node.js: 优先使用 APK 内置离线运行时(assets/offline/node), 彻底免去联网安装失败
         if (tool.id == "nodejs") {
@@ -385,15 +466,20 @@ class WorkspaceDetailVM(
                 // 离线不可用时回退到 apt/apk（错误仅在联网路径也失败时返回）
             }
         }
-        // apt/apk 包安装：OpenJDK 根据所选版本渲染包名
-        val resolvedPackage = if (tool.id == "openjdk") {
-            val v = version ?: tool.versions.firstOrNull() ?: "17"
-            "openjdk-$v-jdk-headless"
+        // apt/apk 包安装：构建候选包名链(前序失败自动回退后续候选)
+        val aptCandidates: List<String>
+        val apkCandidates: List<String>
+        if (tool.id == "openjdk") {
+            // Ubuntu 25.10 等新发行版已移除 openjdk-17, 主候选失败回退 distro 默认 JDK;
+            // Alpine 无 default-jdk 概念, 回退 openjdk21/openjdk17 实际存在版本
+            val v = version ?: tool.versions.firstOrNull() ?: "21"
+            aptCandidates = listOf("openjdk-$v-jdk-headless", "default-jdk-headless").distinct()
+            apkCandidates = (listOf("openjdk-$v") + listOf("openjdk21", "openjdk17").filter { it != "openjdk-$v" }).distinct()
         } else {
-            tool.packageName
+            aptCandidates = listOf(tool.packageName)
+            apkCandidates = listOf(ALPINE_PACKAGE_MAP[tool.id] ?: tool.packageName)
         }
-        val apkPackage = ALPINE_PACKAGE_MAP[tool.id] ?: resolvedPackage
-        return executePackageWithRetry(workspaceId, tool, resolvedPackage, apkPackage)
+        return executePackageWithRetry(workspaceId, aptCandidates, apkCandidates, skipIndexRefresh, onOutput)
     }
 
     private suspend fun executeScriptWithRetry(
@@ -401,21 +487,23 @@ class WorkspaceDetailVM(
         tool: DevToolDef,
         script: String,
         version: String?,
+        onOutput: ((String) -> Unit)? = null,
     ): Pair<Boolean, String?> {
-        val rendered = script
+        // 前缀 dpkg 锁自愈: 脚本内部(ensure/java 安装)同样会跑 apt, 半配置状态一并修复
+        val rendered = (staleLockCleanup() + "\n" + script)
             .replace("{{VERSION}}", version ?: tool.versions.firstOrNull() ?: "")
             .trimIndent()
         var lastError: String? = null
         repeat(3) { attempt ->
             val result = runCatching {
-                repository.executeCommand(workspaceId, rendered, timeoutMillis = TOOL_INSTALL_TIMEOUT_MS)
+                repository.executeCommand(workspaceId, rendered, timeoutMillis = TOOL_INSTALL_TIMEOUT_MS, onOutput = onOutput)
             }.getOrNull()
             val ok = result?.exitCode == 0 && result.stdout.contains("__OK__")
             if (ok) return true to null
             lastError = when {
                 result == null -> "命令执行异常"
                 result.timedOut -> "安装超时（已自动重试）"
-                else -> result.stderr.ifBlank { result.stdout }.take(200).ifBlank { "安装失败（退出码 ${result.exitCode}）" }
+                else -> result.stderr.ifBlank { result.stdout }.takeLast(300).ifBlank { "安装失败（退出码 ${result.exitCode}）" }
             }
             if (attempt < 2) delay(TOOL_INSTALL_RETRY_DELAY_MS)
         }
@@ -424,9 +512,10 @@ class WorkspaceDetailVM(
 
     private suspend fun executePackageWithRetry(
         workspaceId: String,
-        tool: DevToolDef,
-        packageName: String,
-        apkPackage: String,
+        aptCandidates: List<String>,
+        apkCandidates: List<String>,
+        skipIndexRefresh: Boolean = false,
+        onOutput: ((String) -> Unit)? = null,
     ): Pair<Boolean, String?> {
         var lastError: String? = null
         repeat(3) { attempt ->
@@ -436,13 +525,20 @@ class WorkspaceDetailVM(
                     buildString {
                         append("export DEBIAN_FRONTEND=noninteractive; ")
                         append("if command -v apt-get >/dev/null 2>&1; then ")
-                        append("(apt-get update -qq >/dev/null 2>&1 || true); ")
-                        append("apt-get install -y -qq $packageName >/dev/null 2>&1 && echo __OK__; ")
+                        append(staleLockCleanup())
+                        if (!skipIndexRefresh) {
+                            append("(apt-get update -qq -o Acquire::Retries=3 >/dev/null 2>&1 || true); ")
+                        }
+                        // 安装输出不重定向: Get/Unpacking/Setting up 实时流回 UI 作为进度
+                        append("(")
+                        append(aptCandidates.joinToString(" || ") { "apt-get install -y -q -o Acquire::Retries=3 $it" })
+                        append(") && echo __OK__; ")
                         append("elif command -v apk >/dev/null 2>&1; then ")
-                        append("apk add --no-cache -q $apkPackage >/dev/null 2>&1 && echo __OK__; ")
-                        append("else echo __NO_PKG_MANAGER__; fi")
+                        append(apkCandidates.joinToString(" || ") { "(apk add --no-cache $it && echo __OK__)" })
+                        append("; else echo __NO_PKG_MANAGER__; fi")
                     },
                     timeoutMillis = TOOL_INSTALL_TIMEOUT_MS,
+                    onOutput = onOutput,
                 )
             }.getOrNull()
             val ok = result?.exitCode == 0 && result.stdout.contains("__OK__")
@@ -452,12 +548,21 @@ class WorkspaceDetailVM(
                 result.timedOut -> "安装超时（已自动重试）"
                 result.exitCode == 0 && result.stdout.contains("__NO_PKG_MANAGER__") ->
                     "未找到包管理器（仅支持 apt/apk）"
-                else -> result.stderr.ifBlank { result.stdout }.take(200).ifBlank { "安装失败（退出码 ${result.exitCode}）" }
+                else -> result.stderr.ifBlank { result.stdout }.takeLast(300).ifBlank { "安装失败（退出码 ${result.exitCode}）" }
             }
             if (attempt < 2) delay(TOOL_INSTALL_RETRY_DELAY_MS)
         }
         return false to lastError
     }
+
+    /**
+     * dpkg/apt 残留锁自愈: 上一次安装被强杀(超时/退出页面)会残留 /var/lib/dpkg/lock*,
+     * 之后所有 apt 操作报 "Could not get lock" 永久失败。
+     * 用 flock 非阻塞探测锁是否空闲——空闲说明是残留锁(活跃 apt 必然持有), 才清理锁文件并用
+     * dpkg --configure -a 修复半配置包; 探测失败说明有 apt 正在运行, 直接跳过。
+     * 环境无 flock(Ubuntu/Alpine 基础包均自带)时跳过, 不影响正常路径。
+     */
+    private fun staleLockCleanup(): String = STALE_LOCK_CLEANUP_SH
 
     fun executeTerminalCommand(command: String) {
         val trimmed = command.trim()
@@ -553,6 +658,8 @@ data class DevToolState(
     val installing: Boolean = false,
     val error: String? = null,
     val selectedVersion: String? = null,
+    /** 安装中的实时进度摘要(apt/apk 输出的最新一行) */
+    val progress: String? = null,
 )
 
 /** 开发工具安装单次命令超时（apt 更新 + 大文件下载需要较长时间） */
@@ -563,6 +670,38 @@ private const val DETECT_TIMEOUT_MS = 15_000L
 
 /** 安装失败重试间隔 */
 private const val TOOL_INSTALL_RETRY_DELAY_MS = 1_500L
+
+/** dpkg/apt 残留锁自愈脚本(flock 探测式, 详见 [WorkspaceDetailVM.staleLockCleanup]) */
+private const val STALE_LOCK_CLEANUP_SH =
+    "if command -v flock >/dev/null 2>&1 && [ -e /var/lib/dpkg/lock-frontend ]; then " +
+        "flock -n /var/lib/dpkg/lock-frontend true 2>/dev/null && { " +
+        "rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/apt/archives/lock /var/lib/apt/lists/lock 2>/dev/null; " +
+        "dpkg --configure -a >/dev/null 2>&1 || true; }; fi; "
+
+/** 进程级安装状态注册表: 批量安装跑在 AppScope, VM 销毁后重进页面需靠它感知安装仍在进行并防止重复触发 */
+private object DevToolsInstallRegistry {
+    private val batchRunning = mutableMapOf<String, MutableStateFlow<Boolean>>()
+    private val installingTools = mutableMapOf<String, MutableStateFlow<Set<String>>>()
+
+    fun batchRunningFlow(workspaceId: String): MutableStateFlow<Boolean> = synchronized(this) {
+        batchRunning.getOrPut(workspaceId) { MutableStateFlow(false) }
+    }
+
+    fun installingToolsFlow(workspaceId: String): MutableStateFlow<Set<String>> = synchronized(this) {
+        installingTools.getOrPut(workspaceId) { MutableStateFlow(emptySet()) }
+    }
+
+    fun markInstalling(workspaceId: String, toolId: String) {
+        installingToolsFlow(workspaceId).update { it + toolId }
+    }
+
+    fun markInstallDone(workspaceId: String, toolId: String) {
+        installingToolsFlow(workspaceId).update { it - toolId }
+    }
+
+    fun isToolInstalling(workspaceId: String, toolId: String): Boolean =
+        toolId in installingToolsFlow(workspaceId).value
+}
 
 /**
  * 多源下载函数: 按候选 URL 顺序逐个尝试(优先直连, 失败自动切国内镜像)。
@@ -606,14 +745,16 @@ fi
 if ! command -v unzip >/dev/null 2>&1; then
   ensure unzip
 fi
+# 最小 rootfs 可能缺 CA 证书, 缺失时 https 下载全部证书校验失败
+ensure ca-certificates
 command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || { echo "no curl/wget available"; exit 1; }
 command -v unzip >/dev/null 2>&1 || { echo "unzip missing"; exit 1; }
 if ! command -v java >/dev/null 2>&1; then
   if command -v apt-get >/dev/null 2>&1; then
     DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openjdk-17-jre-headless >/dev/null 2>&1 || true
+    { DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openjdk-17-jre-headless >/dev/null 2>&1 || DEBIAN_FRONTEND=noninteractive apt-get install -y -qq default-jre-headless >/dev/null 2>&1; } || true
   elif command -v apk >/dev/null 2>&1; then
-    apk add --no-cache -q openjdk17-jre >/dev/null 2>&1 || true
+    { apk add --no-cache -q openjdk17-jre >/dev/null 2>&1 || apk add --no-cache -q openjdk21-jre >/dev/null 2>&1; } || true
   fi
 fi
 if [ ! -x "${'$'}BT_DIR/aapt2" ]; then
@@ -658,6 +799,8 @@ fi
 if ! command -v unzip >/dev/null 2>&1; then
   ensure unzip
 fi
+# 最小 rootfs 可能缺 CA 证书, 缺失时 https 下载全部证书校验失败
+ensure ca-certificates
 command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || { echo "no curl/wget available"; exit 1; }
 command -v unzip >/dev/null 2>&1 || { echo "unzip missing"; exit 1; }
 if [ ! -f "${'$'}PLAT_DIR/android.jar" ]; then
@@ -697,13 +840,19 @@ if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
     apk add --no-cache -q curl >/dev/null 2>&1 || true
   fi
 fi
+# 最小 rootfs 可能缺 CA 证书, 缺失时 https 下载全部证书校验失败
+if command -v apt-get >/dev/null 2>&1; then
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates >/dev/null 2>&1 || true
+elif command -v apk >/dev/null 2>&1; then
+  apk add --no-cache -q ca-certificates >/dev/null 2>&1 || true
+fi
 command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || { echo "no curl/wget available"; exit 1; }
 if ! command -v java >/dev/null 2>&1; then
   if command -v apt-get >/dev/null 2>&1; then
     DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openjdk-17-jre-headless >/dev/null 2>&1 || true
+    { DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openjdk-17-jre-headless >/dev/null 2>&1 || DEBIAN_FRONTEND=noninteractive apt-get install -y -qq default-jre-headless >/dev/null 2>&1; } || true
   elif command -v apk >/dev/null 2>&1; then
-    apk add --no-cache -q openjdk17-jre >/dev/null 2>&1 || true
+    { apk add --no-cache -q openjdk17-jre >/dev/null 2>&1 || apk add --no-cache -q openjdk21-jre >/dev/null 2>&1; } || true
   fi
 fi
 if [ ! -f "${'$'}R8_DIR/r8.jar" ]; then
@@ -724,7 +873,6 @@ private val ALPINE_PACKAGE_MAP = mapOf(
     "build-essential" to "build-base",
     "openssh-client" to "openssh",
     "ripgrep" to "ripgrep",
-    "openjdk" to "openjdk17",
 )
 
 /** 工作区一键安装的常用开发工具（检测命令为 command -v <command>） */
@@ -744,9 +892,9 @@ val DEV_TOOLS = listOf(    DevToolDef("python3", "Python 3", "Python 解释器�
         "openjdk",
         "OpenJDK",
         "Java 运行时与开发工具包（JDK）",
-        "openjdk-17-jdk-headless",
+        "openjdk-21-jdk-headless",
         "java",
-        versions = listOf("17", "21"),
+        versions = listOf("21", "17"),
     ),
     DevToolDef(
         "android-sdk",

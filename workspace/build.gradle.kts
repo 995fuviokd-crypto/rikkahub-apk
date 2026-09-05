@@ -6,6 +6,10 @@ plugins {
 android {
     namespace = "me.rerere.workspace"
 
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     defaultConfig {
         externalNativeBuild {
             cmake {

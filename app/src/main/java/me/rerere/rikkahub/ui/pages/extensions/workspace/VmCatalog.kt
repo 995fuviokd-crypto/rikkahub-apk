@@ -22,14 +22,14 @@ object VmCatalog {
             id = "ubuntu-24.04",
             labelRes = R.string.vm_image_ubuntu_2404,
             descRes = R.string.vm_image_ubuntu_2404_desc,
-            url = "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.4-base-arm64.tar.gz",
+            url = "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cdimage/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.4-base-arm64.tar.gz",
             sizeHintMb = 35,
         ),
         VmImage(
             id = "ubuntu-25.10",
             labelRes = R.string.vm_image_ubuntu_2510,
             descRes = R.string.vm_image_ubuntu_2510_desc,
-            url = "https://cdimage.ubuntu.com/ubuntu-base/releases/25.10/release/ubuntu-base-25.10-base-arm64.tar.gz",
+            url = "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cdimage/ubuntu-base/releases/25.10/release/ubuntu-base-25.10-base-arm64.tar.gz",
             sizeHintMb = 36,
         ),
         VmImage(
