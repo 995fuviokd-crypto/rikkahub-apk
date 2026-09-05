@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.message
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -60,6 +61,7 @@ import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
 import me.rerere.rikkahub.ui.components.ui.DotLoading
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.JsonInstant
+import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
 
 private const val ASK_USER_TOOL_NAME = "ask_user"
 
@@ -151,6 +153,21 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
 private data class PlanUiEntry(val content: String, val status: String?)
 
 /**
+ * 从工具输出 JSON 中提取 "error" 字段文本; 非错误输出返回 null。
+ */
+private fun extractToolError(tool: UIMessagePart.Tool): String? {
+    if (!tool.isExecuted) return null
+    val text = tool.output.filterIsInstance<UIMessagePart.Text>()
+        .joinToString("\n") { it.text }
+        .takeIf { it.isNotBlank() } ?: return null
+    val error = runCatching {
+        (JsonInstant.parseToJsonElement(text) as? JsonObject)
+            ?.get("error")?.jsonPrimitiveOrNull?.contentOrNull
+    }.getOrNull() ?: return null
+    return error.takeIf { it.isNotBlank() }
+}
+
+/**
  * Extracts plan entries from a server-tool card metadata produced by
  * [me.rerere.ai.agent.SessionUpdateBridge]; null when the card is not a plan.
  */
@@ -181,7 +198,11 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         return
     }
 
-    val renderer = remember(tool.toolName) { ToolUIRegistry.resolve(tool.toolName) }
+    // 直出脚本工具（pluginId.toolName）动态命中渲染器：显示插件名·工具名
+    val pluginManager = org.koin.compose.koinInject<me.rerere.rikkahub.data.plugin.PluginManager>()
+    val renderer = remember(tool.toolName, pluginManager) {
+        ToolUIRegistry.resolveForTool(tool.toolName, pluginManager)
+    }
     val context = remember(tool, loading) {
         ToolUIContext(
             tool = tool,
@@ -275,6 +296,26 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
             {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     renderer.Summary(context)
+                    // 通用工具错误展示: 首行人话摘要, 可展开完整堆栈
+                    val errorText = remember(tool) { extractToolError(tool) }
+                    if (errorText != null) {
+                        var showFullError by remember(tool) { mutableStateOf(false) }
+                        Text(
+                            text = errorText.lineSequence().firstOrNull().orEmpty(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.clickable { showFullError = !showFullError },
+                        )
+                        if (showFullError) {
+                            Text(
+                                text = errorText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.75f),
+                            )
+                        }
+                    }
                     if (images.isNotEmpty()) {
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(4.dp),

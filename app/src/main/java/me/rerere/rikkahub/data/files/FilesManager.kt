@@ -304,16 +304,22 @@ class FilesManager(
                 runCatching {
                     val url = URL(image)
                     val connection = url.openConnection() as HttpURLConnection
-                    connection.connect()
+                    connection.connectTimeout = 10_000
+                    connection.readTimeout = 30_000
+                    try {
+                        connection.connect()
 
-                    if (connection.responseCode == HttpURLConnection.HTTP_OK) {
-                        val bitmap = BitmapFactory.decodeStream(connection.inputStream)
-                        activityContext.exportImage(activity, bitmap)
-                    } else {
-                        Log.e(
-                            TAG,
-                            "saveMessageImage: Failed to download image from $image, response code: ${connection.responseCode}"
-                        )
+                        if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+                            val bitmap = BitmapFactory.decodeStream(connection.inputStream)
+                            activityContext.exportImage(activity, bitmap)
+                        } else {
+                            Log.e(
+                                TAG,
+                                "saveMessageImage: Failed to download image from $image, response code: ${connection.responseCode}"
+                            )
+                        }
+                    } finally {
+                        connection.disconnect()
                     }
                 }.getOrNull()
             }

@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.pages.extensions.plugin
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,14 +12,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -34,23 +36,77 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.CloudDownload
-import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.InformationCircle
+import me.rerere.hugeicons.stroke.Puzzle
+import me.rerere.hugeicons.stroke.Search01
 import me.rerere.rikkahub.data.ai.agent.AgentEnvStatus
 import me.rerere.rikkahub.data.ai.agent.AgentInstallProgress
 import me.rerere.rikkahub.data.plugin.InstalledPlugin
+import me.rerere.rikkahub.data.plugin.PluginCapabilityPreflight
 import me.rerere.rikkahub.data.plugin.PluginCategories
 import me.rerere.rikkahub.data.plugin.PluginStatus
 import me.rerere.rikkahub.ui.theme.CustomColors
+/** 已安装插件的运行时信息（页面级 File 探测，避免卡片重组期反复 IO） */
+data class PluginRuntimeInfo(
+    /** 面板/脚本插件：启用后会加载进 Cordis 内核（运行状态有意义） */
+    val kernelEligible: Boolean,
+    /** web/index.html 存在：可提供"打开面板"直达入口 */
+    val panelFile: java.io.File?,
+    /** 可用面板规格（统一探测：web 轨 entry HTML 或 schema 轨 panel.json） */
+    val panelSpec: me.rerere.rikkahub.data.plugin.PluginPanelSpec? = null,
+)
 
-/** 已安装插件 Tab：分类筛选 + Node 环境提醒 + 本地包安装入口 */
+/** 卡片运行状态模型（区别于安装态：反映内核真实加载结果） */
+internal enum class PluginRunState(val label: String) {
+    RUNNING("运行中"),
+    LOAD_FAILED("加载失败"),
+    EFFECTIVE("已生效"),
+    STOPPED("已停用"),
+    RESOURCE_PACK("资源包"),
+    BROKEN("已损坏"),
+    INSTALLED("已安装"),
+}
+
+internal fun pluginRunState(
+    plugin: InstalledPlugin,
+    runtimeInfo: PluginRuntimeInfo?,
+    runtimeLoaded: Set<String>,
+): PluginRunState {
+    val hasCapability = plugin.info != null && (
+        plugin.info.systemPrompt.isNotBlank() ||
+            plugin.info.actions.isNotEmpty() ||
+            plugin.info.extensionPoints.homeActions.isNotEmpty() ||
+            plugin.info.extensionPoints.settingsActions.isNotEmpty() ||
+            plugin.info.extensionPoints.sidebarActions.isNotEmpty() ||
+            plugin.info.extensionPoints.chatToolbarActions.isNotEmpty() ||
+            plugin.info.extensionPoints.inputBarActions.isNotEmpty()
+        )
+    return when {
+        plugin.status == PluginStatus.BROKEN -> PluginRunState.BROKEN
+        plugin.status == PluginStatus.ENABLED && !hasCapability -> PluginRunState.RESOURCE_PACK
+        // 面板/脚本插件启用但内核未加载：真实失败态（apply 崩溃/依赖缺失），不再静默显示"已生效"
+        plugin.status == PluginStatus.ENABLED &&
+            runtimeInfo?.kernelEligible == true &&
+            plugin.id !in runtimeLoaded -> PluginRunState.LOAD_FAILED
+        plugin.status == PluginStatus.ENABLED && runtimeInfo?.kernelEligible == true -> PluginRunState.RUNNING
+        plugin.status == PluginStatus.ENABLED -> PluginRunState.EFFECTIVE
+        hasCapability -> PluginRunState.STOPPED
+        else -> PluginRunState.INSTALLED
+    }
+}
+
+/** 已安装插件 Tab：运行状态披露 + 能力徽章 + 更新提示 + 面板直达 + 分类筛选 */
 @Composable
 internal fun InstalledTab(
     installed: List<InstalledPlugin>,
+    runtimeLoaded: Set<String>,
+    runtimeInfo: Map<String, PluginRuntimeInfo>,
+    updateVersions: Map<String, String>,
     envStatus: AgentEnvStatus,
     envProgress: AgentInstallProgress?,
     envInstalling: Boolean,
@@ -59,9 +115,10 @@ internal fun InstalledTab(
     onRetryEnv: () -> Unit,
     onInstallPkg: (InstalledPlugin) -> Unit,
     onToggle: (String) -> Unit,
-    onUninstall: (InstalledPlugin) -> Unit,
     onInstallLocal: () -> Unit,
     onSelect: (InstalledPlugin) -> Unit,
+    onOpenPanel: (InstalledPlugin) -> Unit,
+    onGoMarket: () -> Unit,
 ) {
     var installedCategory by remember { mutableStateOf(PluginCategories.ALL) }
     val filtered = installed.filter { plugin ->
@@ -130,30 +187,64 @@ internal fun InstalledTab(
             }
         }
         if (filtered.isEmpty()) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 48.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        if (installed.isEmpty()) "还没有安装插件" else "该分类下没有已安装插件",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            item(key = "empty") {
+                EmptyStateGuide(
+                    hasAny = installed.isNotEmpty(),
+                    onGoMarket = onGoMarket,
+                )
             }
         }
         items(filtered, key = { it.id }) { plugin ->
             InstalledPluginCard(
                 plugin = plugin,
+                runtimeInfo = runtimeInfo[plugin.id],
+                runState = pluginRunState(plugin, runtimeInfo[plugin.id], runtimeLoaded),
+                updateVersion = updateVersions[plugin.id],
                 envNotReady = envNotReady,
                 installingPkg = pkgInstallingId == plugin.id,
                 onInstallPkg = { onInstallPkg(plugin) },
                 onClick = { onSelect(plugin) },
                 onToggle = { onToggle(plugin.id) },
-                onUninstall = { onUninstall(plugin) },
+                onOpenPanel = { runtimeInfo[plugin.id]?.panelSpec?.let { onOpenPanel(plugin) } },
             )
+        }
+    }
+}
+
+/** 空态引导：装了插件的分类过滤空态与全空态分开，全空态给"去市场逛逛"直达 */
+@Composable
+private fun EmptyStateGuide(
+    hasAny: Boolean,
+    onGoMarket: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            imageVector = HugeIcons.Puzzle,
+            contentDescription = null,
+            modifier = Modifier.size(48.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = if (hasAny) "该分类下没有已安装插件" else "还没有安装插件",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (!hasAny) {
+            Text(
+                text = "从市场安装插件，为对话扩展提示词、工具与面板",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FilledTonalButton(onClick = onGoMarket) {
+                Icon(HugeIcons.Search01, contentDescription = null, modifier = Modifier.size(16.dp))
+                Text("去市场逛逛", modifier = Modifier.padding(start = 4.dp))
+            }
         }
     }
 }
@@ -239,33 +330,49 @@ private fun WorkspaceEnvBanner(
     }
 }
 
+/** 运行状态小徽章：色点 + 文字（替代原先无语义的 AssistChip 假按钮） */
+@Composable
+private fun RunStateBadge(state: PluginRunState) {
+    val (color, label) = when (state) {
+        PluginRunState.RUNNING -> MaterialTheme.colorScheme.primary to state.label
+        PluginRunState.LOAD_FAILED, PluginRunState.BROKEN -> MaterialTheme.colorScheme.error to state.label
+        PluginRunState.EFFECTIVE -> MaterialTheme.colorScheme.primary to state.label
+        else -> MaterialTheme.colorScheme.onSurfaceVariant to state.label
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .background(color = color, shape = CircleShape),
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+        )
+    }
+}
+
 @Composable
 internal fun InstalledPluginCard(
     plugin: InstalledPlugin,
+    runtimeInfo: PluginRuntimeInfo?,
+    runState: PluginRunState,
+    updateVersion: String?,
     envNotReady: Boolean,
     installingPkg: Boolean,
     onInstallPkg: () -> Unit,
     onClick: () -> Unit,
     onToggle: () -> Unit,
-    onUninstall: () -> Unit,
+    onOpenPanel: () -> Unit,
 ) {
     val info = plugin.info
     val needsRuntime = !info?.npmPackages.isNullOrEmpty()
-    val hasCapability = info != null && (
-        info.systemPrompt.isNotBlank() ||
-            info.actions.isNotEmpty() ||
-            info.extensionPoints.homeActions.isNotEmpty() ||
-            info.extensionPoints.settingsActions.isNotEmpty() ||
-            info.extensionPoints.sidebarActions.isNotEmpty() ||
-            info.extensionPoints.chatToolbarActions.isNotEmpty() ||
-            info.extensionPoints.inputBarActions.isNotEmpty()
-        )
-    val statusLabel = when {
-        plugin.status == PluginStatus.BROKEN -> "损坏"
-        plugin.status == PluginStatus.ENABLED && !hasCapability -> "资源包"
-        plugin.status == PluginStatus.ENABLED -> "已生效"
-        hasCapability -> "未生效"
-        else -> "已安装"
+    val requestedCaps = remember(info?.id, info?.tags) {
+        info?.let { PluginCapabilityPreflight.requestedFromTags(it.tags) }.orEmpty()
     }
     Card(
         modifier = Modifier
@@ -276,48 +383,80 @@ internal fun InstalledPluginCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Text(
-                        text = plugin.info?.name ?: plugin.id,
+                        text = info?.name ?: plugin.id,
                         style = MaterialTheme.typography.titleSmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    AssistChip(
-                        onClick = {},
-                        label = {
-                            Text(
-                                statusLabel,
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                        },
-                    )
+                    if (!info?.version.isNullOrBlank()) {
+                        Text(
+                            text = "v${info!!.version}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    RunStateBadge(runState)
+                    if (updateVersion != null) {
+                        Text(
+                            text = "可更新 v$updateVersion",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.tertiary,
+                        )
+                    }
                     if (needsRuntime && envNotReady) {
-                        AssistChip(
-                            onClick = {},
-                            label = {
-                                Text(
-                                    "需 Node 环境",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                )
-                            },
+                        Text(
+                            text = "需 Node 环境",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
                         )
                     }
                 }
-                if (plugin.info != null) {
-                    if (plugin.info.description.isNotBlank()) {
+                if (info != null) {
+                    if (info.description.isNotBlank()) {
                         Text(
-                            text = plugin.info.description,
+                            text = info.description,
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                    }
+                    // 能力徽章：披露插件申请的宿主能力（信任模型入口，点击进详情看完整清单）
+                    if (requestedCaps.isNotEmpty()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            requestedCaps.take(3).forEach { cap ->
+                                Text(
+                                    text = cap,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier
+                                        .background(
+                                            color = MaterialTheme.colorScheme.secondaryContainer,
+                                            shape = MaterialTheme.shapes.extraSmall,
+                                        )
+                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                                )
+                            }
+                            if (requestedCaps.size > 3) {
+                                Text(
+                                    text = "+${requestedCaps.size - 3}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                     }
                     // 本地结合: 声明了 npm CLI 的插件提供预装入口, 装完 npx 直接命中本地
                     if (needsRuntime) {
@@ -351,16 +490,19 @@ internal fun InstalledPluginCard(
                     )
                 }
             }
+            // 面板插件直达入口：装了面板就该一键打开，不再让用户找入口
+            if (runtimeInfo?.panelSpec != null) {
+                IconButton(onClick = onOpenPanel) {
+                    Icon(
+                        HugeIcons.Puzzle,
+                        contentDescription = "打开面板",
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
             if (plugin.status != PluginStatus.BROKEN) {
                 Switch(checked = plugin.status == PluginStatus.ENABLED, onCheckedChange = { onToggle() })
-            }
-            IconButton(onClick = onUninstall) {
-                Icon(
-                    HugeIcons.Delete01,
-                    contentDescription = "卸载",
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.error,
-                )
             }
         }
     }

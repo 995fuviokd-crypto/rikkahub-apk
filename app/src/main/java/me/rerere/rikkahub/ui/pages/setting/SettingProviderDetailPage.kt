@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import androidx.activity.compose.BackHandler
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.Connect
@@ -154,6 +155,12 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
     val toaster = LocalToaster.current
     val context = LocalContext.current
 
+    // 编辑态提升到 Pager 之上：HorizontalPager 离屏销毁页面导致 remember 丢失，
+    // 切到"模型"页再切回会丢掉未保存的配置编辑
+    var internalProvider by remember(provider) { mutableStateOf(provider) }
+    val isDirty = internalProvider != provider
+    var showUnsavedDialog by remember { mutableStateOf(false) }
+
     val onEdit = { newProvider: ProviderSetting ->
         val newSettings = settings.copy(
             providers = settings.providers.map {
@@ -174,12 +181,22 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
         navController.popBackStack()
     }
 
+    // 返回拦截：有未保存修改时先弹确认（返回按钮 + 系统返回键双路径）
+    fun handleBack() {
+        if (isDirty) {
+            showUnsavedDialog = true
+        } else {
+            navController.popBackStack()
+        }
+    }
+    BackHandler { handleBack() }
+
     Scaffold(
         containerColor = CustomColors.topBarColors.containerColor,
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    BackButton()
+                    BackButton(onClick = ::handleBack)
                 },
                 colors = CustomColors.topBarColors,
                 title = {
@@ -241,6 +258,8 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                 0 -> {
                     SettingProviderConfigPage(
                         provider = provider,
+                        internalProvider = internalProvider,
+                        onInternalEdit = { internalProvider = it },
                         providers = settings.providers,
                         onEdit = {
                             onEdit(it)
@@ -264,16 +283,55 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
             }
         }
     }
+
+    // 未保存修改确认：confirm=保存并离开 / dismiss=放弃修改 / 点外部或返回键=继续编辑
+    if (showUnsavedDialog) {
+        AlertDialog(
+            onDismissRequest = { showUnsavedDialog = false },
+            title = {
+                Text(stringResource(R.string.setting_provider_page_unsaved_title))
+            },
+            text = {
+                Text(stringResource(R.string.setting_provider_page_unsaved_text))
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showUnsavedDialog = false
+                        navController.popBackStack()
+                    }
+                ) {
+                    Text(stringResource(R.string.setting_provider_page_unsaved_discard))
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showUnsavedDialog = false
+                        onEdit(internalProvider)
+                        toaster.show(
+                            context.getString(R.string.setting_provider_page_save_success),
+                            type = ToastType.Success
+                        )
+                        navController.popBackStack()
+                    }
+                ) {
+                    Text(stringResource(R.string.setting_provider_page_unsaved_save_exit))
+                }
+            }
+        )
+    }
 }
 
 @Composable
 private fun SettingProviderConfigPage(
     provider: ProviderSetting,
+    internalProvider: ProviderSetting,
+    onInternalEdit: (ProviderSetting) -> Unit,
     providers: List<ProviderSetting>,
     onEdit: (ProviderSetting) -> Unit,
     onDelete: () -> Unit
 ) {
-    var internalProvider by remember(provider) { mutableStateOf(provider) }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
     Column(
@@ -287,21 +345,21 @@ private fun SettingProviderConfigPage(
         ProviderConfigure(
             provider = internalProvider,
             onEdit = {
-                internalProvider = it
+                onInternalEdit(it)
             }
         )
 
         AgentModeConfigSection(
             provider = internalProvider,
             providers = providers,
-            onEdit = { internalProvider = it }
+            onEdit = onInternalEdit
         )
 
         if (internalProvider is ProviderSetting.OpenAI) {
             SettingProviderBalanceOption(
                 provider = internalProvider,
                 balanceOption = internalProvider.balanceOption,
-                onEdit = { internalProvider = internalProvider.copyProvider(balanceOption = it) }
+                onEdit = { onInternalEdit(internalProvider.copyProvider(balanceOption = it)) }
             )
             ProviderBalanceText(providerSetting = provider, style = MaterialTheme.typography.labelSmall)
         }
@@ -329,7 +387,7 @@ private fun SettingProviderConfigPage(
 
             IconButton(
                 onClick = {
-                    internalProvider = internalProvider.resetBaseUrlToDefault()
+                    onInternalEdit(internalProvider.resetBaseUrlToDefault())
                 },
                 enabled = !internalProvider.isUsingDefaultBaseUrl(),
             ) {

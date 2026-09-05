@@ -12,7 +12,6 @@ import java.util.zip.ZipInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.datastore.SettingsStore
@@ -42,28 +41,6 @@ class SkillsVM(
             settingsStore.settingsFlow.collect { settings ->
                 _pluginSkills.value = pluginManager.listPluginSkills(settings.enabledPlugins)
             }
-        }
-    }
-
-    /** 切换插件技能（skill 插件）的启用状态，仅对 type=skill 插件生效 */
-    fun togglePluginSkill(pluginId: String) {
-        viewModelScope.launch {
-            val settings = settingsStore.settingsFlow.first()
-            val enabled = if (pluginId in settings.enabledPlugins) {
-                settings.enabledPlugins - pluginId
-            } else {
-                settings.enabledPlugins + pluginId
-            }
-            settingsStore.update { it.copy(enabledPlugins = enabled) }
-        }
-    }
-
-    /** 卸载插件技能（skill 插件），同时从 enabledPlugins 清理 */
-    fun uninstallPluginSkill(pluginId: String) {
-        viewModelScope.launch {
-            pluginManager.uninstall(pluginId)
-            val settings = settingsStore.settingsFlow.first()
-            settingsStore.update { it.copy(enabledPlugins = settings.enabledPlugins - pluginId) }
         }
     }
 

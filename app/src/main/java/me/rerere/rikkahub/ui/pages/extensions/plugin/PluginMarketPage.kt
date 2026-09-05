@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.io.File
+import me.rerere.rikkahub.Screen
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.BookOpen01
 import me.rerere.hugeicons.stroke.CloudUpload
@@ -55,7 +56,9 @@ import org.koin.compose.koinInject
 fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val pluginManager: PluginManager = koinInject()
+    val navController = me.rerere.rikkahub.ui.context.LocalNavController.current
     val installed by vm.installed.collectAsStateWithLifecycle()
+    val runtimeLoaded by vm.runtimeLoaded.collectAsStateWithLifecycle()
     val marketEntries by vm.marketEntries.collectAsStateWithLifecycle()
     val marketLoading by vm.marketLoading.collectAsStateWithLifecycle()
     val marketError by vm.marketError.collectAsStateWithLifecycle()
@@ -207,15 +210,58 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
         }
     }
 
-    // 进入市场页自动拉取最新索引
+    // 进入市场页自动拉取最新索引；已安装 Tab 静默拉市场索引用于"可更新"徽章
     LaunchedEffect(tab) {
         when (tab) {
+            0 -> {
+                if (installed.isNotEmpty() && marketEntries.isEmpty()) {
+                    vm.loadMarket()
+                    vm.loadCommunity()
+                }
+            }
             1 -> {
                 vm.loadMarket()
                 vm.loadCommunity()
             }
             2 -> vm.loadDshMarket()
             3 -> vm.loadTavernMarket()
+        }
+    }
+
+    // 运行时信息探测（面板入口/内核资格）：随已安装列表重算
+    val runtimeInfo = remember(installed, pluginManager) {
+        installed.associate { plugin ->
+            val dir = pluginManager.getPluginDir(plugin.id)
+            val scriptDir = me.rerere.rikkahub.data.script.ScriptRuntime.scriptDir(dir)
+            val hasScript = scriptDir.isDirectory && scriptDir.listFiles().orEmpty().any { it.extension == "js" }
+            // 统一面板探测：显式声明优先（schema 轨 panel.json / web 轨 entry），缺省特征探测 web 轨
+            val panelSpec = pluginManager.resolvePanelSpec(plugin.id, plugin.info)
+            val panelFile = panelSpec
+                ?.takeIf { it.type == me.rerere.rikkahub.data.plugin.PluginPanelSpec.TYPE_WEB }
+                ?.let { pluginManager.resolveWebResourceFile(plugin.id, it.entry) }
+            plugin.id to PluginRuntimeInfo(
+                kernelEligible = panelSpec?.type == me.rerere.rikkahub.data.plugin.PluginPanelSpec.TYPE_WEB || hasScript,
+                panelFile = panelFile,
+                panelSpec = panelSpec,
+            )
+        }
+    }
+
+    // 已安装插件可更新版本（官方 + 社区市场聚合）
+    val updateVersions = remember(installed, marketEntries, communityEntries) {
+        vm.updateVersionsFor(installed)
+    }
+
+    // 打开插件面板：schema 轨路由原生渲染器，web 轨路由插件 WebView 宿主
+    val openPluginPanel: (InstalledPlugin) -> Unit = { plugin ->
+        val spec = runtimeInfo[plugin.id]?.panelSpec
+        when (spec?.type) {
+            me.rerere.rikkahub.data.plugin.PluginPanelSpec.TYPE_SCHEMA ->
+                navController.navigate(Screen.SchemaPanel(pluginId = plugin.id))
+
+            else -> runtimeInfo[plugin.id]?.panelFile?.let { file ->
+                navController.navigate(Screen.WebView(url = file.toURI().toString(), contentId = "", pluginId = plugin.id))
+            }
         }
     }
 
@@ -314,6 +360,9 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
             when (tab) {
                 0 -> InstalledTab(
                     installed = installed,
+                    runtimeLoaded = runtimeLoaded,
+                    runtimeInfo = runtimeInfo,
+                    updateVersions = updateVersions,
                     envStatus = envStatus,
                     envProgress = envProgress,
                     envInstalling = envInstalling,
@@ -322,9 +371,10 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
                     onRetryEnv = vm::refreshEnvStatus,
                     onInstallPkg = { vm.installPkgToWorkspace(it) },
                     onToggle = vm::toggleEnabled,
-                    onUninstall = { deleteTarget = it },
                     onInstallLocal = { localZipLauncher.launch(arrayOf("application/zip", "*/*")) },
                     onSelect = { selectedInstalled = it },
+                    onOpenPanel = openPluginPanel,
+                    onGoMarket = { tab = 1 },
                 )
 
                 1 -> MarketTab(
@@ -458,6 +508,8 @@ fun PluginMarketPage(vm: PluginMarketVM = koinViewModel()) {
                 selectedInstalled = null
             },
             onDismiss = { selectedInstalled = null },
+            onOpenPanel = runtimeInfo[plugin.id]?.panelSpec?.let { { openPluginPanel(plugin) } },
+            updateVersion = updateVersions[plugin.id],
         )
     }
 }

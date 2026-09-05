@@ -57,6 +57,7 @@ import me.rerere.hugeicons.stroke.Message02
 import me.rerere.hugeicons.stroke.QuillWrite01
 import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.hugeicons.stroke.Search01
+import me.rerere.hugeicons.stroke.Tools
 import me.rerere.hugeicons.stroke.Calendar03
 import me.rerere.hugeicons.stroke.CalendarAdd01
 import me.rerere.hugeicons.stroke.SmartPhone01
@@ -823,5 +824,81 @@ private fun ScrapeWebPreview(content: JsonElement) {
                 }
             }
         }
+    }
+}
+
+/**
+ * 脚本插件工具调用渲染（design.md D2.4 / R4.4）：
+ * 三段式 run_script_tool 调用块显示「插件名 · 工具名」，
+ * 参数摘要展示 args JSON（截断），替代裸工具名展示。
+ */
+/**
+ * 脚本插件工具调用渲染（design.md D2.4 / R4.4）：
+ * 直出形态（toolName = pluginId.toolName）直接显示「插件名 · 工具名」；
+ * 旧三段式 run_script_tool 从参数解析出插件与工具名，渲染一致。
+ */
+object ScriptToolUI : ToolUIRenderer {
+    override val toolName: String = "run_script_tool"
+
+    override fun icon(context: ToolUIContext): ImageVector = HugeIcons.Tools
+
+    private fun args(context: ToolUIContext): kotlinx.serialization.json.JsonObject =
+        context.arguments as? kotlinx.serialization.json.JsonObject
+            ?: kotlinx.serialization.json.JsonObject(emptyMap())
+
+    private fun pluginId(context: ToolUIContext): String {
+        // 直出形态：toolName = pluginId.toolName
+        if (context.tool.toolName != toolName) {
+            val dot = context.tool.toolName.lastIndexOf('.')
+            if (dot > 0) return context.tool.toolName.substring(0, dot)
+        }
+        return args(context)["plugin_id"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    }
+
+    private fun toolArg(context: ToolUIContext): String {
+        if (context.tool.toolName != toolName) {
+            val dot = context.tool.toolName.lastIndexOf('.')
+            if (dot > 0) return context.tool.toolName.substring(dot + 1)
+        }
+        return args(context)["tool"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    }
+
+    @Composable
+    override fun title(context: ToolUIContext): String {
+        val pluginManager = org.koin.compose.koinInject<me.rerere.rikkahub.data.plugin.PluginManager>()
+        val id = pluginId(context)
+        val tool = toolArg(context)
+        if (id.isEmpty() && tool.isEmpty()) {
+            return stringResource(R.string.chat_message_tool_call_generic, context.tool.toolName)
+        }
+        // 插件名映射（低频渲染 + remember 缓存；解析失败回退 plugin_id）
+        val pluginName = androidx.compose.runtime.remember(id) {
+            runCatching { pluginManager.loadInfo(id)?.name }.getOrNull()?.takeIf { it.isNotBlank() } ?: id
+        }
+        return if (tool.isEmpty()) "插件 $pluginName" else "$pluginName · $tool"
+    }
+
+    override fun hasSummary(context: ToolUIContext): Boolean =
+        argsSummaryText(context).isNotEmpty()
+
+    /** 摘要：直出形态取 args 对象，三段式取 args 参数 */
+    private fun argsSummaryText(context: ToolUIContext): String {
+        if (context.tool.toolName != toolName) {
+            return args(context)["args"]?.toString().orEmpty()
+        }
+        return args(context)["args"]?.toString().orEmpty()
+    }
+
+    @Composable
+    override fun Summary(context: ToolUIContext) {
+        val argsText = argsSummaryText(context)
+        if (argsText.isEmpty()) return
+        Text(
+            text = argsText.take(160),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }

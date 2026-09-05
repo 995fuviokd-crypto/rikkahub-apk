@@ -45,7 +45,38 @@ data class PluginInfo(
      */
     @SerialName("config")
     val configSchema: PluginConfigSchema? = null,
+    /** 面板声明（双轨：web WebView 宿主 / schema 原生渲染器）；缺省按特征探测 web 轨 */
+    val panel: PluginPanelSpec? = null,
 )
+
+/**
+ * 插件面板声明（design.md D2.2 双轨面板）。
+ *
+ * - web 轨：宿主 WebView 加载 entry（缺省 index.html），桥协议走 web/plugin.client.js
+ * - schema 轨：宿主用原生 Compose 渲染 entry（缺省 panel.json）描述的组件树，
+ *   交互事件经 seamCallAsync('ui','onAction') 回传 script 指定的插件脚本处理
+ */
+@Serializable
+data class PluginPanelSpec(
+    /** 面板类型：[TYPE_WEB] 或 [TYPE_SCHEMA]，缺省 web 向后兼容 */
+    val type: String = TYPE_WEB,
+    /** web 轨入口 HTML 相对路径（缺省 index.html）；schema 轨 schema JSON 相对路径（缺省 panel.json） */
+    val entry: String = "",
+    /** schema 轨事件处理脚本相对路径（可选；为空时面板为纯静态展示） */
+    val script: String = "",
+) {
+    companion object {
+        const val TYPE_WEB = "web"
+        const val TYPE_SCHEMA = "schema"
+        const val DEFAULT_WEB_ENTRY = "index.html"
+        const val DEFAULT_SCHEMA_ENTRY = "panel.json"
+
+        fun defaultEntryFor(type: String): String = when (type) {
+            TYPE_SCHEMA -> DEFAULT_SCHEMA_ENTRY
+            else -> DEFAULT_WEB_ENTRY
+        }
+    }
+}
 
 /**
  * 插件配置声明（plugin.json 的 "config" 字段）。

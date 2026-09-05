@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.components.ui
 
 import android.content.ClipData
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -13,14 +14,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
@@ -34,12 +39,12 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.service.ChatError
@@ -53,6 +58,7 @@ fun ErrorCardsDisplay(
     onDismissError: (Uuid) -> Unit,
     onClearAllErrors: () -> Unit,
     modifier: Modifier = Modifier,
+    onRetry: (() -> Unit)? = null,
 ) {
     AnimatedVisibility(
         visible = errors.isNotEmpty(),
@@ -96,6 +102,7 @@ fun ErrorCardsDisplay(
                 ErrorCard(
                     error = error,
                     onDismiss = { onDismissError(error.id) },
+                    onRetry = onRetry,
                 )
             }
         }
@@ -107,6 +114,7 @@ fun ErrorCard(
     error: ChatError,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    onRetry: (() -> Unit)? = null,
 ) {
     val clipboard = LocalClipboard.current
     val navController = LocalNavController.current
@@ -114,14 +122,14 @@ fun ErrorCard(
     val checkFastModelSettings = stringResource(R.string.chat_page_check_fast_model_settings)
     val linkColor = MaterialTheme.colorScheme.primary
 
-    // 5 秒后自动消失
-    LaunchedEffect(error.id) {
-        delay(5000)
-        onDismiss()
-    }
+    // 人话化错误摘要（识别失败回退原始消息）
+    val hint = remember(error.id) { ChatErrorMapper.classify(error.error) }
+    val rawMessage = error.error.message ?: "Unknown error"
+    var showDetail by remember(error.id) { mutableStateOf(false) }
+    val summary = hint?.summary ?: rawMessage.lineSequence().firstOrNull().orEmpty()
 
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().animateContentSize(),
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.errorContainer,
         shadowElevation = 4.dp,
@@ -147,11 +155,41 @@ fun ErrorCard(
                     )
                 }
                 Text(
-                    text = error.error.message ?: "Unknown error",
+                    text = summary,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (hint?.suggestion != null) {
+                    Text(
+                        text = hint.suggestion,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.6f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (hint != null) {
+                    // 可展开的技术详情（识别出的错误才折叠原始消息）
+                    Text(
+                        text = if (showDetail) "收起详情" else "查看详情",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f),
+                        modifier = Modifier
+                            .padding(top = 2.dp)
+                            .clickable { showDetail = !showDetail },
+                    )
+                    AnimatedVisibility(visible = showDetail) {
+                        Text(
+                            text = rawMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f),
+                            maxLines = 8,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
                 if (error.solution == ChatErrorSolution.CheckFastModelSettings) {
                     Text(
                         text = buildAnnotatedString {
@@ -178,12 +216,40 @@ fun ErrorCard(
                     )
                 }
             }
+            if (onRetry != null && hint?.retryable != false) {
+                Surface(
+                    onClick = {
+                        onDismiss()
+                        onRetry()
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.Refresh01,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.errorContainer,
+                        )
+                        Text(
+                            text = "重试",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.errorContainer,
+                        )
+                    }
+                }
+            }
             IconButton(
                 onClick = {
                     scope.launch {
                         clipboard.setClipEntry(
                             ClipEntry(
-                                clipData = ClipData.newPlainText("Error", error.error.message ?: "Unknown error")
+                                clipData = ClipData.newPlainText("Error", rawMessage)
                             )
                         )
                     }

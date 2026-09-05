@@ -41,6 +41,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.SheetValue
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -178,6 +181,10 @@ fun ChatDrawerContent(
     var folderToRename by remember { mutableStateOf<Folder?>(null) }
     var folderToDelete by remember { mutableStateOf<Folder?>(null) }
 
+    // 删除会话确认 + 撤销状态
+    var conversationToDelete by remember { mutableStateOf<Conversation?>(null) }
+    val drawerSnackbarHostState = remember { SnackbarHostState() }
+
     // 扩展功能入口折叠状态（工作流/插件市场/群组/权限管理）
     var extensionsExpanded by remember { mutableStateOf(false) }
 
@@ -304,13 +311,7 @@ fun ChatDrawerContent(
                     vm.generateTitle(it, true)
                 },
                 onDelete = {
-                    scope.launch {
-                        vm.deleteConversation(it).join()
-                        conversations.refresh()
-                        if (it.id == current.id) {
-                            navigateToChatPage(navController)
-                        }
-                    }
+                    conversationToDelete = it
                 },
                 onPin = {
                     vm.updatePinnedStatus(it)
@@ -674,7 +675,58 @@ fun ChatDrawerContent(
                     )
                 }
             }
+
+            // 删除会话撤销 Snackbar
+            SnackbarHost(
+                hostState = drawerSnackbarHostState,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
         }
+    }
+
+    // 删除会话确认对话框（含撤销能力）
+    conversationToDelete?.let { conversation ->
+        val snackDeleted = stringResource(R.string.history_page_conversation_deleted)
+        val snackUndo = stringResource(R.string.history_page_undo)
+        AlertDialog(
+            onDismissRequest = { conversationToDelete = null },
+            title = { Text(stringResource(R.string.chat_page_delete)) },
+            text = {
+                Text(stringResource(R.string.chat_page_delete_conversation_confirm, conversation.title))
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        conversationToDelete = null
+                        scope.launch {
+                            // 先备份完整对话（含消息节点），供撤销恢复
+                            val fullConversation = runCatching {
+                                repo.getConversationById(conversation.id)
+                            }.getOrNull() ?: conversation
+                            vm.deleteConversation(conversation).join()
+                            conversations.refresh()
+                            if (conversation.id == current.id) {
+                                navigateToChatPage(navController)
+                            }
+                            val result = drawerSnackbarHostState.showSnackbar(
+                                message = snackDeleted,
+                                actionLabel = snackUndo,
+                                withDismissAction = true,
+                            )
+                            if (result == SnackbarResult.ActionPerformed) {
+                                runCatching { repo.insertConversation(fullConversation) }
+                                conversations.refresh()
+                            }
+                        }
+                    }
+                ) { Text(stringResource(R.string.chat_page_delete)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { conversationToDelete = null }) {
+                    Text(stringResource(R.string.chat_page_cancel))
+                }
+            }
+        )
     }
 
     // 昵称编辑对话框

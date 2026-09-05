@@ -34,6 +34,7 @@ open class PluginManager(
     private val context: Context,
     private val scriptRuntime: ScriptRuntime,
     private val pluginConfigStore: PluginConfigRepository? = null,
+    private val settingsStore: me.rerere.rikkahub.data.datastore.SettingsStore? = null,
 ) {
     /** 插件目录文件变化广播（本地 DIY 插件保存/替换 zip 后触发），订阅方刷新已安装列表实现热重载 */
     private val _directoryEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
@@ -191,15 +192,6 @@ open class PluginManager(
     }
 
     /**
-     * 渲染层便捷分发：对全部已启用插件执行 [hook]，payload 仅含 { text }。
-     * 供 MarkdownNew 等无会话上下文的通用组件使用；无已启用插件时原样返回。
-     */
-    suspend fun dispatchHookToEnabled(hook: String, payload: JsonObject): JsonObject {
-        if (enabledPluginIds.isEmpty()) return payload
-        return dispatchHook(enabledPlugins = enabledPluginIds, hook = hook, payload = payload)
-    }
-
-    /**
      * 为单个插件构造 Hook 负载：把该插件的当前配置（合并默认值）注入顶层 config 字段，
      * 供插件脚本按 `ctx.config.<key>` 读取。无配置时原样返回。
      */
@@ -212,9 +204,6 @@ open class PluginManager(
             put("config", parsed)
         }
     }
-
-    private val enabledPluginIds: Set<String>
-        get() = listPlugins().filter { it.status == PluginStatus.ENABLED }.map { it.id }.toSet()
 
     /** 已启用插件的系统提示文本列表（顺序按插件 id 稳定）。
      *  声明了 config schema 的插件附加当前配置（合并默认值），让 AI 实时感知用户配置变更。 */
@@ -241,6 +230,25 @@ open class PluginManager(
             val dir = me.rerere.rikkahub.data.script.ScriptRuntime.scriptDir(getPluginDir(id))
             dir.isDirectory && dir.listFiles()?.any { it.extension == "js" } == true
         }
+    }
+
+    /**
+     * 管线冷数据快照（design.md D2.4 / R5.1）：
+     * 一次调用聚合启用插件清单、Hook 声明、系统提示与工具清单，
+     * ChatService 免逐插件 loadInfo 反复 IO 与插件运行时细节耦合。
+     * 执行（dispatchHook/runTool）仍走原路径；本接口只提供"读"的一致视图。
+     */
+    fun pipelineSnapshot(): PluginPipelineSnapshot {
+        // settingsFlow 为 StateFlow，.value 同步读取；快照为纯冷数据计算，无挂起点
+        val enabled = settingsStore?.settingsFlow?.value?.enabledPlugins ?: emptySet()
+        if (enabled.isEmpty()) return PluginPipelineSnapshot(emptySet(), emptyMap(), emptyList(), emptyList())
+        val installed = listPlugins().filter { it.info?.id in enabled }.sortedBy { it.id }
+        return buildPipelineSnapshot(
+            installed = installed,
+            enabled = enabled,
+            configJson = { info -> pluginConfigStore?.resolvedConfigJson(info)?.takeIf { it != "{}" } },
+            tools = { id -> runCatching { scriptRuntime.listToolNames(getPluginDir(id)) }.getOrDefault(emptyList()) },
+        )
     }
 
     /** 已安装的 skill 类型插件列表（供技能页合并展示）。type=skill 的插件既可注入 systemPrompt，也可作为技能查看/启用 */
@@ -317,6 +325,32 @@ open class PluginManager(
         if (canonicalFile != canonicalRoot && !canonicalFile.startsWith(canonicalRoot + File.separator)) return null
         if (!file.isFile) return null
         return file
+    }
+
+    /**
+     * 统一探测插件的可用面板规格（显式声明优先，缺省特征探测 web 轨）。
+     *
+     * - schema 轨：plugin.json 声明 panel.type=schema 且 entry（缺省 panel.json）存在
+     * - web 轨：web/plugin.client.js 存在（entry 缺省 index.html；显式 entry 须存在于 web/ 下）
+     *
+     * 返回 null 表示该插件没有可用面板。市场卡片、已安装详情、安装后验证
+     * 与运行宿主声明均以本函数为唯一判定来源。
+     */
+    fun resolvePanelSpec(pluginId: String, info: PluginInfo?): PluginPanelSpec? {
+        info ?: return null
+        val dir = getPluginDir(pluginId)
+        val declared = info.panel ?: run {
+            val legacy = File(dir, "web/plugin.client.js").isFile
+            return if (legacy) PluginPanelSpec() else null
+        }
+        if (declared.type == PluginPanelSpec.TYPE_SCHEMA) {
+            val entry = declared.entry.ifBlank { PluginPanelSpec.DEFAULT_SCHEMA_ENTRY }
+            return if (File(dir, entry).isFile) declared.copy(entry = entry) else null
+        }
+        // web 轨：宿主桥协议文件必须存在，entry 只决定加载哪个 HTML
+        if (!File(dir, "web/plugin.client.js").isFile) return null
+        val entry = declared.entry.ifBlank { PluginPanelSpec.DEFAULT_WEB_ENTRY }
+        return if (resolveWebResourceFile(pluginId, entry) != null) declared.copy(entry = entry) else null
     }
 
     /** 内置插件包制作技能 id（随 App 预置，可在已安装列表卸载） */
@@ -398,7 +432,8 @@ open class PluginManager(
                             backup.copyRecursively(targetDir, overwrite = true)
                             backup.deleteRecursively()
                         }
-                        return@withContext Result.failure(IllegalStateException("安装插件失败"))
+                        // R7.2：失败自动回滚后明示旧版本仍在，避免用户误以为插件损坏
+                        return@withContext Result.failure(IllegalStateException("安装插件失败，已自动恢复原版本"))
                     }
                     backup.deleteRecursively()
                 } catch (e: Throwable) {
@@ -429,6 +464,51 @@ open class PluginManager(
     }
 
     companion object {
+
+        /**
+         * 管线快照聚合纯函数（D2.4/R5.1）：输入安装清单与启用集合，
+         * 输出与目录/DataStore 对账一致的冷数据视图（可 JVM 单测）。
+         */
+        fun buildPipelineSnapshot(
+            installed: List<InstalledPlugin>,
+            enabled: Set<String>,
+            configJson: (PluginInfo) -> String? = { null },
+            tools: (String) -> List<String> = { emptyList() },
+        ): PluginPipelineSnapshot {
+            if (enabled.isEmpty()) return PluginPipelineSnapshot(emptySet(), emptyMap(), emptyList(), emptyList())
+            val hookHandlers = mutableMapOf<String, MutableList<String>>()
+            val systemPrompts = mutableListOf<String>()
+            val toolEntries = mutableListOf<PluginToolsEntry>()
+            val enabledIds = mutableSetOf<String>()
+            installed
+                .filter { it.info != null && it.info.id in enabled }
+                .sortedBy { it.info?.id }
+                .forEach { plugin ->
+                    val info = plugin.info ?: return@forEach
+                    enabledIds += info.id
+                    info.hooks.forEach { hook ->
+                        hookHandlers.getOrPut(hook.name) { mutableListOf() }.add(info.id)
+                    }
+                    if (info.systemPrompt.isNotBlank()) {
+                        val configText = configJson(info)
+                        systemPrompts += if (configText != null) {
+                            info.systemPrompt + "\n\n<插件配置 ${info.id}>：$configText\n</插件配置>"
+                        } else {
+                            info.systemPrompt
+                        }
+                    }
+                    val toolNames = tools(info.id)
+                    if (toolNames.isNotEmpty()) {
+                        toolEntries += PluginToolsEntry(info.id, info.name, toolNames)
+                    }
+                }
+            return PluginPipelineSnapshot(
+                enabledPlugins = enabledIds,
+                hookHandlers = hookHandlers,
+                systemPrompts = systemPrompts,
+                tools = toolEntries,
+            )
+        }
         private const val TAG = "PluginManager"
         const val PLUGIN_DIR_NAME = "plugins"
         const val METADATA_FILE = "plugin.json"
@@ -972,6 +1052,24 @@ data class InstalledPlugin(
     val id: String,
     val info: PluginInfo?,
     val status: PluginStatus,
+)
+
+/** 管线快照中的插件工具条目（pluginId → 插件名 + 工具名列表） */
+data class PluginToolsEntry(
+    val pluginId: String,
+    val pluginName: String,
+    val toolNames: List<String>,
+)
+
+/** 管线冷数据快照（D2.4/R5.1）：ChatService 一次性取用的只读视图 */
+data class PluginPipelineSnapshot(
+    val enabledPlugins: Set<String>,
+    /** hook 名 → 声明该 hook 的启用插件 id 列表（id 稳定排序） */
+    val hookHandlers: Map<String, List<String>>,
+    /** 启用插件系统提示（含配置注入） */
+    val systemPrompts: List<String>,
+    /** 启用插件工具清单 */
+    val tools: List<PluginToolsEntry>,
 )
 
 /** 插件包内承载的 skill 型技能，供技能页与本地技能合并展示 */

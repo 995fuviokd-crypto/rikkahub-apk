@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.repository
 
 import android.database.sqlite.SQLiteBlobTooBigException
+import android.util.Log
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
@@ -8,6 +9,8 @@ import androidx.paging.PagingSource
 import androidx.paging.map
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import me.rerere.ai.ui.UIMessage
@@ -26,6 +29,8 @@ import me.rerere.rikkahub.utils.JsonInstant
 import java.time.Instant
 import kotlin.uuid.Uuid
 
+private const val TAG = "ConversationRepository"
+
 class ConversationRepository(
     private val conversationDAO: ConversationDAO,
     private val messageNodeDAO: MessageNodeDAO,
@@ -38,6 +43,15 @@ class ConversationRepository(
         private const val PAGE_SIZE = 20
         private const val INITIAL_LOAD_SIZE = 40
     }
+
+    /** 会话数据损坏事件（loadMessageNodes 检测到无法读取的节点页时发出）。 */
+    data class ConversationCorruption(
+        val conversationId: String,
+        val lostNodeEstimate: Int,
+    )
+
+    private val _corruptionEvents = MutableSharedFlow<ConversationCorruption>(extraBufferCapacity = 8)
+    val corruptionEvents: SharedFlow<ConversationCorruption> = _corruptionEvents
 
     suspend fun getRecentConversations(assistantId: Uuid, limit: Int = 10): List<Conversation> {
         return conversationDAO.getRecentConversationsOfAssistant(
@@ -451,16 +465,19 @@ class ConversationRepository(
         return database.withTransaction {
             val nodes = mutableListOf<MessageNode>()
             var offset = 0
+            var corruptedNodes = 0
             val pageSize = 64
             while (true) {
                 val page = try {
                     messageNodeDAO.getNodesOfConversationPaged(conversationId, pageSize, offset)
                 } catch (e: SQLiteBlobTooBigException) {
-                    e.printStackTrace()
+                    Log.e(TAG, "Corrupted node page in $conversationId at offset $offset", e)
+                    corruptedNodes += pageSize
                     offset += pageSize
                     continue
                 } catch (e: IllegalStateException) {
-                    e.printStackTrace()
+                    Log.e(TAG, "Corrupted node page in $conversationId at offset $offset", e)
+                    corruptedNodes += pageSize
                     offset += pageSize
                     continue
                 }
@@ -478,6 +495,15 @@ class ConversationRepository(
                     )
                 }
                 offset += page.size
+            }
+            // 损坏节点对用户可见：避免静默丢消息
+            if (corruptedNodes > 0) {
+                _corruptionEvents.tryEmit(
+                    ConversationCorruption(
+                        conversationId = conversationId,
+                        lostNodeEstimate = corruptedNodes,
+                    )
+                )
             }
             nodes
         }

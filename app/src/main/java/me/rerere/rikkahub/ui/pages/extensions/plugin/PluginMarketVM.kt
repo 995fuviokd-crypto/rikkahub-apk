@@ -60,6 +60,31 @@ class PluginMarketVM(
     private val _installed = MutableStateFlow<List<InstalledPlugin>>(emptyList())
     val installed = _installed.asStateFlow()
 
+    /**
+     * Cordis 内核真实加载的插件集合（运行时状态披露）。
+     * 区别于"已启用"（设置开关）：启用的面板/脚本插件若 apply 失败、依赖缺失，
+     * 不会出现在 loadedIds 中——UI 依此呈现"加载失败"而非静默的"已生效"。
+     * 解析失败（无 Koin 环境）退化为空集，纯安装态展示。
+     */
+    private val _runtimeLoaded = MutableStateFlow<Set<String>>(emptySet())
+    val runtimeLoaded = _runtimeLoaded.asStateFlow()
+
+    private val runtimeHost: me.rerere.rikkahub.data.plugin.CordisRuntimeHost? by lazy {
+        runCatching {
+            org.koin.java.KoinJavaComponent.getKoin()
+                .get<me.rerere.rikkahub.data.plugin.CordisRuntimeHost>()
+        }.getOrNull()
+    }
+
+    init {
+        // 运行时加载态：跟随内核热插拔（启用/禁用/目录变更后 sync 会更新 loadedIds）
+        viewModelScope.launch {
+            runtimeHost?.let { host ->
+                host.loadedIds.collect { _runtimeLoaded.value = it }
+            }
+        }
+    }
+
     /** 工作区插件运行环境(Node.js + 常用工具)的就绪状态, 供 DSH npm 类插件的环境提醒 */
     private val _envStatus = MutableStateFlow(AgentEnvStatus.UNKNOWN)
     val envStatus = _envStatus.asStateFlow()
@@ -268,6 +293,24 @@ class PluginMarketVM(
         }
     }
 
+    /**
+     * 已安装插件的可更新版本聚合：扫官方 + 社区市场索引，
+     * 返回 pluginId → 市场最新版本。供已安装 Tab 显示"可更新"徽章
+     * （用户停留在已安装页也能感知更新，无需进市场 Tab）。
+     */
+    fun updateVersionsFor(installed: List<InstalledPlugin>): Map<String, String> {
+        val map = mutableMapOf<String, String>()
+        _marketEntries.value.forEach { entry ->
+            officialUpdateFor(entry, installed)?.let { map[entry.id] = it }
+        }
+        _communityEntries.value.forEach { entry ->
+            communityUpdateFor(entry, installed)?.let {
+                map[communityPluginIdFor(entry.id)] = it
+            }
+        }
+        return map
+    }
+
     fun loadMarket() {
         viewModelScope.launch {
             _marketLoading.value = true
@@ -341,8 +384,7 @@ class PluginMarketVM(
                 .onSuccess { bytes ->
                     pluginManager.installZip(bytes)
                         .onSuccess { info ->
-                            autoEnablePlugin(info.id)
-                            _notice.value = "已安装并启用 ${info.name}（社区市场）"
+                            _notice.value = postInstallFlow(info, "（社区市场）")
                         }
                         .onFailure { _notice.value = "安装失败: ${it.message}" }
                 }
@@ -395,8 +437,7 @@ class PluginMarketVM(
                 }
                 pluginManager.installZip(bytes)
                     .onSuccess { info ->
-                        autoEnablePlugin(info.id)
-                        _notice.value = "已安装并启用 ${info.name} ${info.version}"
+                        _notice.value = postInstallFlow(info, "")
                     }
                     .onFailure { _notice.value = "安装失败: ${it.message}" }
             } catch (e: Throwable) {
@@ -413,8 +454,7 @@ class PluginMarketVM(
             _notice.value = null
             pluginManager.installZip(bytes)
                 .onSuccess { info ->
-                    autoEnablePlugin(info.id)
-                    _notice.value = "已安装并启用 ${info.name} ${info.version}"
+                    _notice.value = postInstallFlow(info, "")
                 }
                 .onFailure { _notice.value = "安装失败: ${it.message}" }
             refreshInstalled()
@@ -433,8 +473,7 @@ class PluginMarketVM(
                 .onSuccess { bytes ->
                     pluginManager.installZip(bytes)
                         .onSuccess { info ->
-                            autoEnablePlugin(info.id)
-                            _notice.value = "已安装并启用 ${info.name}（OpenAI 插件）"
+                            _notice.value = postInstallFlow(info, "（OpenAI 插件）")
                         }
                         .onFailure { _notice.value = "安装失败: ${it.message}" }
                 }
@@ -490,8 +529,7 @@ class PluginMarketVM(
                     .onSuccess { bytes ->
                         pluginManager.installZip(bytes)
                             .onSuccess { info ->
-                                autoEnablePlugin(info.id)
-                                _notice.value = "已安装并启用 ${info.name}（DSH 插件）"
+                                _notice.value = postInstallFlow(info, "（DSH 插件）")
                             }
                             .onFailure { _notice.value = "安装失败: ${it.message}" }
                     }
@@ -519,8 +557,7 @@ class PluginMarketVM(
                 .onSuccess { bytes ->
                     pluginManager.installZip(bytes)
                         .onSuccess { info ->
-                            autoEnablePlugin(info.id)
-                            _notice.value = "已安装并启用 ${info.name}（DSH 插件）"
+                            _notice.value = postInstallFlow(info, "（DSH 插件）")
                         }
                         .onFailure { _notice.value = "安装失败: ${it.message}" }
                 }
@@ -531,14 +568,58 @@ class PluginMarketVM(
     }
 
     /** 安装成功后自动启用插件，避免"装了但没生效" */
-    private fun autoEnablePlugin(pluginId: String) {
+    private suspend fun autoEnablePlugin(pluginId: String) {
         // 先同步更新内存态，使紧随其后的 refreshInstalled() 能立即反映"已生效"
         _enabledPlugins = _enabledPlugins + pluginId
-        viewModelScope.launch {
-            settingsStore.update { it.copy(enabledPlugins = it.enabledPlugins + pluginId) }
-            registerMcpServersIfNeeded(pluginId)
-            refreshInstalled()
+        settingsStore.update { it.copy(enabledPlugins = it.enabledPlugins + pluginId) }
+        registerMcpServersIfNeeded(pluginId)
+        refreshInstalled()
+    }
+
+    /**
+     * 安装后可靠性闭环：
+     * 1. 立即触发内核对账（不等 directoryEvents 的 debounce，装完即可用）
+     * 2. 验证面板/脚本插件真实加载结果（失败直接告知，根治"装了却不可用"的静默失败）
+     * 3. 环境需求前置披露：npm CLI 插件在环境未就绪时，提示安装后需一键补全而非无声不可用
+     * 4. 面板插件提示可从已安装页打开面板
+     *
+     * 返回最终提示文案（调用方作为 notice 展示）。
+     */
+    private suspend fun postInstallFlow(info: me.rerere.rikkahub.data.plugin.PluginInfo, sourceLabel: String): String {
+        autoEnablePlugin(info.id)
+        val base = "已安装并启用 ${info.name} ${info.version}$sourceLabel"
+
+        // 立即对账内核（面板/脚本插件装完即加载）
+        val host = runtimeHost
+        if (host != null) {
+            runCatching { host.sync() }
         }
+
+        val dir = pluginManager.getPluginDir(info.id)
+        // 统一面板探测（显式 schema/web 声明优先）；加载验证只对需要内核执行的形态生效
+        val panelSpec = pluginManager.resolvePanelSpec(info.id, info)
+        val webPanel = panelSpec?.type == me.rerere.rikkahub.data.plugin.PluginPanelSpec.TYPE_WEB
+        val hasScript = me.rerere.rikkahub.data.script.ScriptRuntime.scriptDir(dir)
+            .listFiles().orEmpty().any { it.extension == "js" }
+
+        // 环境缺失前置告知：CLI 插件装了但环境没跟上，用户必须知道下一步
+        if (info.npmPackages.isNotEmpty()) {
+            val envReady = _envStatus.value == AgentEnvStatus.READY || _envStatus.value == AgentEnvStatus.NO_ROOTFS
+            if (!envReady) {
+                return "$base。注意：该插件的命令行能力需要 Node.js 工作区环境，请在「已安装」页一键补全后再使用。"
+            }
+        }
+
+        // 加载验证：内核对账后需要执行的插件（web 面板/脚本，含 schema 事件脚本）仍未加载 → 真实失败，明说
+        val needsKernel = webPanel || hasScript
+        if (host != null && needsKernel && info.id !in host.loadedIds.value) {
+            return "$base。警告：插件未能加载进运行环境（依赖缺失或脚本错误），可尝试关闭后重新启用，持续失败请更新重装。"
+        }
+
+        if (panelSpec != null) {
+            return "$base。可在「已安装」页打开插件面板。"
+        }
+        return base
     }
 
     /** 插件启用时，把插件包内 mcp.json 的远程服务注册到 MCP 设置，使对话中真正可用。

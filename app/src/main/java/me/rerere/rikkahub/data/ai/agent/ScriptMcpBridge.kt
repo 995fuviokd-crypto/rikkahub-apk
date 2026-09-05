@@ -36,8 +36,9 @@ import me.rerere.rikkahub.utils.JsonInstant
  * sub-processes inside the workspace PRoot container and therefore cannot invoke these
  * tools directly. PRoot does not isolate the network namespace, so the agent can reach
  * `127.0.0.1` on the host; this bridge starts a local HTTP MCP server (Streamable HTTP)
- * exposing the enabled script plugins as the single `run_script_tool` tool and forwards
- * calls back into [ScriptRuntime].
+ * exposing the enabled script plugin tools directly (`pluginId.toolName`, D2.4/R4.4)
+ * plus the legacy `run_script_tool` compatibility channel, forwarding calls back into
+ * [ScriptRuntime].
  *
  * Lifecycle is managed by [AcpRuntime] / DI; the server binds an ephemeral port and is
  * stopped via [stop].
@@ -145,52 +146,85 @@ class ScriptMcpBridge(
         )
     }
 
-    /** Lists the enabled script plugins and their tools as a single `run_script_tool` MCP tool. */
+    /**
+     * Lists the enabled script plugin tools (D2.4/R4.4 direct form):
+     * each tool is exposed as its own `pluginId.toolName` MCP tool, plus the legacy
+     * three-segment `run_script_tool` for backward compatibility.
+     */
     private fun handleToolsList(): JsonObject {
         val enabled = settingsStore.settingsFlow.value.enabledPlugins
         val entries = enabled.sorted().mapNotNull { id ->
             val info = pluginManager.loadInfo(id) ?: return@mapNotNull null
             val toolNames = scriptRuntime.listToolNames(pluginManager.getPluginDir(id))
             if (toolNames.isEmpty()) return@mapNotNull null
-            id to (info.name to toolNames)
+            Triple(id, info.name, toolNames)
         }
         return buildJsonObject {
             put(
                 "tools",
                 buildJsonArray {
-                    add(
-                        buildJsonObject {
-                            put("name", "run_script_tool")
-                            put("description", buildToolDescription(entries))
-                            put(
-                                "inputSchema",
+                    entries.forEach { (id, pluginName, toolNames) ->
+                        toolNames.forEach { tool ->
+                            add(
                                 buildJsonObject {
-                                    put("type", "object")
+                                    put("name", "$id.$tool")
+                                    put("description", "[插件 $pluginName] 调用脚本工具 `$tool`，参数经 args 对象透传。Tools.* 运行时映射 RikkaHub 本地能力。")
                                     put(
-                                        "properties",
+                                        "inputSchema",
                                         buildJsonObject {
-                                            put("plugin_id", buildJsonObject {
-                                                put("type", "string")
-                                                put("description", "The plugin id (from the tool description)")
-                                            })
-                                            put("tool", buildJsonObject {
-                                                put("type", "string")
-                                                put("description", "The tool name exported by the script")
-                                            })
-                                            put("args", buildJsonObject {
-                                                put("type", "object")
-                                                put("description", "Arguments for the tool as a JSON object")
-                                            })
+                                            put("type", "object")
+                                            put(
+                                                "properties",
+                                                buildJsonObject {
+                                                    put("args", buildJsonObject {
+                                                        put("type", "object")
+                                                        put("description", "Arguments passed to the script tool as a JSON object")
+                                                    })
+                                                },
+                                            )
+                                            put("required", buildJsonArray { add(JsonPrimitive("args")) })
                                         },
                                     )
-                                    put("required", buildJsonArray {
-                                        add(JsonPrimitive("plugin_id"))
-                                        add(JsonPrimitive("tool"))
-                                    })
                                 },
                             )
-                        },
-                    )
+                        }
+                    }
+                    // 兼容通道：旧三段式
+                    if (entries.isNotEmpty()) {
+                        add(
+                            buildJsonObject {
+                                put("name", "run_script_tool")
+                                put("description", buildToolDescription(entries))
+                                put(
+                                    "inputSchema",
+                                    buildJsonObject {
+                                        put("type", "object")
+                                        put(
+                                            "properties",
+                                            buildJsonObject {
+                                                put("plugin_id", buildJsonObject {
+                                                    put("type", "string")
+                                                    put("description", "The plugin id (from the tool description)")
+                                                })
+                                                put("tool", buildJsonObject {
+                                                    put("type", "string")
+                                                    put("description", "The tool name exported by the script")
+                                                })
+                                                put("args", buildJsonObject {
+                                                    put("type", "object")
+                                                    put("description", "Arguments for the tool as a JSON object")
+                                                })
+                                            },
+                                        )
+                                        put("required", buildJsonArray {
+                                            add(JsonPrimitive("plugin_id"))
+                                            add(JsonPrimitive("tool"))
+                                        })
+                                    },
+                                )
+                            },
+                        )
+                    }
                 },
             )
         }
@@ -200,17 +234,39 @@ class ScriptMcpBridge(
         val params = request["params"] as? JsonObject ?: return buildJsonObject {
             put("text", "missing params")
         } to true
-        val name = params["name"]?.jsonPrimitive?.content
-        if (name != "run_script_tool") {
-            return buildJsonObject { put("text", "unknown tool: $name") } to true
-        }
+        val name = params["name"]?.jsonPrimitive?.content ?: return buildJsonObject {
+            put("text", "missing tool name")
+        } to true
         val arguments = params["arguments"] as? JsonObject ?: buildJsonObject { }
-        val pluginId = arguments["plugin_id"]?.jsonPrimitive?.content
-        val tool = arguments["tool"]?.jsonPrimitive?.content
-        if (pluginId.isNullOrBlank() || tool.isNullOrBlank()) {
-            return buildJsonObject { put("text", "plugin_id and tool are required") } to true
+
+        // 直出形态：pluginId.toolName
+        val dot = name.lastIndexOf('.')
+        if (name != "run_script_tool" && dot > 0) {
+            val pluginId = name.substring(0, dot)
+            val tool = name.substring(dot + 1)
+            val argsJson = arguments["args"]?.toString() ?: "{}"
+            return executeScriptTool(pluginId, tool, argsJson)
         }
-        val argsJson = arguments["args"]?.toString() ?: "{}"
+
+        // 兼容三段式
+        if (name == "run_script_tool") {
+            val pluginId = arguments["plugin_id"]?.jsonPrimitive?.content
+            val tool = arguments["tool"]?.jsonPrimitive?.content
+            if (pluginId.isNullOrBlank() || tool.isNullOrBlank()) {
+                return buildJsonObject { put("text", "plugin_id and tool are required") } to true
+            }
+            val argsJson = arguments["args"]?.toString() ?: "{}"
+            return executeScriptTool(pluginId, tool, argsJson)
+        }
+        return buildJsonObject { put("text", "unknown tool: $name") } to true
+    }
+
+    /** 统一执行路由：启用校验 → QuickJS runTool → MCP content 结构 */
+    private fun executeScriptTool(
+        pluginId: String,
+        tool: String,
+        argsJson: String,
+    ): Pair<JsonElement, Boolean> {
         // 与工具清单一致：仅已启用插件可执行，防止绕过用户禁用决策
         if (pluginId !in settingsStore.settingsFlow.value.enabledPlugins) {
             return buildJsonObject {
@@ -241,16 +297,16 @@ class ScriptMcpBridge(
         } to false
     }
 
-    private fun buildToolDescription(entries: List<Pair<String, Pair<String, List<String>>>>): String = buildString {
-        append("Invoke a local tool provided by an script market script or ToolPkg plugin. ")
+    private fun buildToolDescription(entries: List<Triple<String, String, List<String>>>): String = buildString {
+        append("兼容调用通道（优先使用同名直出工具 pluginId.toolName）。")
         if (entries.isEmpty()) {
             append("No script plugins are currently enabled.")
             return@buildString
         }
         append("Enabled plugins and their tools:\n")
-        entries.forEach { (id, pair) ->
-            append("- 插件「").append(pair.first).append("」（plugin_id=").append(id).append("）：\n")
-            pair.second.forEach { tool ->
+        entries.forEach { (id, pluginName, toolNames) ->
+            append("- 插件「").append(pluginName).append("」（plugin_id=").append(id).append("）：\n")
+            toolNames.forEach { tool ->
                 append("  - `").append(tool).append("`\n")
             }
         }

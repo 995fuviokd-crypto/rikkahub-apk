@@ -103,6 +103,7 @@ import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceFileEditorPage
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceTerminalPage
 import me.rerere.androidvm.VmVM
 import me.rerere.androidvm.navigation.VmNavigator
+import me.rerere.androidvm.VmWorkspaceBridge
 import me.rerere.androidvm.ui.VmDetailPage
 import me.rerere.androidvm.ui.VmListPage
 import me.rerere.rikkahub.ui.pages.extensions.workflow.WorkflowListPage
@@ -274,16 +275,21 @@ class RouteActivity : ComponentActivity() {
         val migrationState by DatabaseMigrationTracker.state.collectAsStateWithLifecycle()
 
         val startScreen = remember {
-            Screen.Chat(
-                id = if (readBooleanPreference("create_new_conversation_on_start", true)) {
-                    Uuid.random().toString()
-                } else {
-                    readStringPreference(
-                        "lastConversationId",
+            // 首启引导：未完成过 onboarding 时进入向导（skip/finish 才写标记，旋转重建不受影响）
+            if (!readBooleanPreference("onboarding_completed", false)) {
+                Screen.Onboarding
+            } else {
+                Screen.Chat(
+                    id = if (readBooleanPreference("create_new_conversation_on_start", true)) {
                         Uuid.random().toString()
-                    ) ?: Uuid.random().toString()
-                }
-            )
+                    } else {
+                        readStringPreference(
+                            "lastConversationId",
+                            Uuid.random().toString()
+                        ) ?: Uuid.random().toString()
+                    }
+                )
+            }
         }
 
         val backStack = rememberNavBackStack(startScreen)
@@ -434,6 +440,10 @@ class RouteActivity : ComponentActivity() {
                                 WebViewPage(key.url, key.contentId, key.pluginId)
                             }
 
+                            entry<Screen.SchemaPanel> { key ->
+                                me.rerere.rikkahub.ui.pages.extensions.plugin.SchemaPanelPage(key.pluginId)
+                            }
+
                             entry<Screen.SettingTheme> {
                                 SettingThemePage()
                             }
@@ -485,6 +495,10 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.SettingModels> {
                                 SettingModelPage()
+                            }
+
+                            entry<Screen.Onboarding> {
+                                me.rerere.rikkahub.ui.pages.onboarding.OnboardingPage()
                             }
 
                             entry<Screen.SettingSearch> {
@@ -559,7 +573,8 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.AndroidVms> {
                                 val context = LocalContext.current
                                 val scope = rememberCoroutineScope()
-                                val vm = remember { VmVM(context, scope) }
+                                val bridge = koinInject<VmWorkspaceBridge>()
+                                val vm = remember { VmVM(context, scope, bridge) }
                                 LaunchedEffect(Unit) { vm.load() }
                                 VmListPage(vm, vmNavigatorAdapter)
                             }
@@ -567,13 +582,15 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.AndroidVmDetail> { key ->
                                 val context = LocalContext.current
                                 val scope = rememberCoroutineScope()
-                                val vm = remember { VmVM(context, scope) }
+                                val bridge = koinInject<VmWorkspaceBridge>()
+                                val vm = remember { VmVM(context, scope, bridge) }
                                 LaunchedEffect(Unit) { vm.load() }
                                 VmDetailPage(
                                     vm = vm,
                                     navigator = vmNavigatorAdapter,
                                     instanceId = key.id,
                                     onOpenTerminal = { backStack.add(Screen.WorkspaceTerminal(it)) },
+                                    onOpenWorkspace = { backStack.add(Screen.WorkspaceDetail(it)) },
                                 )
                             }
 
@@ -715,6 +732,9 @@ sealed interface Screen : NavKey {
     data object Setting : Screen
 
     @Serializable
+    data object Onboarding : Screen
+
+    @Serializable
     data object Backup : Screen
 
     @Serializable
@@ -722,6 +742,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data class WebView(val url: String = "", val contentId: String = "", val pluginId: String = "") : Screen
+
+    @Serializable
+    data class SchemaPanel(val pluginId: String) : Screen
 
     @Serializable
     data object SettingTheme : Screen

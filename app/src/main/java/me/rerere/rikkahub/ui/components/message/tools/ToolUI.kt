@@ -102,6 +102,7 @@ object ToolUIRegistry {
         UseSkillToolUI,
         RecentChatsToolUI,
         ConversationSearchToolUI,
+        ScriptToolUI,
         EditFileToolUI,
         ReadFileToolUI,
         WriteFileToolUI,
@@ -111,6 +112,21 @@ object ToolUIRegistry {
 
     /** 查找工具对应的渲染器, 未注册时返回默认渲染器 */
     fun resolve(toolName: String): ToolUIRenderer = renderers[toolName] ?: DefaultToolUIRenderer
+
+    /**
+     * 直出脚本插件工具渲染解析（D2.4/R4.4）：`pluginId.toolName` 形态且
+     * 前缀为已安装插件 id 时使用 [ScriptToolUI] 直出分支（显示插件名·工具名）。
+     */
+    fun resolveForTool(toolName: String, pluginManager: me.rerere.rikkahub.data.plugin.PluginManager): ToolUIRenderer =
+        renderers[toolName] ?: run {
+            val dot = toolName.lastIndexOf('.')
+            if (dot > 0) {
+                val pluginId = toolName.substring(0, dot)
+                if (pluginManager.getInstalled(pluginId) != null) ScriptToolUI else DefaultToolUIRenderer
+            } else {
+                DefaultToolUIRenderer
+            }
+        }
 }
 
 internal fun JsonElement?.getStringContent(key: String): String? =

@@ -25,6 +25,7 @@ import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.ui.pages.extensions.group.GroupEditorVM
 import me.rerere.rikkahub.ui.pages.extensions.group.GroupListVM
 import me.rerere.rikkahub.ui.pages.extensions.permission.PermissionVM
+import me.rerere.rikkahub.ui.pages.onboarding.OnboardingVM
 import me.rerere.rikkahub.ui.pages.setting.SettingVM
 import me.rerere.rikkahub.ui.pages.setting.SettingAgentVM
 import me.rerere.rikkahub.ui.pages.memory.MemoryLibraryVM
@@ -50,6 +51,7 @@ val viewModelModule = module {
         )
     }
     viewModelOf(::ChatDrawerVM)
+    viewModelOf(::OnboardingVM)
     viewModelOf(::SettingVM)
     viewModelOf(::SettingAgentVM)
     viewModel {
@@ -91,6 +93,7 @@ val viewModelModule = module {
             repository = get(),
             terminalSessionManager = get(),
             acpEnvironmentManager = get(),
+            appScope = get(),
         )
     }
     viewModelOf(::WorkflowListVM)

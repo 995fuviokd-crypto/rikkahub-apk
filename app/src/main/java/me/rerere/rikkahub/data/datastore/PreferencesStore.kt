@@ -125,6 +125,7 @@ class SettingsStore(
         val GLOBAL_TOOL_ACCESSIBILITY = booleanPreferencesKey("global_tool_accessibility")
         val GLOBAL_TOOL_POWER_MANAGEMENT = booleanPreferencesKey("global_tool_power_management")
         val GLOBAL_TOOL_TERMUX = booleanPreferencesKey("global_tool_termux")
+        val GLOBAL_TOOL_VM = booleanPreferencesKey("global_tool_vm")
         // 插件配置：插件 id -> 配置对象 JSON 文本（声明 config schema 的插件由用户编辑，热生效）
         val PLUGIN_CONFIGS = stringPreferencesKey("plugin_configs")
 
@@ -271,6 +272,7 @@ class SettingsStore(
                 globalToolAccessibility = preferences[GLOBAL_TOOL_ACCESSIBILITY] ?: false,
                 globalToolPowerManagement = preferences[GLOBAL_TOOL_POWER_MANAGEMENT] ?: false,
                 globalToolTermux = preferences[GLOBAL_TOOL_TERMUX] ?: false,
+                globalToolVm = preferences[GLOBAL_TOOL_VM] ?: false,
                 recallSegmented = preferences[RECALL_SEGMENTED] ?: false,
                 recallBoundaryPunctuation = preferences[RECALL_BOUNDARY_PUNCTUATION] ?: "。！？～",
                 recallRollbackEnabled = preferences[RECALL_ROLLBACK_ENABLED] ?: true,
@@ -350,8 +352,9 @@ class SettingsStore(
                 displayScaleDensityDpi = preferences[DISPLAY_SCALE_DENSITY_DPI] ?: 160,
                 autoApproveTools = preferences[AUTO_APPROVE_TOOLS] != false,
                 autonomousExecutionEnabled = preferences[AUTONOMOUS_EXECUTION_ENABLED] != false,
-                // 后台保活常驻默认开启
-                keepAliveEnabled = preferences[KEEP_ALIVE_ENABLED] != false,
+                // 后台保活默认关闭：生成期间已有独立前台服务保活，
+                // 常驻空转 FGS 只带来通知噪音与耗电；显式设置过的用户不受影响
+                keepAliveEnabled = preferences[KEEP_ALIVE_ENABLED] == true,
                 enabledPlugins = preferences[ENABLED_PLUGINS]?.let {
                     runCatching { JsonInstant.decodeFromString<Set<String>>(it) }.getOrDefault(emptySet())
                 } ?: emptySet(),
@@ -521,6 +524,7 @@ class SettingsStore(
             preferences[GLOBAL_TOOL_ACCESSIBILITY] = settings.globalToolAccessibility
             preferences[GLOBAL_TOOL_POWER_MANAGEMENT] = settings.globalToolPowerManagement
             preferences[GLOBAL_TOOL_TERMUX] = settings.globalToolTermux
+            preferences[GLOBAL_TOOL_VM] = settings.globalToolVm
             preferences[RECALL_SEGMENTED] = settings.recallSegmented
             preferences[RECALL_BOUNDARY_PUNCTUATION] = settings.recallBoundaryPunctuation
             preferences[RECALL_ROLLBACK_ENABLED] = settings.recallRollbackEnabled
@@ -765,6 +769,7 @@ data class Settings(
     val globalToolPowerManagement: Boolean = false,
     // AI 全能控制：全局 Termux 桥接开关（对所有助手生效，与助手自身的 localTools 取并集）
     val globalToolTermux: Boolean = false,
+    val globalToolVm: Boolean = false,
     // 消息撤回：范围（true=分段截断，false=整条）、边界标点、副作用回滚、撤回后告知 AI
     val recallSegmented: Boolean = false,
     val recallBoundaryPunctuation: String = "。！？～",

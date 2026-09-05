@@ -322,6 +322,8 @@ class ChatService(
     private val workflowRepository: WorkflowRepository,
     private val workflowRunner: WorkflowRunner,
     private val pluginManager: me.rerere.rikkahub.data.plugin.PluginManager,
+    // D2.4 管线统一：Hook/快照经 Cordis 宿主调度（kernel 事件轨 + QuickJS 链）
+    private val cordisRuntimeHost: me.rerere.rikkahub.data.plugin.CordisRuntimeHost,
     private val genMediaRepository: GenMediaRepository,
     val subagentRunTracker: me.rerere.rikkahub.data.ai.subagent.SubagentRunTracker,
     val planTracker: me.rerere.rikkahub.data.ai.plan.PlanTracker,
@@ -362,6 +364,22 @@ class ChatService(
         if (error is CancellationException) return
         _errors.update {
             it + ChatError(title = title, error = error, conversationId = conversationId, solution = solution)
+        }
+    }
+
+    init {
+        // 会话数据损坏（节点页无法读取）转发为用户可见错误，避免静默丢消息
+        appScope.launch {
+            conversationRepo.corruptionEvents.collect { corruption ->
+                addError(
+                    error = IllegalStateException(
+                        "部分历史消息无法读取（约 ${corruption.lostNodeEstimate} 条节点已损坏），" +
+                            "可尝试导出备份或重建会话"
+                    ),
+                    conversationId = runCatching { Uuid.parse(corruption.conversationId) }.getOrNull(),
+                    title = context.getString(R.string.error_title_operation),
+                )
+            }
         }
     }
 
@@ -554,7 +572,6 @@ class ChatService(
                 val processedContent = applyMessageBeforeSendHook(
                     content = preprocessUserInputParts(content, assistant),
                     conversationId = conversationId,
-                    enabledPlugins = settings.enabledPlugins,
                 )
 
                 // 添加消息到列表
@@ -605,17 +622,14 @@ class ChatService(
     private suspend fun applyTitleHook(
         title: String,
         conversationId: Uuid,
-        enabledPlugins: Set<String>,
     ): String {
-        if (enabledPlugins.isEmpty()) return title
-        val hasHandler = enabledPlugins.any { id ->
-            pluginManager.loadInfo(id)?.hooks?.any { it.name == PluginHook.TITLE_AFTER_GENERATE } == true
-        }
+        // 快照已按启用集合过滤，含该 hook 即存在已启用处理器
+        val hasHandler = runCatching { cordisRuntimeHost.pipelineSnapshot() }.getOrNull()
+            ?.hookHandlers?.containsKey(PluginHook.TITLE_AFTER_GENERATE) == true
         if (!hasHandler) return title
 
         val result = runCatching {
-            pluginManager.dispatchHook(
-                enabledPlugins = enabledPlugins,
+            cordisRuntimeHost.dispatchHook(
                 hook = PluginHook.TITLE_AFTER_GENERATE,
                 payload = buildJsonObject {
                     put("conversationId", conversationId.toString())
@@ -636,18 +650,16 @@ class ChatService(
     private suspend fun applyRequestBeforeSendHook(
         prompts: List<String>,
         conversationId: Uuid,
-        enabledPlugins: Set<String>,
     ): List<String> {
-        if (prompts.isEmpty() || enabledPlugins.isEmpty()) return prompts
-        val hasHandler = enabledPlugins.any { id ->
-            pluginManager.loadInfo(id)?.hooks?.any { it.name == PluginHook.REQUEST_BEFORE_SEND } == true
-        }
+        if (prompts.isEmpty()) return prompts
+        // 快照已按启用集合过滤，含该 hook 即存在已启用处理器
+        val hasHandler = runCatching { cordisRuntimeHost.pipelineSnapshot() }.getOrNull()
+            ?.hookHandlers?.containsKey(PluginHook.REQUEST_BEFORE_SEND) == true
         if (!hasHandler) return prompts
 
         val original = prompts.joinToString(separator = "\n\n")
         val result = runCatching {
-            pluginManager.dispatchHook(
-                enabledPlugins = enabledPlugins,
+            cordisRuntimeHost.dispatchHook(
                 hook = PluginHook.REQUEST_BEFORE_SEND,
                 payload = buildJsonObject {
                     put("conversationId", conversationId.toString())
@@ -670,14 +682,15 @@ class ChatService(
     private suspend fun applyMessageBeforeSendHook(
         content: List<UIMessagePart>,
         conversationId: Uuid,
-        enabledPlugins: Set<String>,
     ): List<UIMessagePart> {
         val firstTextIndex = content.indexOfFirst { it is UIMessagePart.Text }
-        if (firstTextIndex < 0 || enabledPlugins.isEmpty()) return content
+        // 快照已按启用集合过滤，无该 hook 处理器时直接返回
+        val hasHandler = runCatching { cordisRuntimeHost.pipelineSnapshot() }.getOrNull()
+            ?.hookHandlers?.containsKey(PluginHook.MESSAGE_BEFORE_SEND) == true
+        if (firstTextIndex < 0 || !hasHandler) return content
         val original = (content[firstTextIndex] as UIMessagePart.Text).text
         val result = runCatching {
-            pluginManager.dispatchHook(
-                enabledPlugins = enabledPlugins,
+            cordisRuntimeHost.dispatchHook(
                 hook = PluginHook.MESSAGE_BEFORE_SEND,
                 payload = buildJsonObject {
                     put("conversationId", conversationId.toString())
@@ -700,9 +713,11 @@ class ChatService(
      */
     private suspend fun applyMessageAfterGenerateHook(
         conversationId: Uuid,
-        enabledPlugins: Set<String>,
     ) {
-        if (enabledPlugins.isEmpty()) return
+        // 快照已按启用集合过滤，无该 hook 处理器时直接返回
+        val hasHandler = runCatching { cordisRuntimeHost.pipelineSnapshot() }.getOrNull()
+            ?.hookHandlers?.containsKey(PluginHook.MESSAGE_AFTER_GENERATE) == true
+        if (!hasHandler) return
         val conversation = getConversationFlow(conversationId).value
         val lastNode = conversation.messageNodes.lastOrNull() ?: return
         val lastMessage = lastNode.currentMessage
@@ -712,8 +727,7 @@ class ChatService(
         val original = (lastMessage.parts[textIndex] as UIMessagePart.Text).text
 
         val result = runCatching {
-            pluginManager.dispatchHook(
-                enabledPlugins = enabledPlugins,
+            cordisRuntimeHost.dispatchHook(
                 hook = PluginHook.MESSAGE_AFTER_GENERATE,
                 payload = buildJsonObject {
                     put("conversationId", conversationId.toString())
@@ -888,6 +902,10 @@ class ChatService(
         // 压缩摘要目标 token：按上下文窗口的 1/8 派生，替代旧的固定值，
         // 保证摘要规模与模型容量成正比（128k → ~16k；上限 32k 防止劣质模型跑飞）
         val compressTargetTokens = (resolveContextLength(model) / 8).coerceIn(2048, 32_000)
+        // D2.4/R5.1：管线冷数据一次取用（启用插件/Hook 清单/系统提示/工具），
+        // 免循环内逐插件 loadInfo 反复 IO；执行路径（dispatchHook）保持不变
+        val pipelineSnapshot = runCatching { cordisRuntimeHost.pipelineSnapshot() }.getOrNull()
+            ?: me.rerere.rikkahub.data.plugin.PluginPipelineSnapshot(emptySet(), emptyMap(), emptyList(), emptyList())
         // 副作用记录器：贯穿本轮完整生成（含重连/压缩续跑），完成后绑定到最后的 AI 节点
         val workspaceIds = resolveWorkspaceIds(assistant, model)
         val sideEffectRecorder = SideEffectRecorder(
@@ -954,9 +972,8 @@ class ChatService(
                 workspaceRoot = workspaceIds.firstOrNull()?.toString(),
                 sideEffectRecorder = sideEffectRecorder,
                 extraSystemPrompts = applyRequestBeforeSendHook(
-                    prompts = pluginManager.enabledSystemPrompts(settings.enabledPlugins),
+                    prompts = pipelineSnapshot.systemPrompts,
                     conversationId = conversationId,
-                    enabledPlugins = settings.enabledPlugins,
                 ),
                 memories = if (!assistant.enableMemory) {
                     emptyList()
@@ -1016,6 +1033,7 @@ class ChatService(
                                 if (settings.globalToolAccessibility) add(LocalToolOption.Accessibility)
                                 if (settings.globalToolPowerManagement) add(LocalToolOption.PowerManagement)
                                 if (settings.globalToolTermux) add(LocalToolOption.Termux)
+                                if (settings.globalToolVm) add(LocalToolOption.Vm)
                             }
                         )
                     )
@@ -1071,7 +1089,7 @@ class ChatService(
 
                 // 生成正常结束时执行 message:afterGenerate 动态 Hook（取消/异常时不改写）
                 if (cause == null) {
-                    applyMessageAfterGenerateHook(conversationId, settings.enabledPlugins)
+                    applyMessageAfterGenerateHook(conversationId)
                 }
 
                 // 生成结束：取消 Live Update 通知，后台时发送完成通知
@@ -1407,7 +1425,7 @@ class ChatService(
             // 生成完，conversation可能不是最新了，因此需要重新获取
             conversationRepo.getConversationById(conversation.id)?.let {
                 val generated = result.message.toText().trim()
-                val finalTitle = applyTitleHook(generated, conversationId, settings.enabledPlugins)
+                val finalTitle = applyTitleHook(generated, conversationId)
                 saveConversation(
                     conversationId,
                     it.copy(title = finalTitle)

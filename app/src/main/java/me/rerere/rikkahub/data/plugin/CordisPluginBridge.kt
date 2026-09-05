@@ -19,10 +19,10 @@ import me.rerere.rikkahub.data.cordis.ToolsSeam
 class CordisPluginBridge(
     val kernel: CordisKernel,
     private var jsExec: (suspend (String, String, JsonObject) -> JsonObject)? = null,
-    private val agentHost: me.rerere.rikkahub.data.agent.AgentHost? = null,
+    private val agentHost: (() -> me.rerere.rikkahub.data.agent.AgentHost)? = null,
     private val settingsStore: me.rerere.rikkahub.data.datastore.SettingsStore? = null,
-    private val conversationRepo: me.rerere.rikkahub.data.repository.ConversationRepository? = null,
-    private val chatService: me.rerere.rikkahub.service.ChatService? = null,
+    private val conversationRepo: (() -> me.rerere.rikkahub.data.repository.ConversationRepository)? = null,
+    private val chatService: (() -> me.rerere.rikkahub.service.ChatService)? = null,
     private val eventBus: CordisHostEventBus? = null,
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -35,7 +35,8 @@ class CordisPluginBridge(
         jsExec = executor
     }
 
-    fun load(declaration: PluginDeclaration) {
+    /** R3.3：suspend 化透传（kernel.register 已 suspend，apply 在调用方协程执行）。 */
+    suspend fun load(declaration: PluginDeclaration) {
         declarations[declaration.id] = declaration
         pluginCapabilities[declaration.id] = declaration.capabilities.toSet()
         if (declaration.kind == PluginDeclarationKind.PANEL) {
@@ -71,7 +72,11 @@ class CordisPluginBridge(
 
     fun isPanelPlugin(pluginId: String): Boolean = pluginId in panelPlugins
 
-    fun createJsBridge(pluginId: String): CordisJsBridge? {
+    fun createJsBridge(
+        pluginId: String,
+        asyncScope: kotlinx.coroutines.CoroutineScope? = null,
+        resultDispatcher: ((js: String) -> Unit)? = null,
+    ): CordisJsBridge? {
         val caps = pluginCapabilities[pluginId] ?: return null
         return CordisJsBridge(
             pluginId = pluginId,
@@ -82,6 +87,8 @@ class CordisPluginBridge(
             conversationRepo = conversationRepo,
             chatService = chatService,
             eventBus = eventBus,
+            asyncScope = asyncScope,
+            resultDispatcher = resultDispatcher,
         )
     }
 

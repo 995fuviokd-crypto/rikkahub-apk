@@ -79,7 +79,6 @@ import kotlinx.serialization.json.put
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.data.plugin.PluginHook
-import me.rerere.rikkahub.data.plugin.PluginManager
 import me.rerere.rikkahub.ui.components.table.DataTable
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
@@ -162,9 +161,10 @@ fun MarkdownNew(
     // 避免主线程同步执行大段内容的 AST 解析 + HTML 生成 + DOM 解析导致掉帧
     var document by remember { mutableStateOf<Document?>(null) }
 
-    // message:beforeRender 渲染钩子：无插件管理器（预览/测试环境）时安全降级
-    val pluginManager = remember {
-        runCatching { org.koin.core.context.GlobalContext.get().get<PluginManager>() }.getOrNull()
+    // message:beforeRender 渲染钩子：经 Cordis 宿主统一调度（D2.4），
+    // 无宿主（预览/测试环境）时安全降级
+    val runtimeHost = remember {
+        runCatching { org.koin.core.context.GlobalContext.get().get<me.rerere.rikkahub.data.plugin.CordisRuntimeHost>() }.getOrNull()
     }
 
     val updatedContent by rememberUpdatedState(content)
@@ -172,10 +172,10 @@ fun MarkdownNew(
         snapshotFlow { updatedContent }
             .distinctUntilChanged()
             .mapLatest { content ->
-                val transformed = if (pluginManager != null) {
+                val transformed = if (runtimeHost != null) {
                     runCatching {
-                        pluginManager
-                            .dispatchHookToEnabled(
+                        runtimeHost
+                            .dispatchHook(
                                 hook = PluginHook.MESSAGE_BEFORE_RENDER,
                                 payload = buildJsonObject { put("text", content) },
                             )["text"]?.jsonPrimitive?.contentOrNull ?: content

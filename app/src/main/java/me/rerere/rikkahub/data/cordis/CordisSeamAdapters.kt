@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.cordis
 
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -23,6 +24,7 @@ import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.session.Session
 import me.rerere.rikkahub.data.session.SessionEvent
+import me.rerere.rikkahub.data.session.SessionEventRepository
 
 /**
  * 从 config 解析目标模型：优先 config["modelId"]（UUID 字符串），
@@ -79,9 +81,14 @@ class HostLlmSeam(
 
 /**
  * `tools` 能力缝真实实现：独立工具注册表 + `tools/change` 事件派发。
+ *
+ * [notifyChanged] 事件驱动：注册表变更时在 [scope]（如 AppScope）上异步派发
+ * `tools/change`，避免在注册路径上 runBlocking 阻塞调用线程；无 scope 时
+ * （纯 JVM 测试）退回同步 emit。
  */
 class HostToolsSeam(
     private val eventBus: CordisEventBus,
+    private val scope: kotlinx.coroutines.CoroutineScope? = null,
 ) : ToolsSeam {
     private val lock = Any()
     private val defs = linkedMapOf<String, ToolSeamDefinition>()
@@ -108,35 +115,56 @@ class HostToolsSeam(
 
     override fun notifyChanged() {
         val names = definitions().map { it.name }
-        runBlocking {
-            eventBus.emit(
-                CordisEvent(
-                    name = "tools/change",
-                    payload = buildJsonObject {
-                        put("tools", names.joinToString(","))
-                        put("count", names.size)
-                    },
-                )
-            )
+        val event = CordisEvent(
+            name = "tools/change",
+            payload = buildJsonObject {
+                put("tools", names.joinToString(","))
+                put("count", names.size)
+            },
+        )
+        val s = scope
+        if (s != null) {
+            s.launch { eventBus.emit(event) }
+        } else {
+            runBlocking { eventBus.emit(event) }
         }
     }
 }
 
 /**
- * `sessions` 能力缝真实实现：维护内存事件源会话日志。
+ * `sessions` 能力缝真实实现：事件源会话日志 + 可选真实会话表落库（R2.3）。
  *
- * [append] 反序列化 SessionEvent JSON 追加；[rebuildContext] 从日志派生上下文。
- * 与 [me.rerere.rikkahub.data.session.SessionEventRepository]（Room 持久化）互补：
- * 本实现面向插件运行时的轻量会话组装，持久化由 repository 承担。
+ * - [bind] 绑定会话 id 后，[append] 同时写入内存日志与 Room 事件表
+ *   （经 [sessionEventRepoProvider] 惰性解析，构造零依赖）
+ * - 未绑定会话时维持纯内存行为（面板/测试轻量会话组装）
+ * - [rebuildContext] 从内存日志派生上下文（读路径不走库，快照语义）
  */
-class HostSessionsSeam : SessionsSeam {
+class HostSessionsSeam(
+    private val sessionEventRepoProvider: (() -> SessionEventRepository)? = null,
+) : SessionsSeam {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     @Volatile
     private var current: Session = Session()
 
+    @Volatile
+    private var boundConversationId: String? = null
+
+    /** 兼容旧签名：纯内存绑定（不落库）。 */
     fun bind(initial: Session) {
+        boundConversationId = null
         current = initial
+    }
+
+    /** 绑定真实会话：append 双写内存与 Room 事件表。幂等。 */
+    fun bind(conversationId: String, initial: Session = Session()) {
+        boundConversationId = conversationId
+        current = initial
+    }
+
+    /** 解除绑定：停止落库，内存日志保留（快照仍可读）。 */
+    fun unbind() {
+        boundConversationId = null
     }
 
     fun snapshot(): Session = current
@@ -144,6 +172,10 @@ class HostSessionsSeam : SessionsSeam {
     override suspend fun append(event: JsonObject) {
         val sessionEvent = json.decodeFromString<SessionEvent>(event.toString())
         current = current.append(sessionEvent)
+        val conversationId = boundConversationId ?: return
+        val repo = runCatching { sessionEventRepoProvider?.invoke() }.getOrNull() ?: return
+        runCatching { repo.append(conversationId, sessionEvent) }
+            .onFailure { it.printStackTrace() }
     }
 
     override suspend fun rebuildContext(): List<UIMessage> =

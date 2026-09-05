@@ -26,17 +26,22 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.stroke.MoreVertical
+import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.script.ScriptRuntime
+import me.rerere.rikkahub.data.plugin.PluginBoundary
 import me.rerere.rikkahub.data.plugin.PluginJsBridge
 import me.rerere.rikkahub.data.plugin.PluginManager
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -45,26 +50,79 @@ import me.rerere.rikkahub.ui.components.webview.WebView
 import me.rerere.rikkahub.ui.components.webview.WebViewContentCache
 import me.rerere.rikkahub.ui.components.webview.rememberWebViewState
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
-import org.koin.compose.koinInject
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WebViewPage(url: String, contentId: String, pluginId: String = "") {
     val context = LocalContext.current
-    val pluginManager: PluginManager = koinInject()
-    val scriptRuntime: ScriptRuntime = koinInject()
-    val cordisBridge: me.rerere.rikkahub.data.plugin.CordisPluginBridge = koinInject()
-    val interfaces = if (pluginId.isNotEmpty()) {
-        val base = mutableMapOf<String, Any>(
-            "AndroidPlugin" to PluginJsBridge(pluginId, pluginManager, scriptRuntime)
-        )
-        // 阶段 7：Cordis 面板插件额外注入 CordisBridge（能力缝访问）
-        cordisBridge.createJsBridge(pluginId)?.let {
-            base["CordisBridge"] = it
+    // R3.1 异步桥接线载体：执行作用域 + 主线程 handler + 延迟绑定的 WebView 状态
+    val pageScope = rememberCoroutineScope()
+    val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    val asyncStateHolder = remember {
+        mutableStateOf<me.rerere.rikkahub.ui.components.webview.WebViewState?>(null)
+    }
+    // D1.1 懒加载：pluginId 为空（普通网页/Markdown 预览）时零插件依赖解析；
+    // 非空时才解析插件链，且经 PluginBoundary 包裹——依赖构造失败呈现占位态而非崩溃
+    val pluginDeps = if (pluginId.isNotEmpty()) {
+        // remember 内非组合上下文，不能用 @Composable koinInject；经全局 Koin 实例
+        // 解析（项目既有模式），任何失败（缺定义/构造异常）被 PluginBoundary 捕获为降级态
+        remember(pluginId) {
+            PluginBoundary.guard("webview plugin deps[$pluginId]") {
+                val koin = org.koin.java.KoinJavaComponent.getKoin()
+                Triple(
+                    koin.get<PluginManager>(),
+                    koin.get<ScriptRuntime>(),
+                    koin.get<me.rerere.rikkahub.data.plugin.CordisPluginBridge>(),
+                )
+            }
         }
-        base
+    } else {
+        null
+    }
+
+    when (pluginDeps) {
+        is PluginBoundary.Result.Err -> {
+            // 插件运行环境不可用：页面本体保持可打开，正文区降级为占位说明
+            PluginUnavailablePlaceholder(pluginId)
+            return
+        }
+
+        null, is PluginBoundary.Result.Ok -> {}
+    }
+
+    // R3.1/R3.2 异步桥：实例独立 remember 以便 DisposableEffect 生命周期收口
+    val cordisJsBridge = if (pluginId.isNotEmpty() && pluginDeps is PluginBoundary.Result.Ok) {
+        val cordisBridge = pluginDeps.value.third
+        remember(pluginId) {
+            cordisBridge.createJsBridge(
+                pluginId = pluginId,
+                asyncScope = pageScope,
+                resultDispatcher = { js ->
+                    mainHandler.post {
+                        asyncStateHolder.value?.webView?.evaluateJavascript(js, null)
+                    }
+                },
+            )
+        }
+    } else {
+        null
+    }
+
+    val interfaces = if (pluginId.isNotEmpty() && pluginDeps is PluginBoundary.Result.Ok) {
+        val (pluginManager, scriptRuntime, _) = pluginDeps.value
+        remember(pluginId, cordisJsBridge) {
+            buildMap<String, Any> {
+                put("AndroidPlugin", PluginJsBridge(pluginId, pluginManager, scriptRuntime))
+                cordisJsBridge?.let { put("CordisBridge", it) }
+            }
+        }
     } else {
         emptyMap()
+    }
+
+    // R3.2 页面离开即解绑事件订阅（取消时监听器清理）
+    androidx.compose.runtime.DisposableEffect(cordisJsBridge) {
+        onDispose { cordisJsBridge?.release() }
     }
     val state = if (url.isNotEmpty()) {
         rememberWebViewState(
@@ -92,6 +150,20 @@ fun WebViewPage(url: String, contentId: String, pluginId: String = "") {
                 loadWithOverviewMode = true
             }
         )
+    }
+    // R3.1：异步结果回推经 holder 找到当前 WebView 实例（state 晚于 interfaces 创建）
+    asyncStateHolder.value = state
+
+    // R4.2 web 轨设计体系注入：插件面板页加载完成后注入 Material3 动态色 CSS 变量
+    // 与 cordis.css 轻量组件样式（页面自带样式优先，变量仅提供取色基准）
+    val colorScheme = MaterialTheme.colorScheme
+    LaunchedEffect(state.isLoading, pluginId, colorScheme) {
+        if (pluginId.isNotEmpty() && !state.isLoading) {
+            state.webView?.evaluateJavascript(
+                me.rerere.rikkahub.ui.components.webview.CordisDesignTokens.injectionJs(colorScheme),
+                null,
+            )
+        }
     }
 
     var showDropdown by remember { mutableStateOf(false) }
@@ -218,6 +290,53 @@ fun WebViewPage(url: String, contentId: String, pluginId: String = "") {
                     )
                 }
             }
+        }
+    }
+}
+
+/** 插件运行环境不可用时的降级占位页（R1.3）：保留导航壳，正文区呈现结构化说明。 */
+@Composable
+private fun PluginUnavailablePlaceholder(pluginId: String) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = stringResource(R.string.webview_page_plugin_title, pluginId),
+                        maxLines = 1,
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                },
+                navigationIcon = {
+                    BackButton()
+                },
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(24.dp),
+            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+        ) {
+            Icon(
+                imageVector = HugeIcons.Bug01,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+            Text(
+                text = stringResource(R.string.webview_page_plugin_unavailable_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = stringResource(R.string.webview_page_plugin_unavailable_text),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
         }
     }
 }

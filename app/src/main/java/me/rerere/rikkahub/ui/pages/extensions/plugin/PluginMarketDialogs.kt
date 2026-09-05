@@ -27,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.CloudUpload
@@ -43,6 +44,8 @@ internal fun PluginDetailDialog(
     onDismiss: () -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
+    // R7.4 能力预检门控：申请能力宿主全未实现时禁装（下面 preflight 块内赋值）
+    var installBlocked by remember(entry.tags) { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -77,11 +80,51 @@ internal fun PluginDetailDialog(
                 val repoUrl = entry.repository
                 if (repoUrl.isNotBlank() && (repoUrl.startsWith("https://") || repoUrl.startsWith("http://"))) {
                     Text(
-                        text = "GitHub 仓库",
-                        style = MaterialTheme.typography.labelLarge,
+                        text = repoUrl,
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
+                        textDecoration = TextDecoration.Underline,
+                        maxLines = 1,
                         modifier = Modifier.clickable { uriHandler.openUri(repoUrl) },
                     )
+                }
+                // 安装前能力（权限）披露：声明的能力缝逐项列出，宿主未实现项标灰
+                val preflight = remember(entry.tags) {
+                    me.rerere.rikkahub.data.plugin.PluginCapabilityPreflight.check(
+                        me.rerere.rikkahub.data.plugin.PluginCapabilityPreflight.requestedFromTags(entry.tags),
+                        me.rerere.rikkahub.data.plugin.CordisRuntimeHost.HOST_CAPABILITIES,
+                    )
+                }
+                if (preflight.requested.isNotEmpty()) {
+                    Text("申请能力", style = MaterialTheme.typography.labelLarge)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        preflight.requested.take(6).forEach { cap ->
+                            val supported = cap in preflight.supported
+                            AssistChip(
+                                onClick = {},
+                                label = {
+                                    Text(
+                                        if (supported) cap else "$cap（暂不支持）",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (supported) {
+                                            MaterialTheme.colorScheme.onSurface
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                    )
+                                },
+                            )
+                        }
+                    }
+                    if (!preflight.allSupported) {
+                        Text(
+                            text = "灰色能力在当前宿主暂未实现，安装后调用会返回不可用。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    // 申请能力宿主一个都不支持 → 不可装（R7.4 预检门控）
+                    installBlocked = preflight.requested.isNotEmpty() && preflight.supported.isEmpty()
                 }
                 if (entry.tags.isNotEmpty()) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -97,9 +140,22 @@ internal fun PluginDetailDialog(
         },
         confirmButton = {
             if (downloading) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                Row(
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Text("安装中…", style = MaterialTheme.typography.labelMedium)
+                }
             } else if (installed) {
-                TextButton(onClick = onDismiss) { Text("关闭") }
+                TextButton(onClick = onDismiss) { Text("已安装，点击关闭") }
+            } else if (installBlocked) {
+                // R7.4 "已证明可装"才亮安装按钮：申请能力宿主全未实现 → 禁装并说明理由
+                Text(
+                    text = "无法安装",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             } else {
                 TextButton(onClick = onInstall) { Text("安装") }
             }

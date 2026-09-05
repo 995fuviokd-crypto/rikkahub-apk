@@ -14,6 +14,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import me.rerere.rikkahub.data.cordis.CordisKernel
 import me.rerere.rikkahub.data.datastore.SettingsStore
@@ -41,6 +42,8 @@ class CordisRuntimeHost(
     private val settingsStore: SettingsStore,
     private val scope: CoroutineScope,
     private val kernel: CordisKernel,
+    private val eventBus: CordisHostEventBus? = null,
+    private val toolsSeamProducer: ScriptToolsSeamProducer? = null,
 ) {
     companion object {
         private const val TAG = "CordisRuntimeHost"
@@ -62,6 +65,13 @@ class CordisRuntimeHost(
     fun start() {
         if (started) return
         started = true
+        // 插件子系统生命周期归口：事件总线与工具缝生产者随协调者一起启动（构造期零副作用）
+        runCatching { eventBus?.start() }.onFailure {
+            Log.w(TAG, "start CordisHostEventBus failed", it)
+        }
+        runCatching { toolsSeamProducer?.start() }.onFailure {
+            Log.w(TAG, "start ScriptToolsSeamProducer failed", it)
+        }
         scope.launch(Dispatchers.Default) {
             try {
                 sync()
@@ -104,6 +114,42 @@ class CordisRuntimeHost(
     }
 
     /**
+     * 管线冷数据快照透传（D2.4/R5.1）：ChatService 经宿主取用，
+     * 避免直接依赖 PluginManager 文件层细节。
+     */
+    fun pipelineSnapshot(): me.rerere.rikkahub.data.plugin.PluginPipelineSnapshot =
+        pluginManager.pipelineSnapshot()
+
+    /**
+     * 管线 Hook 统一调度入口（design.md D2.4）：
+     * ChatService / UI 的所有动态 Hook 派发经本入口，消除对 PluginManager 的直接依赖。
+     *
+     * 执行链（两轨串行，QuickJS 为主力）：
+     * 1. QuickJS Hook 链：声明该 hook 的启用脚本插件（PluginManager.dispatchHook，
+     *    超时链式语义不变）
+     * 2. kernel `hook:<name>` 事件：已加载进内核的面板/脚本插件可监听响应，
+     *    返回非 null JsonObject 时继续链式改写
+     */
+    suspend fun dispatchHook(hook: String, payload: JsonObject): JsonObject {
+        val enabled = settingsStore.settingsFlow.value.enabledPlugins
+        var current = pluginManager.dispatchHook(
+            enabledPlugins = enabled,
+            hook = hook,
+            payload = payload,
+        )
+        // kernel 事件轨：面板插件（经 CordisBridge 订阅 events）响应 hook，
+        // Waterfall 链式语义与 QuickJS Hook 链一致
+        runCatching {
+            val results = kernel.eventBus.dispatch(
+                me.rerere.rikkahub.data.cordis.DispatchMode.Waterfall,
+                me.rerere.rikkahub.data.cordis.CordisEvent("hook:$hook", current),
+            )
+            results.lastOrNull { it != null }?.let { current = it }
+        }
+        return current
+    }
+
+    /**
      * 全量对账：期望集合 = enabledPlugins ∩ 可加载插件；与内核现状 diff 后增量加载/卸载。
      * 幂等，可任意时刻调用。
      */
@@ -141,18 +187,24 @@ class CordisRuntimeHost(
         }
     }
 
-    /** 把已安装插件映射为内核声明；无可执行能力（纯提示词型）返回 null。 */
+    /** 把已安装插件映射为内核声明；无可执行能力（纯提示词型/纯静态 schema 面板）返回 null。 */
     private fun buildDeclaration(plugin: InstalledPlugin): PluginDeclaration? {
         val info = plugin.info ?: return null
         val dir = pluginManager.getPluginDir(plugin.id)
-        val panelClient = File(dir, "web/plugin.client.js")
+        val panelSpec = pluginManager.resolvePanelSpec(plugin.id, info)
         val scriptDir = ScriptRuntime.scriptDir(dir)
         val hasScript = scriptDir.isDirectory && scriptDir.listFiles().orEmpty().any { it.extension == "js" }
 
         val capabilities = HOST_CAPABILITIES + info.tags.orEmpty().filter { it.startsWith("cap:") }
 
+        // schema 轨面板的事件处理脚本（panel.script）也是可执行能力，与普通脚本同轨加载
+        val schemaScript = panelSpec?.takeIf { it.type == PluginPanelSpec.TYPE_SCHEMA && it.script.isNotBlank() }
+            ?.let { File(dir, it.script) }?.takeIf { it.isFile }
+        val executableScript = hasScript || schemaScript != null
+
         return when {
-            panelClient.isFile -> PluginDeclaration(
+            // web 轨面板：仍以 plugin.client.js 为宿主桥协议入口
+            panelSpec?.type == PluginPanelSpec.TYPE_WEB -> PluginDeclaration(
                 id = info.id,
                 name = info.name,
                 version = info.version,
@@ -167,7 +219,7 @@ class CordisRuntimeHost(
                 },
             )
 
-            hasScript -> PluginDeclaration(
+            executableScript -> PluginDeclaration(
                 id = info.id,
                 name = info.name,
                 version = info.version,

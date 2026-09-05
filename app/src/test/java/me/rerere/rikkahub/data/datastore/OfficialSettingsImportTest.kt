@@ -48,18 +48,20 @@ class OfficialSettingsImportTest {
     }
 
     @Test
-    fun `official settings with null titleModelId should deserialize`() {
+    fun `official settings with legacy null model fields should deserialize`() {
         val settings = Settings()
         val jsonObj = JsonInstant.parseToJsonElement(JsonInstant.encodeToString(settings)).jsonObject
         val official = jsonObj.toMutableMap().apply {
             officialMissingFields.forEach { remove(it) }
-            // 官方 titleModelId / suggestionModelId 可空，模拟 null
+            // 官方旧版（titleModelId/suggestionModelId 已随 fastModel 重构移除）
+            // 备份仍可能携带这些 null 字段：应作为未知键忽略而非解码失败
             put("titleModelId", kotlinx.serialization.json.JsonNull)
             put("suggestionModelId", kotlinx.serialization.json.JsonNull)
             put("selectedASRProviderId", kotlinx.serialization.json.JsonNull)
         }
         val decoded = JsonInstant.decodeFromString<Settings>(JsonInstant.encodeToString(JsonObject(official)))
-        assertEquals(null, decoded.titleModelId)
-        assertEquals(null, decoded.suggestionModelId)
+        // 解码成功且核心字段保持默认（无标题/建议独立模型概念，回退 chatModel）
+        assertEquals(settings.chatModelId, decoded.chatModelId)
+        assertEquals(settings.fastModelId, decoded.fastModelId)
     }
 }

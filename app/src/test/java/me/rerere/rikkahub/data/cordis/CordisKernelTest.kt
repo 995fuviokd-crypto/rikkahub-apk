@@ -143,7 +143,7 @@ class CordisKernelTest {
     }
 
     @Test
-    fun `循环依赖抛出异常`() {
+    fun `循环依赖抛出异常`() = runBlocking {
         val kernel = CordisKernel()
         val a = CordisPlugin("a", inject = listOf("b"))
         val b = CordisPlugin("b", inject = listOf("a"))
@@ -158,7 +158,7 @@ class CordisKernelTest {
     }
 
     @Test
-    fun `插件 apply 失败时回滚并抛异常`() {
+    fun `插件 apply 失败时回滚并抛异常`() = runBlocking {
         val kernel = CordisKernel()
         val failing = CordisPlugin("bad") { error("apply boom") }
         try {

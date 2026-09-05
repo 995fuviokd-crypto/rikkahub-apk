@@ -119,6 +119,7 @@ val appModule = module {
             workflowRepository = get(),
             workflowRunner = get(),
             pluginManager = get(),
+            cordisRuntimeHost = get(),
             genMediaRepository = get(),
             subagentRunTracker = get(),
             planTracker = get(),

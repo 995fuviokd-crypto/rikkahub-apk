@@ -114,6 +114,95 @@ private const val TAG = "ChatList"
 private const val LoadingIndicatorKey = "LoadingIndicator"
 private const val ScrollBottomKey = "ScrollBottomKey"
 
+/** ProviderSetting 是否已配置 API Key（空会话引导态判定用）。 */
+private fun me.rerere.ai.provider.ProviderSetting.hasApiKey(): Boolean = when (this) {
+    is me.rerere.ai.provider.ProviderSetting.OpenAI -> apiKey.isNotBlank()
+    is me.rerere.ai.provider.ProviderSetting.Google -> apiKey.isNotBlank()
+    is me.rerere.ai.provider.ProviderSetting.Claude -> apiKey.isNotBlank()
+}
+
+/** 空会话引导：欢迎语 + 示例 prompt；未配置模型时给出直达配置入口。 */
+@Composable
+private fun ChatEmptyState(
+    hasConfiguredProvider: Boolean,
+    onClickSuggestion: (String) -> Unit,
+) {
+    val navController = me.rerere.rikkahub.ui.context.LocalNavController.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.chat_page_empty_welcome),
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = stringResource(R.string.chat_page_empty_hint),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (!hasConfiguredProvider) {
+            Surface(
+                onClick = { navController.navigate(me.rerere.rikkahub.Screen.SettingModels) },
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                modifier = Modifier.padding(top = 8.dp),
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.chat_page_empty_no_provider),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                    Text(
+                        text = stringResource(R.string.chat_page_empty_go_settings),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                listOf(
+                    R.string.chat_page_empty_prompt_1,
+                    R.string.chat_page_empty_prompt_2,
+                    R.string.chat_page_empty_prompt_3,
+                    R.string.chat_page_empty_prompt_4,
+                ).forEach { resId ->
+                    val promptText = stringResource(resId)
+                    Surface(
+                        onClick = { onClickSuggestion(promptText) },
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.fillMaxWidth(0.85f),
+                    ) {
+                        Text(
+                            text = promptText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun ChatList(
     innerPadding: PaddingValues,
@@ -329,17 +418,26 @@ private fun ChatListNormal(
             }
         }
 
-        ChatFontProvider(displaySetting = settings.displaySetting) {
-            LazyColumn(
-                state = state,
-                contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 32.dp + innerPadding.calculateBottomPadding()),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .hazeSource(state = hazeState)
-                    .padding(top = innerPadding.calculateTopPadding()),
-            ) {
+            ChatFontProvider(displaySetting = settings.displaySetting) {
+                LazyColumn(
+                    state = state,
+                    contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 32.dp + innerPadding.calculateBottomPadding()),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .hazeSource(state = hazeState)
+                        .padding(top = innerPadding.calculateTopPadding()),
+                ) {
+            // 空会话引导态：欢迎语 + 示例 prompt / 未配置 Provider 引导
+            if (conversation.messageNodes.isEmpty()) {
+                item(key = "EmptyStateGuidance") {
+                    ChatEmptyState(
+                        hasConfiguredProvider = settings.providers.any { it.hasApiKey() },
+                        onClickSuggestion = onClickSuggestion,
+                    )
+                }
+            }
             itemsIndexed(
                 items = displayNodes,
                 key = { _, item -> item.id },
@@ -512,10 +610,21 @@ private fun ChatListNormal(
                 .padding(innerPadding),
         ) {
             // 错误消息卡片
+            // 重试：对最后一条 assistant 消息重新生成（失败恢复的主路径）
+            val retryLastGeneration = remember(conversation.id) {
+                {
+                    val lastAssistant = conversationUpdated.messageNodes
+                        .lastOrNull { it.currentMessage.role == me.rerere.ai.core.MessageRole.ASSISTANT }
+                    if (lastAssistant != null) {
+                        onRegenerate(lastAssistant.currentMessage)
+                    }
+                }
+            }
             ErrorCardsDisplay(
                 errors = errors,
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
+                onRetry = retryLastGeneration,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .zIndex(5f)

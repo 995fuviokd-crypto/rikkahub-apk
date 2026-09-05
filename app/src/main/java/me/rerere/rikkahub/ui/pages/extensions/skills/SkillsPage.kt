@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -31,7 +30,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -61,28 +59,23 @@ import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Puzzle
+import com.composables.icons.lucide.ChevronRight
+import com.composables.icons.lucide.Lucide
 import me.rerere.rikkahub.data.files.SkillFrontmatterParser
 import me.rerere.rikkahub.data.files.SkillMetadata
-import me.rerere.rikkahub.data.plugin.InstalledPlugin
-import me.rerere.rikkahub.data.plugin.PluginManager
-import me.rerere.rikkahub.data.plugin.PluginSkillInfo
-import me.rerere.rikkahub.data.plugin.PluginStatus
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.RikkaConfirmDialog
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
-import me.rerere.rikkahub.ui.pages.extensions.plugin.InstalledPluginDetailDialog
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
-import org.koin.compose.koinInject
 
 @Composable
 fun SkillsPage() {
     val navController = LocalNavController.current
     val vm = koinViewModel<SkillsVM>()
-    val pluginManager: PluginManager = koinInject()
     val skills by vm.skills.collectAsStateWithLifecycle()
     val pluginSkills by vm.pluginSkills.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -92,7 +85,6 @@ fun SkillsPage() {
     var showAddDialog by rememberSaveable { mutableStateOf(false) }
     var showImportDialog by rememberSaveable { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<SkillMetadata?>(null) }
-    var selectedPlugin by remember { mutableStateOf<PluginSkillInfo?>(null) }
     val fileImportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -171,34 +163,47 @@ fun SkillsPage() {
             }
 
             if (pluginSkills.isNotEmpty()) {
-                // 按来源分组展示，防止不同渠道安装的技能混在一起难以区分
-                val grouped = pluginSkills.groupBy { it.source }
-                grouped.forEach { (source, groupSkills) ->
-                    item(key = "group-${source.name}") {
-                        Column(
+                // 插件技能归口：启停/卸载/权限统一在插件中心管理，技能页只保留入口指引，
+                // 避免同一插件在两处列表重复管理导致的状态混乱
+                item(key = "plugin-skills-portal") {
+                    Card(
+                        onClick = { navController.navigate(Screen.Plugins) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp),
+                        colors = CustomColors.cardColorsOnSurfaceContainer,
+                    ) {
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 16.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            Text(
-                                text = source.label,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.primary,
+                            Icon(
+                                imageVector = HugeIcons.Puzzle,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.primary,
                             )
-                            Text(
-                                text = source.hint + "，共 ${groupSkills.size} 项，可在下方开关启用/卸载",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "${pluginSkills.size} 个插件技能",
+                                    style = MaterialTheme.typography.titleSmall,
+                                )
+                                Text(
+                                    text = "安装的技能型插件已统一在插件中心管理（启停、权限、更新、卸载）",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Icon(
+                                imageVector = Lucide.ChevronRight,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                    }
-                    items(groupSkills, key = { "${source.name}-${it.pluginId}" }) { skill ->
-                        PluginSkillCard(
-                            skill = skill,
-                            onClick = { selectedPlugin = skill },
-                            onToggle = { vm.togglePluginSkill(skill.pluginId) },
-                        )
                     }
                 }
             }
@@ -272,76 +277,6 @@ fun SkillsPage() {
         onDismiss = { deleteTarget = null },
     ) {
         Text(stringResource(R.string.skills_page_delete_message, deleteTarget?.name ?: ""))
-    }
-
-    selectedPlugin?.let { skill ->
-        val info = pluginManager.loadInfo(skill.pluginId)
-        InstalledPluginDetailDialog(
-            plugin = InstalledPlugin(
-                id = skill.pluginId,
-                info = info,
-                status = if (skill.enabled) PluginStatus.ENABLED else PluginStatus.INSTALLED,
-            ),
-            installDir = pluginManager.getPluginDir(skill.pluginId).absolutePath,
-            onToggle = { vm.togglePluginSkill(skill.pluginId) },
-            onUninstall = {
-                vm.uninstallPluginSkill(skill.pluginId)
-                selectedPlugin = null
-            },
-            onDismiss = { selectedPlugin = null },
-        )
-    }
-}
-
-@Composable
-private fun PluginSkillCard(
-    skill: PluginSkillInfo,
-    onClick: () -> Unit,
-    onToggle: () -> Unit,
-) {
-    Card(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        colors = CustomColors.cardColorsOnSurfaceContainer,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = HugeIcons.Puzzle,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = skill.name,
-                        style = MaterialTheme.typography.titleSmallEmphasized,
-                        maxLines = 1,
-                    )
-                    AssistChip(
-                        onClick = {},
-                        label = { Text("插件", style = MaterialTheme.typography.labelSmall) },
-                    )
-                }
-                Text(
-                    text = skill.description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                )
-            }
-            Switch(checked = skill.enabled, onCheckedChange = { onToggle() })
-        }
     }
 }
 

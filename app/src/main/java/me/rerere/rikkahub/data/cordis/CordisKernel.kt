@@ -4,7 +4,25 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
+import kotlin.coroutines.coroutineContext
+
+/**
+ * 协程局部的插件归属（R3.3）：apply 及其派生调用经 withContext 携带，
+ * suspend 路径（seam 等）优先读取本元素，避免并发注册时 @Volatile 全局值串扰。
+ *
+ * 非 suspend 注册 API（set/effect 等）仍读 kernel 的 volatile fallback，
+ * 依赖"register 串行"调用约定（CordisRuntimeHost.sync 持锁串行化）。
+ */
+class CordisPluginScope(
+    val pluginId: String,
+    val capabilities: Set<String>,
+) : kotlin.coroutines.CoroutineContext.Element {
+    companion object Key : kotlin.coroutines.CoroutineContext.Key<CordisPluginScope>
+
+    override val key: kotlin.coroutines.CoroutineContext.Key<*> get() = Key
+}
 
 /**
  * Cordis 插件声明：inject 声明依赖，apply 注入 ctx 副作用。
@@ -131,12 +149,12 @@ class CordisContext internal constructor(
         return ctx
     }
 
-    /** 递归销毁子作用域（仅回收本作用域副作用，不影响父服务）。 */
-    fun dispose() {
+    /** 递归销毁子作用域（仅回收本作用域副作用，不影响父服务）。R3.3：结构化取消，无 runBlocking。 */
+    suspend fun dispose() {
         children.forEach { it.dispose() }
         children.clear()
         effects.asReversed().forEach { effect ->
-            runCatching { kotlinx.coroutines.runBlocking { effect.dispose() } }
+            runCatching { effect.dispose() }
         }
         effects.clear()
         handles.forEach { kernel.eventBus.off(it) }
@@ -148,11 +166,11 @@ class CordisContext internal constructor(
     }
 
     /** 仅按插件 ID 清理该插件注册的服务/模型/命令/effects/监听（保留本作用域其他内容）。 */
-    internal fun disposePlugin(pluginId: String) {
+    internal suspend fun disposePlugin(pluginId: String) {
         effects.asReversed()
             .filter { it.pluginId == pluginId }
             .forEach { effect ->
-                runCatching { kotlinx.coroutines.runBlocking { effect.dispose() } }
+                runCatching { effect.dispose() }
             }
         effects.removeAll { it.pluginId == pluginId }
         services.entries.removeAll { it.value.pluginId == pluginId }
@@ -177,12 +195,17 @@ class CordisContext internal constructor(
     /**
      * 访问能力缝服务。插件必须在 [CordisPlugin.capabilities] 中声明该能力名，
      * 否则抛出 [CordisCapabilityNotDeclaredException]（R7.4）。
+     *
+     * 归属判定优先读协程局部 [CordisPluginScope]（R3.3），
+     * 无协程局部时回退 kernel 的 volatile 当前值（同步注册路径）。
      */
     suspend fun seam(name: String): Any? {
-        val declared = kernel.currentCapabilities
+        val scope = coroutineContext[CordisPluginScope]
+        val owner = scope?.pluginId ?: kernel.currentPluginId
+        val declared = scope?.capabilities ?: kernel.currentCapabilities
         if (name !in declared) {
             throw CordisCapabilityNotDeclaredException(
-                "plugin '${kernel.currentPluginId}' attempted to access undeclared capability '$name'; " +
+                "plugin '$owner' attempted to access undeclared capability '$name'; " +
                     "declared: $declared"
             )
         }
@@ -273,8 +296,11 @@ class CordisKernel(
     /**
      * 注册插件：按 inject 依赖做拓扑排序后 apply。
      * 循环依赖抛出 [CordisCycleDependencyException]。
+     *
+     * R3.3：suspend 化，apply 在调用方协程执行（携带 [CordisPluginScope]），
+     * 移除 runBlocking——register 须串行调用（CordisRuntimeHost.sync 持锁保证）。
      */
-    fun register(plugin: CordisPlugin) {
+    suspend fun register(plugin: CordisPlugin) {
         check(!disposed) { "kernel disposed" }
         if (plugins.any { it.id == plugin.id }) error("plugin already registered: ${plugin.id}")
         topoOrder(plugins + plugin) // 先验证依赖图（含循环检测）
@@ -301,11 +327,14 @@ class CordisKernel(
         disposed = true
     }
 
-    private fun applyPlugin(plugin: CordisPlugin) {
+    private suspend fun applyPlugin(plugin: CordisPlugin) {
         currentPluginId = plugin.id
         currentCapabilities = plugin.capabilities.toSet()
         try {
-            kotlinx.coroutines.runBlocking { plugin.apply(root) }
+            // R3.3：协程局部归属（suspend 路径 seam() 优先读取），apply 不再 runBlocking
+            withContext(CordisPluginScope(plugin.id, plugin.capabilities.toSet())) {
+                plugin.apply(root)
+            }
         } catch (e: Throwable) {
             root.disposePlugin(plugin.id)
             throw CordisPluginApplyException("plugin ${plugin.id} apply failed", e)
