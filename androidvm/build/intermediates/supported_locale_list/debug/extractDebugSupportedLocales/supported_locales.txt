@@ -1,5 +1,0 @@
-ja
-ko-rKR
-ru
-zh
-zh-rTW

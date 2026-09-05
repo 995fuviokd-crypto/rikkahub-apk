@@ -14,3 +14,6 @@ local.properties
 .monkeycode/
 app/mapping.txt
 app/build/outputs/mapping/
+# 各模块 build 目录（androidvm 曾整体入库，编译产物严禁跟踪）
+**/build/
+androidvm/build/
