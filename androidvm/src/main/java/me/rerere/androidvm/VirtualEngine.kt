@@ -28,6 +28,14 @@ interface VirtualEngine {
     suspend fun listApps(instance: VmInstance): List<String>
 
     /**
+     * 卸载实例内应用（Android 模式有意义）。
+     * 默认抛 [UnsupportedOperationException]：Linux / 客机 ROM 不处理。
+     */
+    suspend fun uninstallApp(instance: VmInstance, packageName: String) {
+        throw UnsupportedOperationException("Engine ${type.name} does not support app uninstall")
+    }
+
+    /**
      * 安装虚拟框架模块（Xposed/Magisk 格式模块在 Bcore 虚拟空间内加载）。
      * 返回模块包名。Linux 容器不支持，抛 [UnsupportedOperationException]。
      */

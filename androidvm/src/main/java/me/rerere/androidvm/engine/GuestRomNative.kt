@@ -9,9 +9,8 @@ package me.rerere.androidvm.engine
  * 方法语义见 .monkeycode/specs/androidvm-guest-rom/design.md 第 3、5 节。
  */
 object GuestRomNative {
-    init {
-        runCatching { System.loadLibrary("guestrom") }
-    }
+    /** 原生库是否已加载（guestrom.native.enable 构建开关 + NDK 产物存在时为 true） */
+    val available: Boolean = runCatching { System.loadLibrary("guestrom") }.isSuccess
 
     /** 准备客机根：解包 ROM tar、建 data/vendor overlay、放置 Magisk zip */
     external fun prepare(rootDir: String, romUrl: String)

@@ -14,8 +14,9 @@ import top.niunaijun.blackbox.client.ClientConfiguration
  * BlackBoxCore.doAttachBaseContext 需要一个 ClientConfiguration 的具体子类；
  * RikkaHubApp.attachBaseContext 经由 BlackBoxHost 反射加载本类完成初始化。
  *
- * 虚拟 root / 反检测配置通过 SharedPreferences 与宿主（androidvm 的 VmVM）共享，
- * 保证宿主进程与虚拟 app 进程读到一致的开关状态。
+ * 反检测配置(hideRoot/hideXposed)通过 SharedPreferences 与宿主(androidvm 的 VmVM)共享,
+ * 保证宿主进程与虚拟 app 进程读到一致的开关状态; KEY_VIRTUAL_ROOT 仅为宿主侧记录保留
+ * (BlackBoxCore 的 ClientConfiguration 无虚拟 root 钩子, 该开关当前无引擎侧效果)。
  */
 class RikkaBoxConfig(private val context: Context) : ClientConfiguration() {
 
@@ -28,8 +29,6 @@ class RikkaBoxConfig(private val context: Context) : ClientConfiguration() {
     override fun isHideRoot(): Boolean = prefs.getBoolean(KEY_HIDE_ROOT, false)
 
     override fun isHideXposed(): Boolean = prefs.getBoolean(KEY_HIDE_XPOSED, false)
-
-    override fun isVirtualRootEnabled(): Boolean = prefs.getBoolean(KEY_VIRTUAL_ROOT, false)
 
     companion object {
         const val PREFS_NAME = "rikkahub_vm"

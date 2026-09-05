@@ -22,10 +22,10 @@
   <string name="vm_hide_xposed">隱藏 Xposed</string>
   <string name="vm_hide_xposed_desc_android">向偵測到框架的應用隱藏 Xposed 特徵</string>
   <string name="vm_android_only_desc">僅 Android 虛擬化支援</string>
-  <string name="vm_magisk_modules">Magisk / 模組</string>
+  <string name="vm_magisk_modules">Xposed 模組</string>
   <string name="vm_badge_magisk">Magisk</string>
-  <string name="vm_flash_magisk">刷入 Magisk</string>
-  <string name="vm_no_modules_hint">尚未刷入模組，點擊「刷入 Magisk」選擇 Magisk/Xposed 模組</string>
+  <string name="vm_flash_magisk">安裝 Xposed 模組</string>
+  <string name="vm_no_modules_hint">尚未安裝模組，點擊「安裝 Xposed 模組」選擇模組 APK</string>
   <string name="vm_restart_vm">重新啟動虛擬機</string>
   <string name="vm_restart">重新啟動</string>
   <string name="vm_floating_window">懸浮窗小窗</string>
@@ -55,4 +55,6 @@
   <string name="vm_msg_space_restarted">虛擬空間已重新啟動，Magisk/模組將於下次啟動應用時生效</string>
   <string name="vm_msg_read_apk_failed">讀取 APK 失敗：%1$s</string>
   <string name="vm_msg_read_module_failed">讀取模組失敗：%1$s</string>
+  <string name="vm_engine_not_ready">引擎未接入</string>
+  <string name="vm_open_workspace">工作區</string>
 </resources>

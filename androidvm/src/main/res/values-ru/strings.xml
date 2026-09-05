@@ -22,10 +22,10 @@
   <string name="vm_hide_xposed">Скрыть Xposed</string>
   <string name="vm_hide_xposed_desc_android">Скрывает признаки Xposed от приложений, обнаруживающих фреймворк</string>
   <string name="vm_android_only_desc">Только для Android-виртуализации</string>
-  <string name="vm_magisk_modules">Magisk / модули</string>
+  <string name="vm_magisk_modules">Xposed модули</string>
   <string name="vm_badge_magisk">Magisk</string>
-  <string name="vm_flash_magisk">Вшить Magisk</string>
-  <string name="vm_no_modules_hint">Модули еще не вшиты. Нажмите «Вшить Magisk», чтобы выбрать модуль Magisk/Xposed</string>
+  <string name="vm_flash_magisk">Установить Xposed-модуль</string>
+  <string name="vm_no_modules_hint">Xposed-модули еще не установлены. Нажмите «Установить Xposed-модуль» и выберите APK модуля</string>
   <string name="vm_restart_vm">Перезапустить виртуальную машину</string>
   <string name="vm_restart">Перезапуск</string>
   <string name="vm_floating_window">Плавающее окно</string>
@@ -55,4 +55,6 @@
   <string name="vm_msg_space_restarted">Виртуальное пространство перезапущено; Magisk/модули применятся при следующем запуске приложения</string>
   <string name="vm_msg_read_apk_failed">Не удалось прочитать APK: %1$s</string>
   <string name="vm_msg_read_module_failed">Не удалось прочитать модуль: %1$s</string>
+  <string name="vm_engine_not_ready">Движок не подключён</string>
+  <string name="vm_open_workspace">Рабочая область</string>
 </resources>

@@ -47,6 +47,9 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+            // 纯 JVM 单测中 android.util.Log 等框架方法返回默认值而非抛异常，
+            // 让被测代码内的防御性日志不干扰断言路径
+            isReturnDefaultValues = true
         }
     }
 
@@ -118,7 +121,8 @@ android {
         getByName("androidTest").assets.srcDirs("$projectDir/schemas")
         // 黑盒接入开关：开启 blackbox.enable 时纳入宿主 ClientConfiguration 实现（依赖 :Bcore 的 ClientConfiguration）。
         if (providers.gradleProperty("blackbox.enable").getOrElse("false").toBoolean()) {
-            getByName("main").java.srcDir("src/blackbox")
+            // 注意指向 java 子目录: srcDir 指向目录本身时, 其下的 java/ 不会被识别为包结构
+            getByName("main").java.srcDir("src/blackbox/java")
         }
     }
     androidResources {

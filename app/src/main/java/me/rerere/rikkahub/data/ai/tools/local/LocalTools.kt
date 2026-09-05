@@ -43,9 +43,12 @@ class LocalTools(
 
     val rootTools by lazy { buildRootTools(context) }
 
-    val scriptTool by lazy { buildScriptTool(pluginManager, scriptRuntime, settingsStore) }
+    val scriptTools: List<Tool>
+        get() = buildScriptTools(pluginManager, scriptRuntime, settingsStore)
 
     val termuxTools by lazy { buildTermuxTools(context) }
+
+    val vmTools by lazy { buildVmTools(context) }
 
     fun getTools(options: List<LocalToolOption>): List<Tool> {
         val tools = mutableListOf<Tool>()
@@ -87,13 +90,17 @@ class LocalTools(
             tools.addAll(rootTools)
         }
         if (options.contains(LocalToolOption.Scripts)) {
-            tools.add(scriptTool)
+            // 直出形态：每个启用脚本插件的每个工具独立 Tool（pluginId.toolName）+ 兼容通道
+            tools.addAll(scriptTools)
         }
         if (options.contains(LocalToolOption.SystemControl)) {
             tools.addAll(systemControlTools.tools)
         }
         if (options.contains(LocalToolOption.Termux)) {
             tools.addAll(termuxTools)
+        }
+        if (options.contains(LocalToolOption.Vm)) {
+            tools.addAll(vmTools)
         }
         return tools
     }

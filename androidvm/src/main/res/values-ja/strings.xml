@@ -22,10 +22,10 @@
   <string name="vm_hide_xposed">Xposed を隠す</string>
   <string name="vm_hide_xposed_desc_android">フレームワークを検知するアプリへ Xposed の痕跡を隠します</string>
   <string name="vm_android_only_desc">Android 仮想化でのみ対応</string>
-  <string name="vm_magisk_modules">Magisk / モジュール</string>
+  <string name="vm_magisk_modules">Xposed モジュール</string>
   <string name="vm_badge_magisk">Magisk</string>
-  <string name="vm_flash_magisk">Magisk を書き込む</string>
-  <string name="vm_no_modules_hint">モジュール未書き込みです。「Magisk を書き込む」から Magisk/Xposed モジュールを選択してください</string>
+  <string name="vm_flash_magisk">Xposed モジュールを導入</string>
+  <string name="vm_no_modules_hint">モジュール未導入です。「Xposed モジュールを導入」からモジュール APK を選択してください</string>
   <string name="vm_restart_vm">仮想マシンを再起動</string>
   <string name="vm_restart">再起動</string>
   <string name="vm_floating_window">フローティングウィンドウ</string>
@@ -55,4 +55,6 @@
   <string name="vm_msg_space_restarted">仮想空間を再起動しました。Magisk/モジュールは次回アプリ起動時に有効化されます</string>
   <string name="vm_msg_read_apk_failed">APK の読み込みに失敗: %1$s</string>
   <string name="vm_msg_read_module_failed">モジュールの読み込みに失敗: %1$s</string>
+  <string name="vm_engine_not_ready">エンジン未接続</string>
+  <string name="vm_open_workspace">ワークスペース</string>
 </resources>

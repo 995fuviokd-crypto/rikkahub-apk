@@ -22,11 +22,16 @@ class GuestRomEngine(private val context: Context) : VirtualEngine {
         File(context.filesDir, "guestrom/${instance.id}")
 
     override suspend fun provision(instance: VmInstance, onProgress: (Float, String) -> Unit) {
+        check(GuestRomNative.available) {
+            "客机 ROM 引擎未接入：需在构建时启用 guestrom.native.enable 并提供 ROM 镜像（真机路线）"
+        }
+        check(instance.rootfsUrl.isNotBlank()) { "客机 ROM 镜像地址为空：请在实例中配置 ROM URL" }
         GuestRomNative.prepare(rootDir(instance).absolutePath, instance.rootfsUrl)
         onProgress(1f, "ready")
     }
 
     override suspend fun launch(instance: VmInstance, packageName: String?) {
+        check(GuestRomNative.available) { "客机 ROM 引擎未接入" }
         GuestRomNative.boot(rootDir(instance).absolutePath)
     }
 

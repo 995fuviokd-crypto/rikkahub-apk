@@ -22,10 +22,10 @@
   <string name="vm_hide_xposed">Hide Xposed</string>
   <string name="vm_hide_xposed_desc_android">Hides the Xposed framework from apps that detect it.</string>
   <string name="vm_android_only_desc">Only supported by Android virtualization</string>
-  <string name="vm_magisk_modules">Magisk / Modules</string>
+  <string name="vm_magisk_modules">Xposed Modules</string>
   <string name="vm_badge_magisk">Magisk</string>
-  <string name="vm_flash_magisk">Flash Magisk</string>
-  <string name="vm_no_modules_hint">No modules flashed yet. Tap “Flash Magisk” to select a Magisk/Xposed module.</string>
+  <string name="vm_flash_magisk">Install Xposed Module</string>
+  <string name="vm_no_modules_hint">No Xposed modules installed yet. Tap “Install Xposed Module” to select a module APK.</string>
   <string name="vm_restart_vm">Restart Virtual Machine</string>
   <string name="vm_restart">Restart</string>
   <string name="vm_floating_window">Floating Window</string>
@@ -56,4 +56,6 @@
   <string name="vm_msg_space_restarted">Virtual space restarted; Magisk/modules apply on next app launch.</string>
   <string name="vm_msg_read_apk_failed">Failed to read APK: %1$s</string>
   <string name="vm_msg_read_module_failed">Failed to read module: %1$s</string>
+  <string name="vm_engine_not_ready">Engine not ready</string>
+  <string name="vm_open_workspace">Workspace</string>
 </resources>

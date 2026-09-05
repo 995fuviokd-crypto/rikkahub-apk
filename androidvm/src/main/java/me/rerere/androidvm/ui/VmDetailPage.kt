@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.ArrowLeft
 import com.composables.icons.lucide.Download
 import com.composables.icons.lucide.EyeOff
+import com.composables.icons.lucide.FolderOpen
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Maximize
 import com.composables.icons.lucide.Play
@@ -62,6 +63,7 @@ fun VmDetailPage(
     navigator: VmNavigator,
     instanceId: String,
     onOpenTerminal: (String) -> Unit,
+    onOpenWorkspace: (String) -> Unit = {},
 ) {
     val instance = vm.instances.firstOrNull { it.id == instanceId }
     val snackbar = remember { SnackbarHostState() }
@@ -95,9 +97,10 @@ fun VmDetailPage(
             vm.installApp(instance, tmp.absolutePath)
         }.onFailure { vm.message.value = context.getString(R.string.vm_msg_read_apk_failed, it.message) }
     }
+    // Xposed 模块本身是 APK; Bcore 不支持 Magisk zip 模块
     val modulePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
-        val tmp = File(context.cacheDir, "vm_magisk_${System.currentTimeMillis()}.zip")
+        val tmp = File(context.cacheDir, "vm_module_${System.currentTimeMillis()}.apk")
         runCatching {
             context.contentResolver.openInputStream(uri)?.use { input ->
                 tmp.outputStream().use { out -> input.copyTo(out) }
@@ -145,9 +148,15 @@ fun VmDetailPage(
                             Text(stringResource(R.string.vm_install_apk))
                         }
                     } else {
-                        FilledTonalButton(onClick = { onOpenTerminal(instance.id) }) {
-                            Icon(Lucide.Play, null)
-                            Text(stringResource(R.string.vm_open_terminal))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilledTonalButton(onClick = { onOpenTerminal(instance.id) }) {
+                                Icon(Lucide.Play, null)
+                                Text(stringResource(R.string.vm_open_terminal))
+                            }
+                            OutlinedButton(onClick = { onOpenWorkspace(instance.id) }) {
+                                Icon(Lucide.FolderOpen, null)
+                                Text(stringResource(R.string.vm_open_workspace))
+                            }
                         }
                     }
                 }
@@ -217,7 +226,7 @@ fun VmDetailPage(
                 item {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(stringResource(R.string.vm_magisk_modules), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                        FilledTonalButton(onClick = { modulePicker.launch("*/*") }) {
+                        FilledTonalButton(onClick = { modulePicker.launch("application/vnd.android.package-archive") }) {
                             Icon(Lucide.Download, null)
                             Text(stringResource(R.string.vm_flash_magisk))
                         }

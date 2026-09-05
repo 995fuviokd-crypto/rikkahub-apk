@@ -7,16 +7,26 @@ import me.rerere.androidvm.VmEngineType
 import me.rerere.androidvm.VmInstance
 import me.rerere.androidvm.VmModuleInfo
 import me.rerere.androidvm.VmModuleKind
+import java.io.File
 import kotlin.math.abs
 
 /**
  * 仿光速虚拟机的 Android 应用虚拟化引擎（黑盒 BlackBox 反射接入）。
  *
- * 全部通过反射调用 [me.rerere.androidvm.BlackBoxHost] 中核实的 BlackBoxCore API，
- * 不引入编译期依赖、不破坏宿主构建：未引入 Bcore 时调用抛明确异常（UI 据此提示未接入）。
+ * 全部通过反射调用 [me.rerere.androidvm.BlackBoxHost] 中核实的 BlackBoxCore API,
+ * 不引入编译期依赖、不破坏宿主构建: 未引入 Bcore 时调用抛明确异常(UI 据此提示未接入)。
  *
- * 多实例 / 多开映射：本模块的 [VmInstance.id] 经 [userIdOf] 映射为 BlackBox 的 userId
- * （每个实例 = 一个隔离用户空间）；虚拟 root / Magisk 由 BlackBox 的 XP 模块注入在运行时生效。
+ * 多实例 / 多开映射: 本模块的 [VmInstance.id] 经 [userIdOf] 映射为 BlackBox 的 userId
+ * (每个实例 = 一个隔离用户空间; server 侧安装时自动 createUser, 幂等)。
+ *
+ * 方法签名对照 BlackBoxCore.java(compileSdk35 分支)核实:
+ * - InstallResult installPackageAsUser(File apk, int userId)  ← APK 文件安装
+ * - InstallResult installXPModule(File apk) / boolean isXposedModule(File)
+ * - List<InstalledModule> getInstalledXPModules()  (字段: packageName/name/desc/enable)
+ * - void setModuleEnable(String, boolean) / void uninstallXPModule(String)
+ * - List<PackageInfo> getInstalledPackages(int flags, int userId)
+ * - boolean launchApk(String packageName, int userId)
+ * - void uninstallPackageAsUser(String packageName, int userId)
  */
 class BlackBoxEngine : VirtualEngine {
     override val type = VmEngineType.ANDROID
@@ -25,150 +35,161 @@ class BlackBoxEngine : VirtualEngine {
         get() = runCatching { Class.forName("top.niunaijun.blackbox.BlackBoxCore") }.getOrNull()
 
     private fun requireCore(): Pair<Class<*>, Any?> {
-        val cls = coreClass ?: throw IllegalStateException("Android 虚拟化引擎尚未接入：请引入黑盒 BlackBox 的 Bcore 模块并完成初始化")
+        val cls = coreClass ?: throw IllegalStateException("Android 虚拟化引擎尚未接入：请以 blackbox.enable=true 构建并引入 Bcore 模块")
         val core = cls.getMethod("get").invoke(null)
         return cls to core
     }
 
-    private fun userIdOf(instance: VmInstance): Int = abs(instance.id.hashCode())
+    internal fun isAvailable(): Boolean = coreClass != null
+
+    /** 实例 id → BlackBox userId; abs(hash) 非负, 规避 Int.MIN_VALUE 取绝对值仍为负的坑 */
+    internal fun userIdOf(instance: VmInstance): Int {
+        val h = instance.id.hashCode()
+        return if (h == Int.MIN_VALUE) 0 else abs(h)
+    }
 
     override suspend fun provision(
         instance: VmInstance,
         onProgress: (Float, String) -> Unit,
     ) {
-        // BlackBox 不需要预置 ROM 镜像，应用按需安装到对应 userId 空间。
+        // BlackBox 不需要预置 ROM 镜像, 应用按需安装到对应 userId 空间;
+        // 引擎未接入时立即失败, 避免实例"假装就绪"到启动时才暴露
+        requireCore()
         onProgress(1f, "ready")
     }
 
     override suspend fun launch(instance: VmInstance, packageName: String?) {
-        val pkg = packageName
-            ?: throw IllegalArgumentException("Android 虚拟化需要指定要启动的包名")
+        val pkg = packageName ?: throw IllegalArgumentException("Android 虚拟化需要指定要启动的包名")
         val (cls, core) = requireCore()
-        val ok = cls.getMethod("launchApk", String::class.java, Int::class.java)
+        val ok = cls.getMethod("launchApk", String::class.java, Int::class.javaPrimitiveType)
             .invoke(core, pkg, userIdOf(instance)) as? Boolean ?: false
-        if (!ok) throw IllegalStateException("启动失败：$pkg（实例 ${instance.name}）")
+        if (!ok) throw IllegalStateException("启动失败：$pkg（实例 ${instance.name}，可能未安装或无可启动入口）")
     }
 
-    override suspend fun installApp(instance: VmInstance, pathOrUrl: String): String {
+    /**
+     * 向实例安装 APK。支持:
+     * - 本地 APK 绝对路径
+     * - 宿主已安装应用的包名(整包克隆进虚拟空间)
+     * 返回安装成功的包名。
+     */
+    override suspend fun installApp(instance: VmInstance, pathOrPackageName: String): String {
         val (cls, core) = requireCore()
-        cls.getMethod("installPackageAsUser", String::class.java, Int::class.java)
-            .invoke(core, pathOrUrl, userIdOf(instance))
-        return pathOrUrl
+        val userId = userIdOf(instance)
+        val result: Any? = if (File(pathOrPackageName).isFile) {
+            cls.getMethod(
+                "installPackageAsUser",
+                File::class.java,
+                Int::class.javaPrimitiveType,
+            ).invoke(core, File(pathOrPackageName), userId)
+        } else {
+            cls.getMethod(
+                "installPackageAsUser",
+                String::class.java,
+                Int::class.javaPrimitiveType,
+            ).invoke(core, pathOrPackageName, userId)
+        }
+        val success = result?.javaClass?.getField("success")?.get(result) as? Boolean ?: false
+        if (!success) {
+            val msg = result?.javaClass?.getField("msg")?.get(result) as? String
+            throw IllegalStateException("安装失败：${msg ?: "未知错误"}")
+        }
+        return result?.javaClass?.getField("packageName")?.get(result) as? String
+            ?: pathOrPackageName
     }
 
     override suspend fun listApps(instance: VmInstance): List<String> {
-        val (cls, core) = requireCore()
+        val (cls, core) = runCatching { requireCore() }.getOrNull() ?: return emptyList()
         @Suppress("UNCHECKED_CAST")
-        val list = cls.getMethod("getInstalledPackages", Int::class.java, Int::class.java)
-            .invoke(core, 0, userIdOf(instance)) as? List<Any> ?: return emptyList()
+        val list = cls.getMethod(
+            "getInstalledPackages",
+            Int::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType,
+        ).invoke(core, 0, userIdOf(instance)) as? List<Any> ?: return emptyList()
         return list.mapNotNull { pkg ->
             runCatching {
-                val f = pkg.javaClass.getField("packageName")
-                f.get(pkg) as? String
+                pkg.javaClass.getField("packageName").get(pkg) as? String
             }.getOrNull()
         }
     }
 
+    /** 卸载实例内应用: 从该实例的 userId 空间移除(不影响宿主与其他实例)。 */
+    override suspend fun uninstallApp(instance: VmInstance, packageName: String) {
+        val (cls, core) = requireCore()
+        cls.getMethod(
+            "uninstallPackageAsUser",
+            String::class.java,
+            Int::class.javaPrimitiveType,
+        ).invoke(core, packageName, userIdOf(instance))
+    }
+
+    // ===== Xposed 模块(BlackBox 内核唯一的模块体系; 无 Magisk API) =====
+
     override suspend fun installModule(instance: VmInstance, path: String): String {
         val (cls, core) = requireCore()
-        val file = java.io.File(path)
-        // 标准 Magisk 模块 zip：module.prop + system/ 文件注入 + system.prop 元数据
-        val isMagisk = runCatching {
-            cls.getMethod("isMagiskModule", java.io.File::class.java).invoke(core, file) as? Boolean ?: false
-        }.getOrDefault(false)
-        if (isMagisk) {
-            return (cls.getMethod("installMagiskModule", java.io.File::class.java)
-                .invoke(core, file) as? String) ?: file.name
+        val file = File(path)
+        val isXposed = cls.getMethod("isXposedModule", File::class.java)
+            .invoke(core, file) as? Boolean ?: false
+        if (!isXposed) {
+            throw IllegalArgumentException("不是有效的 Xposed 模块 APK：${file.name}")
         }
-        // 否则视为 Xposed APK 模块（黑盒原生加载）。
-        val result = cls.getMethod("installXPModule", java.io.File::class.java)
-            .invoke(core, file)
-        return runCatching { result?.javaClass?.getField("packageName")?.get(result) as? String }.getOrNull() ?: file.name
+        val result = cls.getMethod("installXPModule", File::class.java).invoke(core, file)
+        val success = result?.javaClass?.getField("success")?.get(result) as? Boolean ?: false
+        if (!success) {
+            val msg = result?.javaClass?.getField("msg")?.get(result) as? String
+            throw IllegalStateException("模块安装失败：${msg ?: "未知错误"}")
+        }
+        return result?.javaClass?.getField("packageName")?.get(result) as? String ?: file.name
     }
 
     override suspend fun listModules(): List<VmModuleInfo> {
-        val (cls, core) = requireCore()
-        val magisk = try {
-            @Suppress("UNCHECKED_CAST")
-            (cls.getMethod("getInstalledMagiskModules").invoke(core) as? List<Any>)
-                ?.mapNotNull { m ->
-                    runCatching {
-                        val c = m.javaClass
-                        val id = c.getField("moduleId").get(m) as? String ?: return@mapNotNull null
-                        val name = (c.getField("name").get(m) as? String) ?: id
-                        val enabled = (c.getField("enable").get(m) as? Boolean) ?: false
-                        val version = (c.getField("version").get(m) as? String) ?: ""
-                        val author = (c.getField("author").get(m) as? String) ?: ""
-                        val desc = (c.getField("description").get(m) as? String) ?: ""
-                        @Suppress("UNCHECKED_CAST")
-                        val props = (c.getField("props").get(m) as? List<String>).orEmpty()
-                        VmModuleInfo(
-                            moduleId = id,
-                            name = name,
-                            kind = VmModuleKind.MAGISK,
-                            enabled = enabled,
-                            version = version,
-                            author = author,
-                            description = desc,
-                            props = props,
-                        )
-                    }.getOrNull()
-                }.orEmpty()
-        } catch (e: Throwable) {
-            emptyList()
+        val (cls, core) = runCatching { requireCore() }.getOrNull() ?: return emptyList()
+        @Suppress("UNCHECKED_CAST")
+        val list = runCatching {
+            cls.getMethod("getInstalledXPModules").invoke(core) as? List<Any>
+        }.getOrNull() ?: return emptyList()
+        return list.mapNotNull { m ->
+            runCatching {
+                val c = m.javaClass
+                val pkg = c.getField("packageName").get(m) as? String ?: return@mapNotNull null
+                VmModuleInfo(
+                    moduleId = pkg,
+                    name = (c.getField("name").get(m) as? String).orEmpty().ifBlank { pkg },
+                    kind = VmModuleKind.XPOSED,
+                    enabled = (c.getField("enable").get(m) as? Boolean) ?: false,
+                    description = (c.getField("desc").get(m) as? String).orEmpty(),
+                )
+            }.getOrNull()
         }
-
-        val xposed = try {
-            @Suppress("UNCHECKED_CAST")
-            val list = cls.getMethod("getInstalledXPModules").invoke(core) as? List<Any> ?: emptyList()
-            list.mapNotNull { m ->
-                runCatching {
-                    val c = m.javaClass
-                    val pkg = c.getField("packageName").get(m) as? String ?: return@mapNotNull null
-                    val name = (c.getField("name").get(m) as? String) ?: pkg
-                    val enabled = (c.getField("enable").get(m) as? Boolean) ?: false
-                    VmModuleInfo(moduleId = pkg, name = name, kind = VmModuleKind.XPOSED, enabled = enabled)
-                }.getOrNull()
-            }
-        } catch (e: Throwable) {
-            emptyList()
-        }
-        return magisk + xposed
     }
 
     override suspend fun setModuleEnabled(moduleId: String, enabled: Boolean) {
         val (cls, core) = requireCore()
-        val magiskIds = runCatching {
-            @Suppress("UNCHECKED_CAST")
-            val list = cls.getMethod("getInstalledMagiskModules").invoke(core) as? List<Any> ?: emptyList()
-            list.mapNotNull { runCatching { it.javaClass.getField("moduleId").get(it) as? String }.getOrNull() }
-        }.getOrDefault(emptyList())
-        if (magiskIds.contains(moduleId)) {
-            cls.getMethod("setMagiskModuleEnable", String::class.java, Boolean::class.java)
-                .invoke(core, moduleId, enabled)
-            return
-        }
-        cls.getMethod("setModuleEnable", String::class.java, Boolean::class.java)
+        cls.getMethod("setModuleEnable", String::class.java, Boolean::class.javaPrimitiveType)
             .invoke(core, moduleId, enabled)
     }
 
     override suspend fun uninstallModule(moduleId: String) {
         val (cls, core) = requireCore()
-        val magiskIds = runCatching {
-            @Suppress("UNCHECKED_CAST")
-            val list = cls.getMethod("getInstalledMagiskModules").invoke(core) as? List<Any> ?: emptyList()
-            list.mapNotNull { runCatching { it.javaClass.getField("moduleId").get(it) as? String }.getOrNull() }
-        }.getOrDefault(emptyList())
-        if (magiskIds.contains(moduleId)) {
-            cls.getMethod("uninstallMagiskModule", String::class.java).invoke(core, moduleId)
-            return
-        }
         cls.getMethod("uninstallXPModule", String::class.java).invoke(core, moduleId)
     }
 
+    /** 查询模块启用状态（非接口方法，供宿主详情页直接查询） */
+    suspend fun isModuleEnabled(moduleId: String): Boolean {
+        val (cls, core) = runCatching { requireCore() }.getOrNull() ?: return false
+        return runCatching {
+            cls.getMethod("isModuleEnable", String::class.java).invoke(core, moduleId) as? Boolean ?: false
+        }.getOrDefault(false)
+    }
+
+    /** Xposed 框架总开关（非接口方法，模块生效的前提） */
+    suspend fun setXPEnabled(enabled: Boolean) {
+        val (cls, core) = requireCore()
+        cls.getMethod("setXPEnable", Boolean::class.javaPrimitiveType).invoke(core, enabled)
+    }
+
     override suspend fun clone(instance: VmInstance, newName: String): VmInstance {
-        // 新实例使用新 id（新 userId），形成独立隔离空间；真实数据克隆需复制用户空间目录，
-        // 此处返回新的空实例，由用户在真机侧按需迁移数据。
+        // 新实例使用新 id(新 userId), 形成独立隔离空间; 真实数据克隆需复制用户空间目录,
+        // 此处返回新的空实例, 由用户在真机侧按需迁移数据。
         return instance.copy(
             id = abs(newName.hashCode()).toString(),
             name = newName,
@@ -178,12 +199,15 @@ class BlackBoxEngine : VirtualEngine {
     }
 
     override suspend fun destroy(instance: VmInstance) {
-        val (cls, core) = requireCore()
+        val (cls, core) = runCatching { requireCore() }.getOrNull() ?: return
         val userId = userIdOf(instance)
         for (pkg in instance.installedApps) {
             runCatching {
-                cls.getMethod("uninstallPackageAsUser", String::class.java, Int::class.java)
-                    .invoke(core, pkg, userId)
+                cls.getMethod(
+                    "uninstallPackageAsUser",
+                    String::class.java,
+                    Int::class.javaPrimitiveType,
+                ).invoke(core, pkg, userId)
             }.onFailure { Log.w("BlackBoxEngine", "卸载 $pkg 失败", it) }
         }
     }
@@ -203,7 +227,7 @@ class BlackBoxEngine : VirtualEngine {
         BlackBoxHost.setHideXposed(ctx, enabled)
     }
 
-    /** 从 Bcore 反射取宿主 Context，供偏好写入（评分规则一致性：Bcore 未接入时返回 null）。 */
+    /** 从 Bcore 反射取宿主 Context, 供偏好写入(Bcore 未接入时返回 null) */
     private fun coreContext(): android.content.Context? = runCatching {
         coreClass?.getMethod("getContext")?.invoke(null) as? android.content.Context
     }.getOrNull()

@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 import me.rerere.androidvm.VirtualEngine
 import me.rerere.androidvm.VmEngineType
 import me.rerere.androidvm.VmInstance
+import me.rerere.androidvm.VmWorkspaceBridge
 import me.rerere.androidvm.VmModuleInfo
 import me.rerere.workspace.RootfsInstaller
 import me.rerere.workspace.RootfsInstallStage
@@ -18,7 +19,10 @@ import java.io.File
  * 复用 workspace 模块完成 rootfs 下载/解包与 shell 接入，可立即在真机运行 Linux 软件。
  * 该模式面向命令行工作负载，不具备 Android APK 运行能力（那是 [BlackBoxEngine] 的职责）。
  */
-class LinuxContainerEngine(private val context: Context) : VirtualEngine {
+class LinuxContainerEngine(
+    private val context: Context,
+    private val bridge: VmWorkspaceBridge? = null,
+) : VirtualEngine {
     override val type = VmEngineType.LINUX
 
     private val manager by lazy {
@@ -31,6 +35,11 @@ class LinuxContainerEngine(private val context: Context) : VirtualEngine {
         onProgress: (Float, String) -> Unit,
     ) {
         withContext(Dispatchers.IO) {
+            // 先在工作区数据库登记(root=实例 id), 终端/文件页据此才能打开;
+            // 登记先于下载, 安装期间打开终端会提示 rootfs 未就绪, 装完即可用
+            if (bridge != null && !bridge.ensureLinkedWorkspace(instance.id, instance.name)) {
+                throw IllegalStateException("工作区登记失败，无法初始化容器")
+            }
             installer.install(instance.id, instance.rootfsUrl) { p ->
                 val ratio = when (p.stage) {
                     RootfsInstallStage.DOWNLOADING -> {
@@ -41,6 +50,11 @@ class LinuxContainerEngine(private val context: Context) : VirtualEngine {
                     RootfsInstallStage.INSTALLED -> 1f
                 }
                 onProgress(ratio, p.stage.name)
+            }
+            // 同步 shell 就绪状态: 工作区详情页(文件/工具/终端入口)据此解锁
+            if (bridge != null) {
+                runCatching { bridge.markShellReady(instance.id) }
+                    .onFailure { me.rerere.androidvm.engine.EngineLog.warn("markShellReady failed: ${it.message}") }
             }
         }
     }
@@ -91,7 +105,13 @@ class LinuxContainerEngine(private val context: Context) : VirtualEngine {
 
     override suspend fun destroy(instance: VmInstance) {
         withContext(Dispatchers.IO) {
-            manager.deleteWorkspace(instance.id)
+            // 优先走 bridge(连带删除工作区 DB 记录, 避免工作区页面残留幽灵条目);
+            // bridge 缺失时退回直接删目录
+            if (bridge != null) {
+                runCatching { bridge.deleteLinkedWorkspace(instance.id) }
+            } else {
+                manager.deleteWorkspace(instance.id)
+            }
         }
     }
 }

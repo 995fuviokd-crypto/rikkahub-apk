@@ -24,7 +24,7 @@ object VmCatalog {
             engineType = VmEngineType.ANDROID,
             systemLabel = "Android 7.1",
             description = "兼容老旧的 32 位应用与游戏",
-            rootfsUrl = "https://example.com/rom/android-7.tar.gz",
+            rootfsUrl = "",
             sizeHintMb = 220,
         ),
         VmImage(
@@ -32,7 +32,7 @@ object VmCatalog {
             engineType = VmEngineType.ANDROID,
             systemLabel = "Android 10",
             description = "主流应用兼容性好，性能均衡",
-            rootfsUrl = "https://example.com/rom/android-10.tar.gz",
+            rootfsUrl = "",
             sizeHintMb = 260,
         ),
         VmImage(
@@ -40,7 +40,7 @@ object VmCatalog {
             engineType = VmEngineType.ANDROID,
             systemLabel = "Android 12",
             description = "最新特性，适合现代应用",
-            rootfsUrl = "https://example.com/rom/android-12.tar.gz",
+            rootfsUrl = "",
             sizeHintMb = 300,
         ),
         // —— 客机 ROM 容器（完整安卓用户态，可刷真 Magisk；需真机 + ARM ROM 镜像）——
@@ -58,7 +58,7 @@ object VmCatalog {
             engineType = VmEngineType.LINUX,
             systemLabel = "Ubuntu 24.04 LTS",
             description = "稳定长期支持，apt 软件生态完整",
-            rootfsUrl = "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.4-base-arm64.tar.gz",
+            rootfsUrl = "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cdimage/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.4-base-arm64.tar.gz",
             sizeHintMb = 35,
         ),
         VmImage(
@@ -66,7 +66,7 @@ object VmCatalog {
             engineType = VmEngineType.LINUX,
             systemLabel = "Ubuntu 25.10",
             description = "最新发行版，软件包最新",
-            rootfsUrl = "https://cdimage.ubuntu.com/ubuntu-base/releases/25.10/release/ubuntu-base-25.10-base-arm64.tar.gz",
+            rootfsUrl = "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cdimage/ubuntu-base/releases/25.10/release/ubuntu-base-25.10-base-arm64.tar.gz",
             sizeHintMb = 36,
         ),
         VmImage(

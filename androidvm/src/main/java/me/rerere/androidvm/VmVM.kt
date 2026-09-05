@@ -24,6 +24,7 @@ import java.util.UUID
 class VmVM(
     private val context: Context,
     private val scope: CoroutineScope,
+    private val bridge: VmWorkspaceBridge? = null,
 ) {
     private val repo = VmRepository(context)
 
@@ -44,12 +45,25 @@ class VmVM(
             val loaded = repo.load()
             instances.clear()
             instances.addAll(loaded)
+            // 自愈旧数据: 早期版本的 Linux 实例没有工作区登记, 终端会白屏; 逐个补登记,
+            // rootfs 已就绪的实例(listApps 非空)顺带补 READY 状态, 免得详情页误判未安装
+            if (bridge != null) {
+                loaded.filter { it.engineType == VmEngineType.LINUX }.forEach { vm ->
+                    runCatching {
+                        if (bridge.ensureLinkedWorkspace(vm.id, vm.name) &&
+                            engineFor(vm).listApps(vm).isNotEmpty()
+                        ) {
+                            bridge.markShellReady(vm.id)
+                        }
+                    }
+                }
+            }
         }
     }
 
     private fun engineFor(instance: VmInstance): VirtualEngine =
         when (instance.engineType) {
-            VmEngineType.LINUX -> LinuxContainerEngine(context)
+            VmEngineType.LINUX -> LinuxContainerEngine(context, bridge)
             VmEngineType.ANDROID -> BlackBoxEngine()
             VmEngineType.GUEST_ROM -> GuestRomEngine(context)
         }

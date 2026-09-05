@@ -28,6 +28,8 @@ dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         google()
+        // 阿里云 central 镜像置于 mavenCentral 之前：直连 repo.maven.apache.org 偶发 TLS 握手被断
+        maven("https://maven.aliyun.com/repository/central")
         mavenCentral()
         // jcenter 已关闭，补国内镜像以解析 Bcore 的 free_reflection / sandhook 等 jcenter 时代坐标
         maven("https://maven.aliyun.com/repository/public")

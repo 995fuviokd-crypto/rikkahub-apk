@@ -22,10 +22,10 @@
   <string name="vm_hide_xposed">Xposed 숨기기</string>
   <string name="vm_hide_xposed_desc_android">프레임워크를 감지하는 앱에 Xposed 흔적을 숨깁니다</string>
   <string name="vm_android_only_desc">Android 가상화에서만 지원</string>
-  <string name="vm_magisk_modules">Magisk / 모듈</string>
+  <string name="vm_magisk_modules">Xposed 모듈</string>
   <string name="vm_badge_magisk">Magisk</string>
-  <string name="vm_flash_magisk">Magisk 주입</string>
-  <string name="vm_no_modules_hint">주입된 모듈이 없습니다. 「Magisk 주입」에서 Magisk/Xposed 모듈을 선택하세요</string>
+  <string name="vm_flash_magisk">Xposed 모듈 설치</string>
+  <string name="vm_no_modules_hint">설치된 모듈이 없습니다. 「Xposed 모듈 설치」에서 모듈 APK를 선택하세요</string>
   <string name="vm_restart_vm">가상 머신 재시작</string>
   <string name="vm_restart">재시작</string>
   <string name="vm_floating_window">플로팅 창</string>
@@ -55,4 +55,6 @@
   <string name="vm_msg_space_restarted">가상 공간을 재시작했습니다. Magisk/모듈은 다음 실행부터 적용됩니다</string>
   <string name="vm_msg_read_apk_failed">APK 읽기 실패: %1$s</string>
   <string name="vm_msg_read_module_failed">모듈 읽기 실패: %1$s</string>
+  <string name="vm_engine_not_ready">엔진 미지원</string>
+  <string name="vm_open_workspace">워크스페이스</string>
 </resources>

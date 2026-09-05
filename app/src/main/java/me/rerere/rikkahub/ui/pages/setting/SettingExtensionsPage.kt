@@ -184,6 +184,19 @@ fun SettingExtensionsPage(vm: SettingVM = koinViewModel()) {
                             )
                         },
                     )
+                    // 虚拟机控制（全局）
+                    item(
+                        headlineContent = { Text(stringResource(R.string.setting_extensions_vm)) },
+                        supportingContent = { Text(stringResource(R.string.setting_extensions_vm_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.globalToolVm,
+                                onCheckedChange = {
+                                    vm.updateSettings(settings.copy(globalToolVm = it))
+                                }
+                            )
+                        },
+                    )
                     // 屏幕显示比例
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_display_scale_title)) },

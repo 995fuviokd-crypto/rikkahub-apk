@@ -316,6 +316,20 @@ private fun AssistantLocalToolContent(
                     )
                 }
             )
+            item(
+                headlineContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_vm_title))
+                },
+                supportingContent = {
+                    Text(stringResource(R.string.assistant_page_local_tools_vm_desc))
+                },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.localTools.contains(LocalToolOption.Vm),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.Vm, it) }
+                    )
+                }
+            )
         }
 
         CardGroup(
