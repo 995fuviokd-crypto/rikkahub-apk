@@ -149,6 +149,11 @@ android {
     }
 }
 
+// 离线/受限网络环境：跳过 Crashlytics mapping 上传（网络不可达会导致构建失败）
+tasks.matching { it.name.startsWith("uploadCrashlyticsMappingFile") }.configureEach {
+    enabled = false
+}
+
 composeCompiler {
     stabilityConfigurationFiles.add(
         project.layout.projectDirectory.file("compose_compiler_config.conf")

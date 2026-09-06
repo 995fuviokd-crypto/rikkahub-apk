@@ -163,4 +163,54 @@ object ConversationCompressor {
         if (markers.any { contains(it) }) return this
         return "[Summary of previous conversation]\n$this"
     }
+
+    /**
+     * micro-trim：对消息列表中超出保留范围的旧工具结果做占位截断（参考 Claude Code 的
+     * tool-result 微压缩），返回新消息列表（不修改原对象）。
+     *
+     * - 仅处理较早历史（[messagesToCompress] 范围）中的 UIMessagePart.Tool；
+     * - 工具输出超过 [toolOutputMaxLength] 字符时，保留开头 + 结尾（开头多为调用入参与状态，
+     *   结尾常含结论），中间以占位符代替，占位文本注明原输出长度；
+     * - 非 Tool 部分与短输出原样保留，消息其余属性（id、role 等）不变。
+     */
+    fun microTrimToolOutputs(
+        messages: List<UIMessage>,
+        toolOutputMaxLength: Int = DEFAULT_TOOL_OUTPUT_TRIM_LENGTH,
+    ): List<UIMessage> {
+        if (messages.isEmpty()) return messages
+        return messages.map { message ->
+            val hasOversized = message.parts.any { it is UIMessagePart.Tool && it.outputText().length > toolOutputMaxLength }
+            if (!hasOversized) {
+                message
+            } else {
+                message.copy(
+                    parts = message.parts.map { part ->
+                        if (part is UIMessagePart.Tool) part.trimmed(toolOutputMaxLength) else part
+                    }
+                )
+            }
+        }
+    }
+
+    /** 汇总工具输出各分片的文本长度（估算用）。 */
+    private fun UIMessagePart.Tool.outputText(): String = output.joinToString("\n") { partText(it, Int.MAX_VALUE) }
+
+    /**
+     * 生成输出截断后的 Tool 副本：超长输出保留头部 2/3 与尾部 1/3，
+     * 中间插入占位说明；输出文本本身是 [UIMessagePart.Text] 分片列表。
+     */
+    private fun UIMessagePart.Tool.trimmed(maxLength: Int): UIMessagePart.Tool {
+        val text = outputText()
+        if (text.length <= maxLength) return this
+        val headLen = maxLength * 2 / 3
+        val tailLen = maxLength - headLen
+        val head = text.take(headLen)
+        val tail = if (tailLen > 0) text.takeLast(tailLen) else ""
+        val placeholder = "\n...[tool output trimmed, original ${text.length} chars]...\n"
+        val trimmedText = head + placeholder + tail
+        return copy(output = listOf(UIMessagePart.Text(trimmedText)))
+    }
+
+    /** micro-trim 默认单工具输出截断长度（字符） */
+    const val DEFAULT_TOOL_OUTPUT_TRIM_LENGTH = 2000
 }

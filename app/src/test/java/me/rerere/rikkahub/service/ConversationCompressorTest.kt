@@ -228,4 +228,43 @@ class ConversationCompressorTest {
         assertEquals("", "".markedAsCompressionSummary())
         assertEquals("   ", "   ".markedAsCompressionSummary())
     }
+
+    // ---- microTrimToolOutputs：压缩前对超长工具结果做占位截断 ----
+
+    @Test
+    fun `micro trim keeps short tool outputs untouched`() {
+        val msg = toolMessage(toolName = "search", input = "q", output = "short output")
+        val trimmed = ConversationCompressor.microTrimToolOutputs(listOf(msg))
+
+        assertEquals(1, trimmed.size)
+        val part = trimmed.single().parts.single() as UIMessagePart.Tool
+        assertEquals("short output", part.output.single().let { (it as UIMessagePart.Text).text })
+    }
+
+    @Test
+    fun `micro trim truncates oversized tool output keeping head and tail`() {
+        val output = "H".repeat(3000) + "T".repeat(3000)
+        val msg = toolMessage(toolName = "read", input = "file.txt", output = output)
+        val trimmed = ConversationCompressor.microTrimToolOutputs(listOf(msg), toolOutputMaxLength = 2000)
+
+        val part = trimmed.single().parts.single() as UIMessagePart.Tool
+        val text = part.output.single().let { (it as UIMessagePart.Text).text }
+        // 占位符注明原始长度
+        assertTrue(text.contains("original ${output.length} chars"))
+        // 头部与尾部保留
+        assertTrue(text.startsWith("HHH"))
+        assertTrue(text.endsWith("TTT"))
+        // 长度显著小于原输出
+        assertTrue(text.length < output.length / 2)
+    }
+
+    @Test
+    fun `micro trim does not modify non tool parts or other messages`() {
+        val plain = UIMessage.user("a".repeat(5000))
+        val tool = toolMessage(toolName = "t", input = "i", output = "ok")
+        val trimmed = ConversationCompressor.microTrimToolOutputs(listOf(plain, tool), toolOutputMaxLength = 100)
+
+        assertEquals(plain, trimmed[0])
+        assertEquals(tool, trimmed[1])
+    }
 }

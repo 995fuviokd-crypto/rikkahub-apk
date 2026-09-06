@@ -1163,6 +1163,13 @@ class ChatService(
                     )
                     break
                 }
+                // 压缩完成：把结构化摘要中的「用户偏好与约束」沉淀到助手持久记忆，
+                // 保障跨会话连续性（对齐 Claude Code MEMORY.md 的角色）
+                storePreferencesFromSummary(
+                    conversationId = conversationId,
+                    summary = getConversationFlow(conversationId).value.compression?.summary.orEmpty(),
+                    assistant = assistant,
+                )
                 // 压缩后上下文已降到阈值以下，继续正常生成
                 if (compressResult.tokensAfter < autoCompressThreshold) continue
                 // 仍超阈值：已达到保留下限（keepRecent=0），说明即使把所有历史压成摘要也无法降到阈值以下。
@@ -1561,11 +1568,15 @@ class ChatService(
         val allActiveMessages = conversation.activeMessages
 
         // Split messages into those to compress and those to keep
-        val (messagesToCompress, messagesToKeep) = try {
+        val (messagesToCompressRaw, messagesToKeep) = try {
             ConversationCompressor.splitRecent(allActiveMessages, keepRecentMessages)
         } catch (e: IllegalArgumentException) {
             throw IllegalStateException(context.getString(R.string.chat_page_compress_not_enough_messages), e)
         }
+
+        // micro-trim：待压缩历史中超大的工具结果先做占位截断（保留头尾、中间省略），
+        // 降低送入压缩模型的 token 体量，也减少摘要对单个工具输出的偏重
+        val messagesToCompress = ConversationCompressor.microTrimToolOutputs(messagesToCompressRaw)
 
         suspend fun compressMessages(content: String, instructionHint: String, outputTargetTokens: Int = targetTokens): String {
             val prompt = settings.compressPrompt.applyPlaceholders(
@@ -1787,6 +1798,63 @@ class ChatService(
     /** 取消异常必须向上传播，避免被通用兜底逻辑吞掉导致停止操作失效。 */
     private fun throwIfCancellation(error: Throwable?) {
         if (error is CancellationException) throw error
+    }
+
+    /**
+     * 压缩完成后，用 fast 模型从结构化摘要中提取「用户偏好与约束」条目，
+     * 沉淀为助手持久记忆（对齐 Claude Code MEMORY.md 的跨会话连续性角色）。
+     *
+     * - 解析失败 / 模型不可用 / 提取为空时静默跳过，绝不影响压缩主流程；
+     * - 提取结果每行一条，经 storeMemory 去重后写入。
+     */
+    private suspend fun storePreferencesFromSummary(
+        conversationId: Uuid,
+        summary: String,
+        assistant: Assistant,
+    ) {
+        if (summary.isBlank()) return
+        runCatching {
+            val settings = settingsStore.settingsFlow.first()
+            val model = settings.findModelById(settings.fastModelId) ?: return
+            val provider = model.findProvider(settings.providers) ?: return
+            val providerHandler = providerManager.getProviderByType(provider)
+
+            val prompt = """
+                Extract the user's preferences, explicit instructions, and hard constraints from the following conversation summary.
+                Each item should be one concise, self-contained sentence, written as a durable memory for future conversations (e.g. "用户偏好使用 Kotlin 而非 Java").
+                Output one item per line, no numbering, no extra commentary. If there is nothing to extract, output nothing.
+
+                <summary>
+                $summary
+                </summary>
+            """.trimIndent()
+
+            val result = providerHandler.generateText(
+                providerSetting = provider,
+                messages = listOf(UIMessage.user(prompt)),
+                params = backgroundTextGenerationParams(model, reasoningLevel = ReasoningLevel.OFF)
+                    .copy(maxTokens = COMPRESS_MAX_OUTPUT_TOKENS),
+            )
+
+            val memoryAssistantId = if (assistant.useGlobalMemory) {
+                MemoryRepository.GLOBAL_MEMORY_ID
+            } else {
+                assistant.id.toString()
+            }
+            result.message.toText().lines()
+                .map { it.trim().trimStart('-', '*', '•').trim() }
+                .filter { it.length in 6..300 }
+                .forEach { line ->
+                    runCatching {
+                        memoryRepository.storeMemory(
+                            assistantId = memoryAssistantId,
+                            content = line,
+                            source = "compression",
+                            conversationId = conversationId.toString(),
+                        )
+                    }.onFailure { Log.e(TAG, "store preference memory failed", it) }
+                }
+        }.onFailure { Log.e(TAG, "extract preferences from summary failed", it) }
     }
 
     /**

@@ -376,15 +376,15 @@ private fun ChatListNormal(
         compressionState != null && n.messages.isNotEmpty() &&
             n.messages.all { it.id in compressionState.compressedMessageIds }
     }
-    // 连续压缩段只保留「组首」节点渲染折叠卡片，组内其余节点由组首统一展示
-    val displayNodes = remember(conversation.messageNodes, compressionState) {
+    // 连续压缩段只在「组首」前渲染一行压缩提示，组内消息本体继续正常展示
+    val compressionHintIndices = remember(conversation.messageNodes, compressionState) {
         if (compressionState == null || compressionState.compressedMessageIds.isEmpty()) {
-            conversation.messageNodes
+            emptySet()
         } else {
-            conversation.messageNodes.filterIndexed { idx, n ->
-                !isCompressedNode(n) ||
-                    (idx > 0 && !isCompressedNode(conversation.messageNodes[idx - 1]))
-            }
+            conversation.messageNodes.indices.filter { idx ->
+                isCompressedNode(conversation.messageNodes[idx]) &&
+                    (idx == 0 || !isCompressedNode(conversation.messageNodes[idx - 1]))
+            }.toSet()
         }
     }
 
@@ -450,28 +450,15 @@ private fun ChatListNormal(
                 }
             }
             itemsIndexed(
-                items = displayNodes,
+                items = conversation.messageNodes,
                 key = { _, item -> item.id },
             ) { index, node ->
-                val nodeCompressed = isCompressedNode(node)
-                if (nodeCompressed && compressionState != null) {
-                    // 组首：折叠展示整段已压缩历史（默认收起，点击展开摘要与原文）
-                    val groupStartIdx = conversation.messageNodes.indexOf(node)
-                    val groupNodes = buildList {
-                        var i = groupStartIdx
-                        while (i < conversation.messageNodes.size && isCompressedNode(conversation.messageNodes[i])) {
-                            add(conversation.messageNodes[i])
-                            i++
-                        }
-                    }
+                if (index in compressionHintIndices) {
+                    // 压缩组首：仅显示一行压缩完成提示（摘要不展示在聊天页）
                     CompressedHistoryGroup(
-                        groupNodes = groupNodes,
-                        summary = compressionState.summary,
-                        compressedCount = compressionState.compressedCount,
-                        assistant = assistant,
-                        modelById = modelById,
+                        compressedCount = compressionState?.compressedCount ?: 0,
                     )
-                } else {
+                }
                 Column {
                     // 流式性能：把 ChatMessage 的回调参数稳定为「只随 node.id 变化」的引用，
                     // 配合 MessageNode 的 @Immutable，让历史消息（node 引用不变）在每 delta
@@ -534,7 +521,6 @@ private fun ChatListNormal(
                             lastMessage = index == lastMessageIndex,
                         )
                     }
-                }
                 }
             }
 
@@ -1063,95 +1049,35 @@ private fun BoxScope.MessageJumper(
 }
 
 /**
- * 已压缩历史组：默认收起为一行卡片（自动收缩），展开后可见滚动摘要全文与原始消息本体。
- * 历史消息始终保留在会话中，仅发送上下文以摘要代替。
+ * 已压缩历史组：仅显示一行「已压缩 N 条」提示，摘要只进入 LLM 上下文、
+ * 不展示在聊天页面；历史消息本体继续按普通消息渲染（可见、可交互），
+ * 仅发送上下文以摘要代替原文。
  */
 @Composable
 private fun CompressedHistoryGroup(
-    groupNodes: List<MessageNode>,
-    summary: String,
     compressedCount: Int,
-    assistant: Assistant?,
-    modelById: Map<Uuid, Model>,
 ) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
     Surface(
-        onClick = { expanded = !expanded },
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp).copy(alpha = 0.6f),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(
-                    imageVector = HugeIcons.Archive02,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = "已压缩 ${compressedCount.coerceAtLeast(groupNodes.size)} 条历史对话",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.weight(1f))
-                Icon(
-                    imageVector = HugeIcons.ArrowDown01,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            AnimatedVisibility(visible = expanded) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    // 滚动摘要全文
-                    if (summary.isNotBlank()) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Text(
-                                    text = "历史摘要",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                                Spacer(Modifier.height(4.dp))
-                                SelectionContainer {
-                                    Text(
-                                        text = summary,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    // 原始消息本体（只读展示，操作回调置空）
-                    groupNodes.forEach { node ->
-                        ChatMessage(
-                            node = node,
-                            model = node.currentMessage.modelId?.let(modelById::get),
-                            assistant = assistant,
-                            loading = false,
-                            onFork = {},
-                            onRegenerate = {},
-                            onEdit = {},
-                            onShare = {},
-                            onDelete = {},
-                            onUpdate = {},
-                        )
-                    }
-                }
-            }
+            Icon(
+                imageVector = HugeIcons.Archive02,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "已压缩 $compressedCount 条历史对话，上下文已替换为摘要",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
