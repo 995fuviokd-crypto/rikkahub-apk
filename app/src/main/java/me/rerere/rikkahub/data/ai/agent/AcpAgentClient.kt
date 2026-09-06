@@ -37,6 +37,7 @@ import me.rerere.ai.agent.AcpPromptParams
 import me.rerere.ai.agent.AcpSessionUpdate
 import me.rerere.ai.agent.AcpTextContent
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import me.rerere.workspace.WorkspaceManager
 import me.rerere.workspace.WorkspaceProcessRunner
 import me.rerere.workspace.WorkspaceProcessSession
@@ -82,7 +83,7 @@ class AcpAgentClient(
     private var sessionCwd: String = ""
     private var agentEnvironment: Map<String, String> = emptyMap()
 
-    private val pendingResponses = mutableMapOf<Long, Channel<AcpMessage>>()
+    private val pendingResponses = ConcurrentHashMap<Long, Channel<AcpMessage>>()
     private val notificationFlow = MutableSharedFlow<AcpMessage>(extraBufferCapacity = 512)
 
     private val notifications: Flow<AcpMessage> = notificationFlow.asSharedFlow()
@@ -100,7 +101,7 @@ class AcpAgentClient(
         val options: List<me.rerere.ai.agent.AcpPermissionOption>,
     )
 
-    private val pendingPermissionDeferreds = mutableMapOf<Long, CompletableDeferred<AcpPermissionOutcome>>()
+    private val pendingPermissionDeferreds = ConcurrentHashMap<Long, CompletableDeferred<AcpPermissionOutcome>>()
     private val _permissionPrompts = MutableStateFlow<Map<Long, PermissionPrompt>>(emptyMap())
 
     /** Live tool-permission prompts awaiting a user decision. */
@@ -333,7 +334,7 @@ class AcpAgentClient(
         val currentModeId: String? = null,
     )
 
-    private val sessionModeInfos = mutableMapOf<String, SessionModes>()
+    private val sessionModeInfos = ConcurrentHashMap<String, SessionModes>()
 
     /** Returns parsed session-mode info for [sessionId], or null when unavailable. */
     fun sessionModes(sessionId: String): Pair<List<Pair<String, String>>, String?> =
@@ -509,9 +510,7 @@ class AcpAgentClient(
         }
         _permissionPrompts.value = emptyMap()
         // Tear down any terminals the agent left running.
-        val staleTerminals = synchronized(terminals) {
-            terminals.values.toList().also { terminals.clear() }
-        }
+        val staleTerminals = terminals.values.toList().also { terminals.clear() }
         staleTerminals.forEach { terminal ->
             if (terminal.closed.compareAndSet(false, true)) {
                 runCatching { terminal.proc.close() }
@@ -655,7 +654,7 @@ class AcpAgentClient(
         val closed = java.util.concurrent.atomic.AtomicBoolean(false)
     }
 
-    private val terminals = mutableMapOf<String, TerminalSession>()
+    private val terminals = ConcurrentHashMap<String, TerminalSession>()
     private var terminalCounter = 0L
 
     /** Starts a sandboxed process for the agent and registers it under a fresh id. */
@@ -737,7 +736,7 @@ class AcpAgentClient(
 
     private fun terminalSession(params: JsonObject?): TerminalSession? {
         val terminalId = params?.get("terminalId")?.jsonPrimitive?.content ?: return null
-        return synchronized(terminals) { terminals[terminalId] }
+        return terminals[terminalId]
     }
 
     private fun handleTerminalOutput(params: JsonObject?): JsonObject {

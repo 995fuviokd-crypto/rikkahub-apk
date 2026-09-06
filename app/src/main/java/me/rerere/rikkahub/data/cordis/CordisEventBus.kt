@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.cordis
 
 import kotlinx.coroutines.CancellationException
+import android.util.Log
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -8,6 +9,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import java.util.LinkedHashMap
+
+private const val TAG = "CordisEventBus"
 
 /** 事件分发模式（对齐 dsh/Cordis 五种语义）。 */
 enum class DispatchMode {
@@ -149,7 +152,7 @@ class CordisEventBus {
         throw e
     } catch (e: Throwable) {
         if (stopOnError) throw e
-        e.printStackTrace()
+        Log.e(TAG, "", e)
         null
     }
 

@@ -3,7 +3,6 @@ package me.rerere.search
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
-import com.whl.quickjs.wrapper.QuickJSContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
@@ -11,6 +10,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
+import me.rerere.common.js.JsEngine
 import me.rerere.common.js.injectFetch
 import me.rerere.search.SearchService.Companion.httpClient
 import me.rerere.search.SearchService.Companion.json
@@ -87,15 +87,12 @@ object CustomJsSearchService : SearchService<SearchServiceOptions.CustomJsOption
     }
 
     private fun executeScript(userScript: String, invocation: String): String {
-        val context = QuickJSContext.create()
-        try {
-            context.injectFetch(httpClient)
-            context.evaluate(userScript)
+        JsEngine.create().use { engine ->
+            engine.injectFetch(httpClient)
+            engine.evaluate(userScript)
 
-            val result = context.evaluate("JSON.stringify($invocation)")
+            val result = engine.evaluate("JSON.stringify($invocation)")
             return result as? String ?: error("Function returned null or undefined")
-        } finally {
-            context.destroy()
         }
     }
 

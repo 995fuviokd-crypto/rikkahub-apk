@@ -31,7 +31,7 @@ import me.rerere.rikkahub.utils.JsonInstant
 /**
  * Host-side MCP bridge for script market plugins.
  *
- * scripts / ToolPkg tools run inside the app process with QuickJS and the local
+ * scripts / ToolPkg tools run inside the app process with V8 (Javet) and the local
  * `Tools.*` runtime (Files/Net/System/Chat …). ACP platform agents are separate CLI
  * sub-processes inside the workspace PRoot container and therefore cannot invoke these
  * tools directly. PRoot does not isolate the network namespace, so the agent can reach
@@ -261,7 +261,7 @@ class ScriptMcpBridge(
         return buildJsonObject { put("text", "unknown tool: $name") } to true
     }
 
-    /** 统一执行路由：启用校验 → QuickJS runTool → MCP content 结构 */
+    /** 统一执行路由：启用校验 → V8 runTool → MCP content 结构 */
     private fun executeScriptTool(
         pluginId: String,
         tool: String,

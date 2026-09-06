@@ -209,6 +209,24 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         supportingContent = { Text(stringResource(R.string.setting_page_extensions_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_extensions)) },
                     )
+                    item(
+                        onClick = { navController.navigate(Screen.SettingOutputStyles) },
+                        leadingContent = { Icon(HugeIcons.Sun01, null) },
+                        supportingContent = { Text("Manage output styles for AI responses") },
+                        headlineContent = { Text("Output Styles") },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.SettingHooks) },
+                        leadingContent = { Icon(HugeIcons.Bash, null) },
+                        supportingContent = { Text("Configure hooks for message processing") },
+                        headlineContent = { Text("Hooks") },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.SettingPresetManager) },
+                        leadingContent = { Icon(HugeIcons.Bookshelf01, null) },
+                        supportingContent = { Text("Import and export preset packages") },
+                        headlineContent = { Text("Preset Manager") },
+                    )
                 }
             }
 

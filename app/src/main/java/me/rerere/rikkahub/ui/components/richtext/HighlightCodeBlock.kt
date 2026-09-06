@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.richtext
 
 import android.content.ClipData
+import android.util.Log
 import android.net.Uri
 import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -81,6 +82,8 @@ import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import me.rerere.rikkahub.utils.toDp
 import kotlin.time.Clock
 
+private const val TAG = "HighlightCodeBlock"
+
 private const val COLLAPSE_LINES = 10
 private val PREVIEWABLE_LANGUAGES = setOf("html", "svg")
 
@@ -125,7 +128,7 @@ fun HighlightCodeBlock(
                         outputStream.write(code.toByteArray())
                     }
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.e(TAG, "", e)
                 }
             }
         }

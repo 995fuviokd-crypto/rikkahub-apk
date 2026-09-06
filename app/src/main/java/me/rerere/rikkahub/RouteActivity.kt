@@ -80,16 +80,23 @@ import me.rerere.rikkahub.ui.hooks.readStringPreference
 import me.rerere.rikkahub.ui.hooks.rememberCustomAsrState
 import me.rerere.rikkahub.ui.hooks.rememberCustomTtsState
 import me.rerere.rikkahub.ui.pages.assistant.AssistantPage
+import me.rerere.rikkahub.ui.pages.assistant.CreationWizardPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantBasicPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantDetailPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantExtensionsPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantLocalToolPage
-import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantMcpPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantMemoryPage
+import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantMcpPage
+import me.rerere.rikkahub.ui.pages.assistant.detail.PresetDebuggerPage
+import me.rerere.rikkahub.ui.pages.assistant.CreationWizardPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantPromptPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantRequestPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantWorkspacePage
-import me.rerere.rikkahub.ui.pages.backup.BackupPage
+import me.rerere.rikkahub.ui.pages.setting.SettingOutputStylesPage
+import me.rerere.rikkahub.ui.pages.setting.OutputStyleEditorPage
+import me.rerere.rikkahub.ui.pages.setting.SettingHooksPage
+import me.rerere.rikkahub.ui.pages.setting.HookEditorPage
+import me.rerere.rikkahub.ui.pages.setting.SettingPresetManagerPage
 import me.rerere.rikkahub.ui.pages.chat.ChatPage
 import me.rerere.rikkahub.ui.pages.debug.DebugPage
 import me.rerere.rikkahub.ui.pages.extensions.ExtensionsPage
@@ -138,6 +145,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingProviderDetailPage
 import me.rerere.rikkahub.ui.pages.setting.SettingProviderPage
 import me.rerere.rikkahub.ui.pages.setting.SettingSearchDetailPage
 import me.rerere.rikkahub.ui.pages.setting.SettingSearchPage
+import me.rerere.rikkahub.ui.pages.backup.BackupPage
 import me.rerere.rikkahub.ui.pages.setting.SettingSpeechPage
 import me.rerere.rikkahub.ui.pages.setting.SettingWebPage
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerPage
@@ -418,6 +426,34 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.AssistantInjections> { key ->
                                 AssistantExtensionsPage(key.id)
+                            }
+
+                            entry<Screen.AssistantPresetDebugger> { key ->
+                                PresetDebuggerPage(key.id)
+                            }
+
+                            entry<Screen.CreationWizard> { key ->
+                                CreationWizardPage(key.id)
+                            }
+
+                            entry<Screen.SettingOutputStyles> {
+                                SettingOutputStylesPage()
+                            }
+
+                            entry<Screen.OutputStyleEditor> { key ->
+                                OutputStyleEditorPage(key.id)
+                            }
+
+                            entry<Screen.SettingHooks> {
+                                SettingHooksPage()
+                            }
+
+                            entry<Screen.HookEditor> { key ->
+                                HookEditorPage(key.id)
+                            }
+
+                            entry<Screen.SettingPresetManager> {
+                                SettingPresetManagerPage()
                             }
 
                             entry<Screen.Translator> {
@@ -724,6 +760,27 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data class AssistantInjections(val id: String) : Screen
+
+    @Serializable
+    data class AssistantPresetDebugger(val id: String) : Screen
+
+    @Serializable
+    data class CreationWizard(val id: String? = null) : Screen
+
+    @Serializable
+    data object SettingOutputStyles : Screen
+
+    @Serializable
+    data class OutputStyleEditor(val id: String? = null) : Screen
+
+    @Serializable
+    data object SettingHooks : Screen
+
+    @Serializable
+    data class HookEditor(val id: String? = null) : Screen
+
+    @Serializable
+    data object SettingPresetManager : Screen
 
     @Serializable
     data object Translator : Screen

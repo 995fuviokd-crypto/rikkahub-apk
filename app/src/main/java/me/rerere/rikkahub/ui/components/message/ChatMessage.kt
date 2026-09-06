@@ -77,6 +77,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
+import me.rerere.rikkahub.data.datastore.DisplaySetting
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
@@ -353,6 +354,16 @@ private fun MessagePartsBlock(
                             is ThinkingStep.ServerToolStep -> {
                                 key(step.tool.toolCallId.ifBlank { step.hashCode().toString() }) {
                                     ChatMessageServerToolStep(tool = step.tool)
+                                }
+                            }
+
+                            is ThinkingStep.InlineText -> {
+                                key(step.index) {
+                                    InlineTextInThinking(
+                                        part = step.part,
+                                        role = role,
+                                        settings = settings.displaySetting,
+                                    )
                                 }
                             }
                         }
@@ -633,5 +644,32 @@ private fun MessagePartsBlock(
                 Text(stringResource(R.string.citations_count, annotations.size))
             }
         }
+    }
+}
+
+@Composable
+private fun InlineTextInThinking(
+    part: UIMessagePart,
+    role: MessageRole,
+    settings: DisplaySetting,
+) {
+    val textPart = part as? UIMessagePart.Text ?: return
+    val text = textPart.text
+    if (text.isBlank()) return
+
+    val textStyle = LocalTextStyle.current.copy(
+        lineHeight = LocalTextStyle.current.lineHeight * settings.fontSizeRatio,
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Text(
+            text = text,
+            style = textStyle,
+            color = if (role == MessageRole.USER) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+        )
     }
 }

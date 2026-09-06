@@ -24,7 +24,7 @@ markdown = "d79a97cc8e"
 okhttp = "5.5.0"
 retrofit = "3.0.0"
 coil = "3.5.0"
-quickjs = "3.2.3"
+javet = "4.0.0"
 room = "2.8.4"
 koin-bom = "4.2.2"
 datastore = "1.2.1"
@@ -122,7 +122,7 @@ coil-gif = { group = "io.coil-kt.coil3", name = "coil-gif", version.ref = "coil"
 coil-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil" }
 coil-svg = { group = "io.coil-kt.coil3", name = "coil-svg", version.ref = "coil" }
 coil-cache-control = { group = "io.coil-kt.coil3", name = "coil-network-cache-control", version.ref = "coil" }
-quickjs = { group = "wang.harlon.quickjs", name = "wrapper-android", version.ref = "quickjs" }
+javet = { group = "com.caoccao.javet", name = "javet-android-v8", version.ref = "javet" }
 koin-bom = { group = "io.insert-koin", name = "koin-bom", version.ref = "koin-bom" }
 koin-android = { group = "io.insert-koin", name = "koin-android" }
 koin-compose = { group = "io.insert-koin", name = "koin-androidx-compose" }

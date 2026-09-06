@@ -45,6 +45,8 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.InjectionPosition
 import me.rerere.rikkahub.data.model.Lorebook
+import me.rerere.rikkahub.data.model.OutputStyle
+import me.rerere.rikkahub.data.model.OutputStyleFrontmatter
 import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.data.model.QuickMessage
 import me.rerere.rikkahub.data.model.Tag
@@ -726,6 +728,8 @@ data class Settings(
     val selectedASRProviderId: Uuid? = null,
     val modeInjections: List<PromptInjection.ModeInjection> = DEFAULT_MODE_INJECTIONS,
     val lorebooks: List<Lorebook> = emptyList(),
+    val outputStyles: List<OutputStyle> = DEFAULT_OUTPUT_STYLES,
+    val presetPackages: List<PresetPackageMeta> = emptyList(),
     val quickMessages: List<QuickMessage> = emptyList(),
     val webServerEnabled: Boolean = false,
     val webServerPort: Int = 8080,
@@ -1030,4 +1034,47 @@ val DEFAULT_MODE_INJECTIONS = listOf(
         position = InjectionPosition.AFTER_SYSTEM_PROMPT,
         name = "Learning Mode"
     )
+)
+
+@Serializable
+data class PresetPackageMeta(
+    val id: String,
+    val name: String,
+    val formatVersion: String,
+    val importedAt: Long,
+)
+
+val DEFAULT_OUTPUT_STYLES = listOf(
+    OutputStyle(
+        id = Uuid.parse("a1b2c3d4-0001-4000-8000-000000000001"),
+        name = "Default",
+        description = "Default software engineering style",
+        frontmatter = OutputStyleFrontmatter(keepDefaultInstructions = true),
+        instructions = "You are a helpful software engineering assistant. Be concise and thorough.",
+        builtin = true,
+    ),
+    OutputStyle(
+        id = Uuid.parse("a1b2c3d4-0002-4000-8000-000000000002"),
+        name = "Learning",
+        description = "Collaborative, learn-by-doing mode with TODO(human) markers",
+        frontmatter = OutputStyleFrontmatter(keepDefaultInstructions = true),
+        instructions = "You are a collaborative coding partner. Use TODO(human) markers to ask the user to contribute code. Explain your reasoning and ask questions to teach.",
+        builtin = true,
+    ),
+    OutputStyle(
+        id = Uuid.parse("a1b2c3d4-0003-4000-8000-000000000003"),
+        name = "Concise",
+        description = "Minimal answers, reduced explanation",
+        frontmatter = OutputStyleFrontmatter(keepDefaultInstructions = true),
+        instructions = "Be brief and to the point. Minimize explanation. Focus on actionable output.",
+        builtin = true,
+    ),
+    OutputStyle(
+        id = Uuid.parse("a1b2c3d4-0004-4000-8000-000000000004"),
+        name = "Explanatory",
+        description = "Detailed explanation with examples and reasoning",
+        frontmatter = OutputStyleFrontmatter(keepDefaultInstructions = false),
+        instructions = "You are a detailed explainer. Provide thorough answers with examples, step-by-step reasoning, and educational context. Anticipate follow-up questions.",
+        builtin = true,
+    ),
 )

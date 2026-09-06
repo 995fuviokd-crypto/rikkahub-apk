@@ -85,7 +85,7 @@
   <string name="assistant_page_local_tools_ask_user_title">詢問使用者</string>
   <string name="assistant_page_local_tools_clipboard_desc">讀取或寫入裝置剪貼簿中的純文字</string>
   <string name="assistant_page_local_tools_clipboard_title">剪貼簿</string>
-  <string name="assistant_page_local_tools_javascript_engine_desc">使用 QuickJS 引擎執行 JavaScript 代碼，進行計算和腳本處理</string>
+  <string name="assistant_page_local_tools_javascript_engine_desc">使用 V8 引擎執行 JavaScript 代碼，進行計算和腳本處理</string>
   <string name="assistant_page_local_tools_javascript_engine_title">JavaScript 引擎</string>
   <string name="assistant_page_local_tools_time_info_desc">從裝置取得目前日期、星期、時間與時區資訊</string>
   <string name="assistant_page_local_tools_time_info_title">時間資訊</string>

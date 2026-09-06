@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.backup.tabs
 
 import me.rerere.hugeicons.HugeIcons
+import android.util.Log
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
 import me.rerere.hugeicons.stroke.Upload02
@@ -67,6 +68,8 @@ import me.rerere.rikkahub.utils.onLoading
 import me.rerere.rikkahub.utils.onSuccess
 import me.rerere.rikkahub.utils.toLocalDateTime
 import java.time.Instant
+
+private const val TAG = "WebDavTab"
 
 @Composable
 fun WebDavTab(
@@ -240,7 +243,7 @@ fun WebDavTab(
                                 type = ToastType.Success
                             )
                         } catch (e: Exception) {
-                            e.printStackTrace()
+                            Log.e(TAG, "", e)
                             toaster.show(
                                 context.getString(
                                     R.string.backup_page_connection_failed,
@@ -274,7 +277,7 @@ fun WebDavTab(
                                 type = ToastType.Success
                             )
                         }.onFailure {
-                            it.printStackTrace()
+                            Log.e(TAG, "", it)
                             toaster.show(
                                 it.message ?: context.getString(R.string.backup_page_unknown_error),
                                 type = ToastType.Error
@@ -343,7 +346,7 @@ fun WebDavTab(
                                             )
                                             vm.loadBackupFileItems()
                                         }.onFailure { err ->
-                                            err.printStackTrace()
+                                            Log.e(TAG, "", err)
                                             toaster.show(
                                                 context.getString(
                                                     R.string.backup_page_delete_failed,
@@ -366,7 +369,7 @@ fun WebDavTab(
                                             showBackupFiles = false
                                             onShowRestartDialog()
                                         }.onFailure { err ->
-                                            err.printStackTrace()
+                                            Log.e(TAG, "", err)
                                             toaster.show(
                                                 context.getString(
                                                     R.string.backup_page_restore_failed,

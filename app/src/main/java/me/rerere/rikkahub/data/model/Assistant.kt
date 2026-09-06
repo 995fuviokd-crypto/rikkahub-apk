@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.model
 
 import kotlinx.serialization.SerialName
+import android.util.Log
 import kotlinx.serialization.Serializable
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.CustomBody
@@ -12,6 +13,8 @@ import me.rerere.rikkahub.data.memory.MemoryScope
 import me.rerere.rikkahub.utils.SimpleCache
 import java.util.concurrent.TimeUnit
 import kotlin.uuid.Uuid
+
+private const val TAG = "Assistant"
 
 @Serializable
 data class Assistant(
@@ -53,6 +56,8 @@ data class Assistant(
     val enableTimeReminder: Boolean = false,            // 时间间隔提醒注入
     val allowConversationSystemPrompt: Boolean = false, // 允许对话单独重写 system prompt
     val allowConversationPromptInjection: Boolean = false, // 允许对话单独绑定提示词注入
+    val activeOutputStyleId: Uuid? = null,                   // 关联的输出风格 ID
+    val hookConfigs: List<HookConfig> = emptyList(),         // 关联的 Hook 配置列表
 ) {
     /**
      * 生效的工作区集合：优先多选字段（workspaceIds），
@@ -109,7 +114,7 @@ private val regexCache = SimpleCache.builder<String, Result<Regex>>()
 
 private fun compileRegexCached(pattern: String): Regex? {
     regexCache.getIfPresent(pattern)?.let { return it.getOrNull() }
-    val result = runCatching { Regex(pattern) }.onFailure { it.printStackTrace() }
+    val result = runCatching { Regex(pattern) }.onFailure { Log.e(TAG, "", it) }
     regexCache.put(pattern, result)
     return result.getOrNull()
 }
@@ -130,7 +135,7 @@ fun String.replaceRegexes(
                     replacement = regex.replaceString,
                 )
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(TAG, "", e)
                 // 替换字符串可能引用不存在的分组，失败时返回原字符串
                 acc
             }
@@ -213,6 +218,13 @@ sealed class PromptInjection {
         val caseSensitive: Boolean = false,        // 大小写敏感
         val scanDepth: Int = 4,                    // 扫描最近N条消息
         val constantActive: Boolean = false,       // 常驻激活（无需匹配）
+        val activateAfterMessageCount: Int? = null, // 消息数达到此值后才激活
+        val positionOverride: InjectionPosition? = null, // 覆盖位置（null 则用 position）
+        val depth: Int? = null,                    // 覆盖深度（null 则用 injectDepth）
+        val injectionRole: MessageRole? = null,    // 覆盖角色（null 则用 role）
+        val tokenBudget: Int? = null,              // token 预算（null 则不截断）
+        val secondaryKeywords: List<String> = emptyList(), // 二级关键词（filterLogic 非空时生效）
+        val filterLogic: FilterLogic? = null,      // 一级与二级关键词的组合逻辑
     ) : PromptInjection()
 }
 
@@ -239,20 +251,35 @@ fun PromptInjection.RegexInjection.isTriggered(context: String): Boolean {
     if (constantActive) return true
     if (keywords.isEmpty()) return false
 
-    return keywords.any { keyword ->
-        if (useRegex) {
-            try {
-                val options = if (caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE)
-                Regex(keyword, options).containsMatchIn(context)
-            } catch (e: Exception) {
-                false
-            }
+    val primaryMatched = keywords.any { keyword -> keywordMatches(context, keyword) }
+
+    if (secondaryKeywords.isEmpty() || filterLogic == null) {
+        return primaryMatched
+    }
+
+    val secondaryMatched = when (filterLogic) {
+        FilterLogic.AND_ANY -> secondaryKeywords.any { keywordMatches(context, it) }
+        FilterLogic.AND_ALL -> secondaryKeywords.all { keywordMatches(context, it) }
+        FilterLogic.NOT_ANY -> secondaryKeywords.none { keywordMatches(context, it) }
+        FilterLogic.NOT_ALL -> !secondaryKeywords.all { keywordMatches(context, it) }
+    }
+
+    return primaryMatched && secondaryMatched
+}
+
+private fun PromptInjection.RegexInjection.keywordMatches(context: String, keyword: String): Boolean {
+    return if (useRegex) {
+        try {
+            val options = if (caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE)
+            Regex(keyword, options).containsMatchIn(context)
+        } catch (e: Exception) {
+            false
+        }
+    } else {
+        if (caseSensitive) {
+            context.contains(keyword)
         } else {
-            if (caseSensitive) {
-                context.contains(keyword)
-            } else {
-                context.contains(keyword, ignoreCase = true)
-            }
+            context.contains(keyword, ignoreCase = true)
         }
     }
 }

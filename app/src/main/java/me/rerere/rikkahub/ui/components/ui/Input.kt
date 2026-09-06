@@ -14,6 +14,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
+import android.util.Log
+
+private const val TAG = "Input"
 
 @Composable
 fun <T : Number> OutlinedNumberInput(
@@ -40,7 +43,7 @@ fun <T : Number> OutlinedNumberInput(
                     }
                     onValueChange(newVal)
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.e("Input", "Failed to parse number", e)
                 }
             }
         },
@@ -76,7 +79,7 @@ fun <T : Number> NumberInput(
                     }
                     onValueChange(newVal)
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.e("Input", "Failed to parse number", e)
                 }
             }
         },

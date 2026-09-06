@@ -92,6 +92,8 @@ import org.jsoup.nodes.Element
 import org.jsoup.nodes.Node
 import org.jsoup.nodes.TextNode
 
+private const val TAG = "MarkdownNew"
+
 // ---- Preprocessing (mirrors Markdown.kt logic) ----
 
 private val INLINE_LATEX_REGEX = Regex("\\\\\\((.+?)\\\\\\)")
@@ -189,7 +191,7 @@ fun MarkdownNew(
                 val html = generateMarkdownHtml(transformed)
                 runCatching { Jsoup.parse(html) }.getOrElse { Jsoup.parse("") }
             }
-            .catch { it.printStackTrace() }
+            .catch { Log.e(TAG, "", it) }
             .flowOn(Dispatchers.Default)
             .collect { document = it }
     }

@@ -12,9 +12,12 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Avatar
+import me.rerere.rikkahub.data.model.InjectionPosition
 import me.rerere.rikkahub.data.model.Lorebook
+import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
+import kotlin.uuid.Uuid
 
 class AssistantVM(
     private val settingsStore: SettingsStore,
@@ -79,6 +82,57 @@ class AssistantVM(
         }
     }
 
+    fun createAssistantFromWizard(state: me.rerere.rikkahub.ui.pages.assistant.WizardState) {
+        viewModelScope.launch {
+            val current = settings.value
+            val assistantId = Uuid.random()
+            val defaultOutputStyleId = current.outputStyles.firstOrNull { it.name == "Default" }?.id
+            val systemPrompt = buildString {
+                if (state.description.isNotBlank()) {
+                    append(state.description)
+                    appendLine()
+                }
+                append(state.selectedPresetTemplateInstructions())
+            }
+            val newAssistant = Assistant(
+                id = assistantId,
+                name = state.name,
+                systemPrompt = systemPrompt,
+                activeOutputStyleId = defaultOutputStyleId,
+            )
+            val lorebookEntries = state.exampleDialogs.map { dialog ->
+                PromptInjection.RegexInjection(
+                    name = "Example: ${dialog.charMessage.take(30)}",
+                    content = "User: ${dialog.userMessage}\nAssistant: ${dialog.charMessage}",
+                    keywords = listOf(dialog.userMessage.take(20)),
+                    priority = 0,
+                    position = me.rerere.rikkahub.data.model.InjectionPosition.AFTER_SYSTEM_PROMPT,
+                    role = me.rerere.ai.core.MessageRole.USER,
+                    constantActive = false,
+                )
+            }
+            val lorebook = if (lorebookEntries.isNotEmpty()) {
+                Lorebook(
+                    id = Uuid.random(),
+                    name = "${state.name} - Examples",
+                    description = "Auto-generated from creation wizard",
+                    entries = lorebookEntries,
+                )
+            } else null
+            val finalAssistant = if (lorebook != null) {
+                newAssistant.copy(lorebookIds = setOf(lorebook.id))
+            } else {
+                newAssistant
+            }
+            settingsStore.update(
+                current.copy(
+                    assistants = current.assistants + finalAssistant,
+                    lorebooks = if (lorebook != null) current.lorebooks + lorebook else current.lorebooks,
+                )
+            )
+        }
+    }
+
     private fun cleanupAssistantFiles(assistant: Assistant) {
         val uris = buildList {
             (assistant.avatar as? Avatar.Image)?.let { add(it.url.toUri()) }
@@ -112,4 +166,13 @@ class AssistantVM(
         } else {
             memoryRepository.getMemoriesOfAssistantFlow(assistant.id.toString())
         }
+}
+
+private fun WizardState.selectedPresetTemplateInstructions(): String = when (selectedPreset) {
+    "General Chat" -> "Be friendly and helpful in your conversations."
+    "Learning Companion" -> "Explain concepts clearly, ask follow-up questions, and use TODO(human) markers when the user should practice."
+    "Programming Assistant" -> "Help with coding tasks. Provide clear explanations, best practices, and concise code examples."
+    "Translator" -> "Translate accurately between languages, preserving tone and context."
+    "Creative Writer" -> "Help with creative writing. Be imaginative, suggest ideas, and provide constructive feedback."
+    else -> ""
 }

@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.recall.RecallRecord
 import me.rerere.rikkahub.data.recall.SideEffectLog
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.uuid.Uuid
 
@@ -38,7 +39,7 @@ class ConversationSession(
     val recallHistory: StateFlow<List<RecallRecord>> = _recallHistory.asStateFlow()
 
     // nodeId -> 该 AI 回复产生的副作用 log（用于回滚）
-    val sideEffectLogs = mutableMapOf<Uuid, SideEffectLog>()
+    val sideEffectLogs = ConcurrentHashMap<Uuid, SideEffectLog>()
 
     val canRedo: Boolean get() = _recallHistory.value.isNotEmpty()
 
@@ -67,14 +68,18 @@ class ConversationSession(
     // 空闲检查任务
     private var idleCheckJob: Job? = null
 
-    fun acquire(): Int = refCount.incrementAndGet().also {
+    fun acquire(): Int = synchronized(this) {
+        val count = refCount.incrementAndGet()
         cancelIdleCheck()
-        Log.d(TAG, "acquire $id (refs=$it)")
+        Log.d(TAG, "acquire $id (refs=$count)")
+        count
     }
 
-    fun release(): Int = refCount.decrementAndGet().also {
-        Log.d(TAG, "release $id (refs=$it)")
-        if (it <= 0) scheduleIdleCheck()
+    fun release(): Int = synchronized(this) {
+        val count = refCount.decrementAndGet()
+        Log.d(TAG, "release $id (refs=$count)")
+        if (count <= 0) scheduleIdleCheck()
+        count
     }
 
     // 作用域 API - 短请求（REST）

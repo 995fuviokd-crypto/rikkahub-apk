@@ -73,6 +73,7 @@ fun MemoryLibraryPage(vm: MemoryLibraryVM = koinViewModel()) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
     val selectedTarget by vm.selectedTarget.collectAsStateWithLifecycle()
+    val showLocalScope by vm.showLocalScope.collectAsStateWithLifecycle()
     val memories by vm.filtered.collectAsStateWithLifecycle()
     val importResult by vm.importResult.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -279,6 +280,11 @@ fun MemoryLibraryPage(vm: MemoryLibraryVM = koinViewModel()) {
                         label = { Text(targetLabel(target)) },
                     )
                 }
+                FilterChip(
+                    selected = showLocalScope,
+                    onClick = { vm.showLocalScope.value = !vm.showLocalScope.value },
+                    label = { Text("Local") },
+                )
             }
 
             Spacer(Modifier.size(12.dp))

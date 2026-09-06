@@ -25,7 +25,7 @@ import java.io.File
  * `tools` 缝生产者（R2.2）：把已启用的 JS 脚本插件工具注册进 [ToolsSeam] 注册表。
  *
  * - 工具以 `pluginId.toolName` 命名直出（R4.4/任务 9 元工具拆出的数据基础）
- * - 执行经 [ScriptRuntime.runTool] 路由进 QuickJS 沙箱
+ * - 执行经 [ScriptRuntime.runTool] 路由进 V8 沙箱
  * - 注册表变更由 HostToolsSeam 事件驱动派发 `tools/change`
  * - 同步触发器与 CordisRuntimeHost 一致：插件目录事件 + enabledPlugins 变化（防抖合并）
  */
@@ -111,7 +111,7 @@ class ScriptToolsSeamProducer(
     /** 当前已注册的缝工具名（测试/诊断）。 */
     fun registeredToolNames(): List<String> = registered.keys.toList()
 
-    /** 执行插件工具：路由进 QuickJS 沙箱，结果包装为结构化 JsonElement。 */
+    /** 执行插件工具：路由进 V8 沙箱，结果包装为结构化 JsonElement。 */
     private suspend fun executePluginTool(
         pluginId: String,
         toolName: String,

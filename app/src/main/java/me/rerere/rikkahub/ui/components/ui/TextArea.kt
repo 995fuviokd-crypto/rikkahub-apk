@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.ui
 
 import android.net.Uri
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -50,6 +51,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.modifier.onClick
 
+private const val TAG = "TextArea"
+
 /**
  * A multi-line text input component with a header and file import functionality.
  *
@@ -98,7 +101,7 @@ fun TextArea(
                     state.setTextAndPlaceCursorAtEnd(content)
                     toaster.show(context.getString(R.string.text_area_import_success), type = ToastType.Success)
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.e(TAG, "", e)
                     val errorMessage = e.message ?: context.getString(R.string.text_area_import_failed)
                     onImportError?.invoke(errorMessage) ?: toaster.show(
                         message = errorMessage,

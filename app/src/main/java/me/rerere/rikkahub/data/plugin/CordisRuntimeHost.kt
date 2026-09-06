@@ -28,7 +28,7 @@ import java.io.File
  * - 面板插件（web/plugin.client.js）→ PANEL：随 WebView 面板运行，经 CordisJsBridge
  *   访问宿主能力缝（llm/tools/sessions/systemPrompt）。
  * - 脚本插件（script/ 目录含 JS 入口）→ JS：经 default js executor 路由到 ScriptRuntime
- *   的 QuickJS 沙箱执行。
+ *   的 V8 沙箱执行。
  * - 纯提示词/技能型插件（无 web/plugin.client.js、无脚本目录）仅注入 systemPrompt，
  *   不占用内核注册表。
  *
@@ -124,8 +124,8 @@ class CordisRuntimeHost(
      * 管线 Hook 统一调度入口（design.md D2.4）：
      * ChatService / UI 的所有动态 Hook 派发经本入口，消除对 PluginManager 的直接依赖。
      *
-     * 执行链（两轨串行，QuickJS 为主力）：
-     * 1. QuickJS Hook 链：声明该 hook 的启用脚本插件（PluginManager.dispatchHook，
+     * 执行链（两轨串行，V8 为主力）：
+     * 1. V8 Hook 链：声明该 hook 的启用脚本插件（PluginManager.dispatchHook，
      *    超时链式语义不变）
      * 2. kernel `hook:<name>` 事件：已加载进内核的面板/脚本插件可监听响应，
      *    返回非 null JsonObject 时继续链式改写
@@ -138,7 +138,7 @@ class CordisRuntimeHost(
             payload = payload,
         )
         // kernel 事件轨：面板插件（经 CordisBridge 订阅 events）响应 hook，
-        // Waterfall 链式语义与 QuickJS Hook 链一致
+        // Waterfall 链式语义与 V8 Hook 链一致
         runCatching {
             val results = kernel.eventBus.dispatch(
                 me.rerere.rikkahub.data.cordis.DispatchMode.Waterfall,

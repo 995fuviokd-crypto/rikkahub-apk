@@ -3,6 +3,7 @@
 package me.rerere.rikkahub.utils
 
 import android.content.Context
+import android.util.Log
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
@@ -16,6 +17,8 @@ import com.google.zxing.BinaryBitmap
 import com.google.zxing.MultiFormatReader
 import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.common.HybridBinarizer
+
+private const val TAG = "ImageUtils"
 
 /**
  * 图片处理工具类
@@ -66,7 +69,7 @@ object ImageUtils {
             // 第三步：处理图片旋转（如果需要）
             bitmap?.let { correctImageOrientation(context, uri, it) }
         }.onFailure {
-            it.printStackTrace()
+            Log.e(TAG, "", it)
         }.getOrNull()
     }
 
@@ -136,7 +139,7 @@ object ImageUtils {
             }
             rotatedBitmap
         }.onFailure {
-            it.printStackTrace()
+            Log.e(TAG, "", it)
         }.getOrDefault(bitmap)
     }
 
@@ -194,7 +197,7 @@ object ImageUtils {
             recycleBitmapSafely(oriented)
         }
     }.onFailure {
-        it.printStackTrace()
+        Log.e(TAG, "", it)
     }.getOrDefault(false)
 
     private val HEIF_BRANDS = setOf(
@@ -224,7 +227,7 @@ object ImageUtils {
 
             result.text
         }.onFailure {
-            it.printStackTrace()
+            Log.e(TAG, "", it)
         }.getOrNull()
     }
 
@@ -287,7 +290,7 @@ object ImageUtils {
                 )
             } else null
         }.onFailure {
-            it.printStackTrace()
+            Log.e(TAG, "", it)
         }.getOrNull()
     }
 

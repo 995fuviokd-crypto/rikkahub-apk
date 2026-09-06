@@ -16,7 +16,7 @@ import me.rerere.rikkahub.data.plugin.PluginPipelineSnapshot
 /**
  * 脚本插件工具直出（design.md D2.4 / R4.4 完整版）：
  * 每个启用脚本插件的每个工具以 `pluginId.toolName` 独立 Tool 直出工具列表，
- * 聊天工具调用块直接显示插件名与工具名；执行统一路由 QuickJS 沙箱。
+ * 聊天工具调用块直接显示插件名与工具名；执行统一路由 V8 沙箱。
  *
  * 同时保留旧三段式 `run_script_tool` 兼容解析（旧会话/旧提示词仍可调用）。
  * 工具清单来自 [PluginManager.pipelineSnapshot] 冷数据快照（与插件中心/Hook 一致视图）。
@@ -112,7 +112,7 @@ private fun buildLegacyScriptTool(
     },
 )
 
-/** 统一执行路由：启用校验 → QuickJS 沙箱 runTool → 结构化文本结果 */
+/** 统一执行路由：启用校验 → V8 沙箱 runTool → 结构化文本结果 */
 private suspend fun executeScriptTool(
     pluginManager: PluginManager,
     runtime: ScriptRuntime,

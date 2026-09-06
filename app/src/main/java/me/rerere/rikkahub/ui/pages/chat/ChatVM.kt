@@ -119,6 +119,7 @@ class ChatVM(
     val processingStatus: StateFlow<String?> =
         chatService
             .getProcessingStatusFlow(_conversationId)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val conversationJobs = chatService
         .getConversationJobs()

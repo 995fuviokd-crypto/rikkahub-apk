@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.richtext
 
 import android.content.ClipData
+import android.util.Log
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -110,6 +111,8 @@ import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMTokenTypes
 import org.intellij.markdown.parser.MarkdownParser
 import kotlin.time.Clock
+
+private const val TAG = "Markdown"
 
 private val flavour by lazy {
     GFMFlavourDescriptor(
@@ -263,7 +266,7 @@ fun MarkdownBlock(
         snapshotFlow { updatedContent }
             .distinctUntilChanged()
             .mapLatest { parseMarkdown(it) }
-            .catch { exception -> exception.printStackTrace() }
+            .catch { exception -> Log.e(TAG, "", exception) }
             .flowOn(Dispatchers.Default)
             .collect { data = it }
     }
@@ -907,7 +910,7 @@ private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modif
                         outputStream.write(tableCsv.toByteArray())
                     }
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.e(TAG, "", e)
                 }
             }
         }

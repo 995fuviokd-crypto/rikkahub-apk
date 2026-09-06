@@ -427,7 +427,7 @@ class GoogleProvider(private val client: ProviderHttpClient, context: Context? =
             ) {
                 var exception = t
 
-                t?.printStackTrace()
+                t?.let { Log.e(TAG, "", it) }
                 println("[onFailure] 发生错误: ${t?.message}")
 
                 try {
@@ -447,7 +447,7 @@ class GoogleProvider(private val client: ProviderHttpClient, context: Context? =
                         }
                     }
                 } catch (e: Throwable) {
-                    e.printStackTrace()
+                    Log.e(TAG, "", e)
                     exception = e
                 } finally {
                     close(exception ?: Exception("Stream failed"))

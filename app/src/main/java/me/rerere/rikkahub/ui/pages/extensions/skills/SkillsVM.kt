@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.extensions.skills
 
 import android.content.Context
+import android.util.Log
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -23,6 +24,8 @@ import me.rerere.rikkahub.data.plugin.PluginManager
 import me.rerere.rikkahub.data.plugin.PluginSkillInfo
 import org.json.JSONArray
 import kotlin.collections.iterator
+
+private const val TAG = "SkillsVM"
 
 class SkillsVM(
     private val skillManager: SkillManager,
@@ -148,7 +151,7 @@ class SkillsVM(
                 _skills.value = skillManager.listSkills()
                 withContext(Dispatchers.Main) { onResult(true, name) }
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(TAG, "", e)
                 withContext(Dispatchers.Main) { onResult(false, e.message ?: "未知错误") }
             }
         }

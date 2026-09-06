@@ -101,7 +101,7 @@ class MemoryFtsManager(private val database: AppDatabase) {
         val conversationFilter = when {
             conversationId == null -> null
             scopeKey == MemoryScope.DURABLE -> null
-            else -> "(scope_key = '${MemoryScope.DURABLE}' OR conversation_id = ?)"
+            else -> "(scope_key = ? OR conversation_id = ?)"
         }
 
         val where = buildList {
@@ -114,7 +114,10 @@ class MemoryFtsManager(private val database: AppDatabase) {
             add(query)
             add(assistantId)
             if (scopeKey != null) add(scopeKey)
-            if (conversationFilter != null) add(conversationId!!)
+            if (conversationFilter != null) {
+                add(MemoryScope.DURABLE)
+                add(conversationId!!)
+            }
         }
 
         val cursor = db.query(

@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.setting
 
 import androidx.activity.compose.BackHandler
+import android.util.Log
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.Connect
@@ -144,6 +145,8 @@ import org.koin.compose.koinInject
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.uuid.Uuid
+
+private const val TAG = "SettingProviderDetailPage"
 
 @Composable
 fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
@@ -688,7 +691,7 @@ private fun ModelList(
                 .sortedBy { it.modelId }
                 .toList()
         }.onFailure {
-            it.printStackTrace()
+            Log.e(TAG, "", it)
         }
     }
     var expanded by rememberSaveable { mutableStateOf(true) }

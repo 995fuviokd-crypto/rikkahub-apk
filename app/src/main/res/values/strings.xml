@@ -86,7 +86,7 @@
   <string name="assistant_page_local_tools_ask_user_title">Ask User</string>
   <string name="assistant_page_local_tools_clipboard_desc">Read or write plain text from the device clipboard</string>
   <string name="assistant_page_local_tools_clipboard_title">Clipboard</string>
-  <string name="assistant_page_local_tools_javascript_engine_desc">Execute JavaScript code with QuickJS engine for calculations and scripting</string>
+  <string name="assistant_page_local_tools_javascript_engine_desc">Execute JavaScript code with V8 engine for calculations and scripting</string>
   <string name="assistant_page_local_tools_javascript_engine_title">JavaScript Engine</string>
   <string name="assistant_page_local_tools_time_info_desc">Get current date, weekday, time, and timezone info from the device</string>
   <string name="assistant_page_local_tools_time_info_title">Time Info</string>
@@ -1436,7 +1436,7 @@
   <string name="assistant_page_local_tools_device_info_title">Device Info</string>
   <string name="assistant_page_local_tools_device_info_desc">Let the AI query device information including the current effective screen resolution</string>
   <string name="assistant_page_local_tools_scripts_title">Scripts</string>
-  <string name="assistant_page_local_tools_scripts_desc">Let the AI run tools exported by script market scripts and ToolPkg plugins locally via the QuickJS engine</string>
+  <string name="assistant_page_local_tools_scripts_desc">Let the AI run tools exported by script market scripts and ToolPkg plugins locally via the V8 engine</string>
   <string name="assistant_page_local_tools_system_control_title">AI System Control</string>
   <string name="assistant_page_local_tools_system_control_desc">Grant the AI full control: read/write app settings, switches, models, assistants, plugin toggles and prompts</string>
   <string name="assistant_page_local_tools_accessibility_title">Accessibility Control</string>  <string name="assistant_page_local_tools_accessibility_desc">Let the AI control your phone via the accessibility service: open apps, tap on-screen elements, adjust volume, and navigate</string>

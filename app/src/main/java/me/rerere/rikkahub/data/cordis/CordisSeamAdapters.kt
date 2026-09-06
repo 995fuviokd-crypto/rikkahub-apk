@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.cordis
 
 import kotlinx.coroutines.flow.first
+import android.util.Log
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -25,6 +26,8 @@ import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.session.Session
 import me.rerere.rikkahub.data.session.SessionEvent
 import me.rerere.rikkahub.data.session.SessionEventRepository
+
+private const val TAG = "CordisSeamAdapters"
 
 /**
  * 从 config 解析目标模型：优先 config["modelId"]（UUID 字符串），
@@ -175,7 +178,7 @@ class HostSessionsSeam(
         val conversationId = boundConversationId ?: return
         val repo = runCatching { sessionEventRepoProvider?.invoke() }.getOrNull() ?: return
         runCatching { repo.append(conversationId, sessionEvent) }
-            .onFailure { it.printStackTrace() }
+            .onFailure { Log.e(TAG, "", it) }
     }
 
     override suspend fun rebuildContext(): List<UIMessage> =

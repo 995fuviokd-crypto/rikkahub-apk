@@ -4,6 +4,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.BookOpen01
 import me.rerere.hugeicons.stroke.Brain02
 import me.rerere.hugeicons.stroke.ArrowRight01
+import me.rerere.hugeicons.stroke.Bug01
 import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Message02
@@ -148,6 +149,13 @@ fun AssistantDetailPage(id: String) {
                         leadingContent = { Icon(HugeIcons.Folder01, null) },
                         supportingContent = { Text(stringResource(R.string.assistant_detail_workspace_desc)) },
                         headlineContent = { Text(stringResource(R.string.assistant_page_workspace)) },
+                        trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
+                    )
+                    item(
+                        onClick = { navController.navigate(Screen.AssistantPresetDebugger(id)) },
+                        leadingContent = { Icon(HugeIcons.Bug01, null) },
+                        supportingContent = { Text("Debug preset injection pipeline") },
+                        headlineContent = { Text("Preset Debugger") },
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
                     )
                 }

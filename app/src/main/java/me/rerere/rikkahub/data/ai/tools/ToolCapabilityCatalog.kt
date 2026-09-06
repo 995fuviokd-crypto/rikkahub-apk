@@ -16,7 +16,7 @@ data class ToolCapabilityEntry(
 
 object ToolCapabilityCatalog {
     val entries: List<ToolCapabilityEntry> = listOf(
-        ToolCapabilityEntry("本地工具", "JavaScript", "在软件内 QuickJS 引擎中执行 JavaScript 代码片段"),
+        ToolCapabilityEntry("本地工具", "JavaScript", "在软件内 V8 引擎中执行 JavaScript 代码片段"),
         ToolCapabilityEntry("本地工具", "时间信息", "获取当前时间/日期/时区等时间信息", LocalToolOption.TimeInfo),
         ToolCapabilityEntry("本地工具", "剪贴板", "读取与写入系统剪贴板", LocalToolOption.Clipboard),
         ToolCapabilityEntry("本地工具", "文字转语音", "朗读文本（TTS）", LocalToolOption.Tts),

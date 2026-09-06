@@ -19,16 +19,22 @@ interface MemoryEmbedder {
  */
 class LocalHashEmbedder(private val dim: Int = 256) : MemoryEmbedder {
 
+    private val cache = object : LinkedHashMap<String, FloatArray>(512, 0.75f, true) {
+        override fun removeEldestEntry(eldest: Map.Entry<String, FloatArray>) = size > 1024
+    }
+
     override fun embed(text: String): FloatArray {
-        val vec = FloatArray(dim)
-        MemoryGating.queryTokens(text).forEach { token ->
-            val h1 = stableHash(token + "#s")
-            val sign = if ((h1 and 1) == 0) 1.0f else -1.0f
-            val h2 = stableHash(token + "#i")
-            val idx = ((h2 % dim) + dim) % dim
-            vec[idx] += sign
+        return cache.getOrPut(text) {
+            val vec = FloatArray(dim)
+            MemoryGating.queryTokens(text).forEach { token ->
+                val h1 = stableHash(token + "#s")
+                val sign = if ((h1 and 1) == 0) 1.0f else -1.0f
+                val h2 = stableHash(token + "#i")
+                val idx = ((h2 % dim) + dim) % dim
+                vec[idx] += sign
+            }
+            vec
         }
-        return vec
     }
 
     override fun similarity(a: FloatArray, b: FloatArray): Float {

@@ -37,8 +37,8 @@ dependencies {
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
 
-    // quickjs
-    api(libs.quickjs)
+    // javet (V8) JS engine
+    api(libs.javet)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

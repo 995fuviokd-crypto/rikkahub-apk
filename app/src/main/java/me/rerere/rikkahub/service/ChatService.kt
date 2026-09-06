@@ -83,7 +83,9 @@ import me.rerere.rikkahub.data.ai.workflow.WorkflowRunner
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
 import me.rerere.rikkahub.data.ai.transformers.DocumentAsPromptTransformer
+import me.rerere.rikkahub.data.ai.transformers.HookTransformer
 import me.rerere.rikkahub.data.ai.transformers.OcrTransformer
+import me.rerere.rikkahub.data.ai.transformers.OutputStyleTransformer
 import me.rerere.rikkahub.data.ai.transformers.PlaceholderTransformer
 import me.rerere.rikkahub.data.ai.transformers.PromptInjectionTransformer
 import me.rerere.rikkahub.data.ai.transformers.RegexOutputTransformer
@@ -285,6 +287,8 @@ enum class ChatErrorSolution {
 
 private val inputTransformers by lazy {
     listOf(
+        HookTransformer(),
+        OutputStyleTransformer(),
         TimeReminderTransformer,
         PromptInjectionTransformer,
         PlaceholderTransformer,
@@ -298,6 +302,7 @@ private val outputTransformers by lazy {
         ThinkTagTransformer,
         Base64ImageToLocalFileTransformer,
         RegexOutputTransformer,
+        HookTransformer(),
     )
 }
 
@@ -322,7 +327,7 @@ class ChatService(
     private val workflowRepository: WorkflowRepository,
     private val workflowRunner: WorkflowRunner,
     private val pluginManager: me.rerere.rikkahub.data.plugin.PluginManager,
-    // D2.4 管线统一：Hook/快照经 Cordis 宿主调度（kernel 事件轨 + QuickJS 链）
+    // D2.4 管线统一：Hook/快照经 Cordis 宿主调度（kernel 事件轨 + V8 链）
     private val cordisRuntimeHost: me.rerere.rikkahub.data.plugin.CordisRuntimeHost,
     private val genMediaRepository: GenMediaRepository,
     val subagentRunTracker: me.rerere.rikkahub.data.ai.subagent.SubagentRunTracker,
@@ -422,14 +427,17 @@ class ChatService(
 
     private fun removeSession(conversationId: Uuid) {
         val session = sessions[conversationId] ?: return
-        if (session.isInUse) {
-            Log.d(TAG, "removeSession: skipped $conversationId (still in use)")
-            return
-        }
-        if (sessions.remove(conversationId, session)) {
-            session.cleanup()
-            _sessionsVersion.value++
-            Log.i(TAG, "removeSession: $conversationId (remaining: ${sessions.size})")
+        synchronized(session) {
+            if (session.isInUse) {
+                Log.d(TAG, "removeSession: skipped $conversationId (still in use)")
+                return
+            }
+            if (sessions.remove(conversationId, session)) {
+                session.sideEffectLogs.clear()
+                session.cleanup()
+                _sessionsVersion.value++
+                Log.i(TAG, "removeSession: $conversationId (remaining: ${sessions.size})")
+            }
         }
     }
 
@@ -590,7 +598,7 @@ class ChatService(
 
                 _generationDoneFlow.emit(conversationId)
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(TAG, "", e)
                 addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
             }
         }
@@ -1208,7 +1216,7 @@ class ChatService(
                 // 兜底取消 Live Update 通知（生成开始前失败时 onCompletion 不会执行）
                 appEventBus.tryEmit(AppEvent.ChatGenerationEnded(conversationId, senderName, null))
 
-                it.printStackTrace()
+                Log.e(TAG, "", it)
                 addError(it, conversationId, title = context.getString(R.string.error_title_generation))
                 Logging.log(TAG, "handleMessageComplete: $it")
                 Logging.log(TAG, it.stackTraceToString())
@@ -1432,7 +1440,7 @@ class ChatService(
                 )
             }
         }.onFailure {
-            it.printStackTrace()
+            Log.e(TAG, "", it)
             addError(
                 error = it,
                 conversationId = conversationId,
@@ -1491,7 +1499,7 @@ class ChatService(
                 )
             )
         }.onFailure {
-            it.printStackTrace()
+            Log.e(TAG, "", it)
         }
     }
 

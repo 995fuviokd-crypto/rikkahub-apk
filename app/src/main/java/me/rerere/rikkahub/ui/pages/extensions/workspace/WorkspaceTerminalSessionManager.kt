@@ -20,6 +20,8 @@ import kotlinx.coroutines.withTimeout
 import me.rerere.rikkahub.AppScope
 import java.util.concurrent.atomic.AtomicLong
 
+private const val TAG = "WorkspaceTerminalSessionManager"
+
 /**
  * Owns workspace terminal sessions independently from the terminal page lifecycle.
  *

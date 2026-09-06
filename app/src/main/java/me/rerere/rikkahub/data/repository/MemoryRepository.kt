@@ -66,6 +66,10 @@ class MemoryRepository(private val memoryDAO: MemoryDAO, private val database: A
             .filter { it.scopeKey == MemoryScope.DURABLE }
             .map { it.toModel() }
 
+    suspend fun getAllScopedMemoriesOfAssistant(assistantId: String): List<AssistantMemory> =
+        memoryDAO.getMemoriesOfAssistant(assistantId)
+            .map { it.toModel() }
+
     fun getGlobalMemoriesFlow(): Flow<List<AssistantMemory>> =
         getMemoriesOfAssistantFlow(GLOBAL_MEMORY_ID)
 
@@ -148,6 +152,10 @@ class MemoryRepository(private val memoryDAO: MemoryDAO, private val database: A
     }
 
     suspend fun countPendingJournal(): Int = memoryDAO.countUnprocessedJournal()
+
+    suspend fun markJournalProcessed(ids: List<Int>) {
+        if (ids.isNotEmpty()) memoryDAO.markJournalProcessed(ids)
+    }
 
     suspend fun getJournalOfConversation(conversationId: String): List<me.rerere.rikkahub.data.db.entity.MemoryJournalEntity> =
         memoryDAO.getJournalOfConversation(conversationId)

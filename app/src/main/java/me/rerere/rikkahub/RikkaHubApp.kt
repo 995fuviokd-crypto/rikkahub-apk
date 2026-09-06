@@ -25,7 +25,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import me.rerere.common.android.appTempFolder
-import com.whl.quickjs.android.QuickJSLoader
 import okhttp3.OkHttpClient
 import me.rerere.rikkahub.di.appModule
 import me.rerere.rikkahub.di.dataSourceModule
@@ -94,14 +93,6 @@ class RikkaHubApp : Application() {
 
         // install crash handler
         CrashHandler.install(this)
-
-        // Init QuickJS native library：loadLibrary 含 APK 解压 so 的磁盘 I/O，
-        // 放后台线程避免冷启动主线程卡顿；JS 工具都在 IO 线程执行，初始化完成后即可用
-        get<AppScope>().launch(Dispatchers.IO) {
-            runCatching { QuickJSLoader.init() }.onFailure {
-                Log.e(TAG, "QuickJS init failed", it)
-            }
-        }
 
         // 预加载冷启动期必用资源（后台执行，首帧后即就绪）：
         // - jieba 词典解压：14MB assets 首次解压较重，提前做避免数据库 onOpen 时竞争首帧

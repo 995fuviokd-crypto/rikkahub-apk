@@ -5,6 +5,7 @@ import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -75,6 +77,7 @@ private const val MAX_TOOL_OUTPUT_CHARS = 32 * 1024
 private const val TOOL_OUTPUT_PREVIEW_CHARS = 4 * 1024
 private const val MAX_PROVIDER_NETWORK_RETRIES = 3
 private const val INITIAL_PROVIDER_RETRY_DELAY_MS = 1_000L
+private const val TOOL_EXECUTION_TIMEOUT_MS = 60_000L
 
 private class StreamChunkHandlingException(cause: Throwable) : RuntimeException(cause)
 
@@ -404,7 +407,9 @@ class GenerationHandler(
                             }
                             Log.i(TAG, "generateText: executing tool ${toolDef.name} with args: $args")
                             sideEffectRecorder?.onBeforeTool(toolDef.name, args)
-                            val result = toolDef.execute(args)
+                            val result = withTimeout(TOOL_EXECUTION_TIMEOUT_MS) {
+                                toolDef.execute(args)
+                            }
                             sideEffectRecorder?.onAfterTool(toolDef.name, args, result)
                             val hasShellAccess = toolsInternal.any { it.name == "workspace_shell" }
                             executedTools += tool.copy(
@@ -413,19 +418,21 @@ class GenerationHandler(
                         }.onFailure {
                             // 取消必须向上传播，否则停止生成会被误报为工具执行错误
                             if (it is CancellationException) throw it
-                            it.printStackTrace()
+                            Log.e(TAG, "", it)
+                            val errorMsg = if (it is TimeoutCancellationException) {
+                                "Tool execution timed out after ${TOOL_EXECUTION_TIMEOUT_MS}ms"
+                            } else {
+                                buildString {
+                                    append("[${it.javaClass.name}] ${it.message}")
+                                    append("\n${it.stackTraceToString()}")
+                                }
+                            }
                             executedTools += tool.copy(
                                 output = listOf(
                                     UIMessagePart.Text(
                                         json.encodeToString(
                                             buildJsonObject {
-                                                put(
-                                                    "error",
-                                                    JsonPrimitive(buildString {
-                                                        append("[${it.javaClass.name}] ${it.message}")
-                                                        append("\n${it.stackTraceToString()}")
-                                                    })
-                                                )
+                                                put("error", JsonPrimitive(errorMsg))
                                             }
                                         )
                                     )

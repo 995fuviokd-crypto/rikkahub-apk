@@ -395,7 +395,7 @@ class ClaudeProvider(private val client: ProviderHttpClient, context: Context? =
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 var exception = t
 
-                t?.printStackTrace()
+                t?.let { Log.e(TAG, "", it) }
                 Log.e(TAG, "onFailure: ${t?.javaClass?.name} ${t?.message} / $response")
 
                 val bodyRaw = response?.body?.stringSafe()
@@ -407,7 +407,7 @@ class ClaudeProvider(private val client: ProviderHttpClient, context: Context? =
                     }
                 } catch (e: Throwable) {
                     Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
+                    Log.e(TAG, "", e)
                 } finally {
                     close(exception)
                 }

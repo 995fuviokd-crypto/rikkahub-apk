@@ -209,7 +209,7 @@ class ChatCompletionsAPI(
                     if (myGeneration != generation) return
                     var exception = t
 
-                    t?.printStackTrace()
+                    t?.let { Log.e(TAG, "", it) }
                     println("[onFailure] 发生错误: ${t?.javaClass?.name} ${t?.message} / $response")
 
                     val bodyRaw = response?.body?.stringSafe()
@@ -222,7 +222,7 @@ class ChatCompletionsAPI(
                         }
                     } catch (e: Throwable) {
                         Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                        e.printStackTrace()
+                        Log.e(TAG, "", e)
                         exception = e
                     }
 
@@ -660,7 +660,7 @@ class ChatCompletionsAPI(
                                             put("url", encodedImage.base64)
                                         })
                                     }.onFailure {
-                                        it.printStackTrace()
+                                        Log.e(TAG, "", it)
                                         put("type", "text")
                                         put("text", "")
                                     }
@@ -717,7 +717,7 @@ class ChatCompletionsAPI(
                                             put("url", encodedImage.base64)
                                         })
                                     }.onFailure {
-                                        it.printStackTrace()
+                                        Log.e(TAG, "", it)
                                         put("type", "text")
                                         put("text", "")
                                     }

@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -13,6 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import me.rerere.rikkahub.data.memory.MemoryScope
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.MemoryTarget
 import me.rerere.rikkahub.data.repository.MemoryRepository
@@ -62,20 +64,44 @@ class MemoryLibraryVM(
     val selectedTarget = MutableStateFlow<String?>(null)
     val searchQuery = MutableStateFlow("")
     val importResult = MutableStateFlow<String?>(null)
+    val showLocalScope = MutableStateFlow(false)
+
+    private val ftsResults = MutableStateFlow<List<AssistantMemory>>(emptyList())
 
     val filtered: StateFlow<List<AssistantMemory>> = combine(
         allMemories,
         selectedTarget,
         searchQuery,
-    ) { memories, target, query ->
-        memories.filter { memory ->
-            val targetMatch = target == null || memory.target.equals(target, ignoreCase = true)
-            val queryMatch = query.isBlank() ||
-                memory.content.contains(query, ignoreCase = true) ||
-                memory.summary?.contains(query, ignoreCase = true) == true
-            targetMatch && queryMatch
-        }.sortedByDescending { it.updatedAt }
+        showLocalScope,
+        ftsResults,
+    ) { memories, target, query, showLocal, fts ->
+        val scopeFiltered = memories.filter { showLocal || it.scopeKey == MemoryScope.DURABLE }
+        val targetFiltered = if (target == null) scopeFiltered
+            else scopeFiltered.filter { it.target.equals(target, ignoreCase = true) }
+        if (query.isBlank()) {
+            targetFiltered.sortedByDescending { it.updatedAt }
+        } else {
+            val ftsIds = fts.map { it.id }.toSet()
+            targetFiltered.filter { it.id in ftsIds }
+                .sortedBy { fts.map { m -> m.id }.indexOf(it.id) }
+        }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    init {
+        viewModelScope.launch {
+            searchQuery.collectLatest { query ->
+                if (query.isBlank()) {
+                    ftsResults.value = emptyList()
+                } else {
+                    ftsResults.value = memoryRepository.searchMemories(
+                        assistantId = MemoryRepository.GLOBAL_MEMORY_ID,
+                        query = query,
+                        limit = 50,
+                    )
+                }
+            }
+        }
+    }
 
     fun delete(memory: AssistantMemory) {
         viewModelScope.launch {

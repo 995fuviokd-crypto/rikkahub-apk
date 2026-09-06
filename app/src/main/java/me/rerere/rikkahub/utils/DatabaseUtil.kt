@@ -14,7 +14,7 @@ object DatabaseUtil {
             field.set(null, size)
             Log.i(TAG, "setCursorWindowSize: set $oldValue to $size")
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "", e)
         }
         // 已fork io.requery.android.database 修改了window size，避免无法反射修改final字段
 //        try {
@@ -25,7 +25,7 @@ object DatabaseUtil {
 //            field.set(null, size)
 //            Log.i(TAG, "setCursorWindowSize: set $oldValue to $size")
 //        } catch (e: Exception) {
-//            e.printStackTrace()
+//            Log.e(TAG, "", e)
 //        }
     }
 }

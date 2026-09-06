@@ -44,8 +44,16 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
         if (event.data == "[DONE]") return DecodeResult(finish(), completed = true)
 
         val chunks = buildList {
-            event.data.trim().split("\n").filter(String::isNotBlank).forEach { line ->
-                val payload = json.parseToJsonElement(line).jsonObject
+            // 优先整体解析：部分 provider 会把单个 JSON 分割成多个 data: 行（SSE 允许），
+            // 传输层用 \n 拼接后整体才是合法 JSON；仅当整体解析失败时再按行回退
+            val parsePayloads = runCatching {
+                listOf(json.parseToJsonElement(event.data.trim()).jsonObject)
+            }.getOrElse {
+                event.data.trim().split("\n")
+                    .filter(String::isNotBlank)
+                    .mapNotNull { line -> runCatching { json.parseToJsonElement(line).jsonObject }.getOrNull() }
+            }
+            parsePayloads.forEach { payload ->
                 payload["error"]?.let { throw it.parseErrorDetail() }
                 responseId = payload["id"]?.jsonPrimitive?.contentOrNull ?: responseId
                 responseModel = payload["model"]?.jsonPrimitive?.contentOrNull ?: responseModel

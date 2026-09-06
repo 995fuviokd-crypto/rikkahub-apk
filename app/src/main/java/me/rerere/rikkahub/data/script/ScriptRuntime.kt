@@ -3,8 +3,6 @@ package me.rerere.rikkahub.data.script
 import android.content.Context
 import android.util.Log
 import android.widget.Toast
-import com.whl.quickjs.wrapper.JSCallFunction
-import com.whl.quickjs.wrapper.QuickJSContext
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -24,6 +22,7 @@ import me.rerere.rikkahub.data.model.Workflow
 import me.rerere.rikkahub.data.model.WorkflowStep
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.WorkflowRepository
+import me.rerere.common.js.JsEngine
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -34,7 +33,7 @@ import java.util.Base64
 import java.util.concurrent.TimeUnit
 
 /**
- * 脚本执行器：用 QuickJS 在 App 内真实执行 script / ToolPkg 中的
+ * 脚本执行器：用 V8 (Javet) 在 App 内真实执行 script / ToolPkg 中的
  * JS 工具。脚本是 CommonJS 模块（exports.xxx），依赖全局 Tools.* 运行时，本类：
  *  1. 把 Tools.* 映射为 RikkaHub 本地能力：Files（沙箱文件系统）、Net（HTTP 请求/网页抓取）、
  *     System（sleep/toast/通知/设备信息）、calc（表达式计算）、Chat（本地会话读写，
@@ -58,6 +57,8 @@ open class ScriptRuntime(
         private const val SCRIPT_DATA_ROOT = "script-data"
         private const val LEGACY_SCRIPT_DATA_ROOT = "operit-data"
         private const val HTTP_TIMEOUT_MS = 15_000L
+        private const val SCRIPT_EXEC_TIMEOUT_MS = 30_000L
+        private const val MAX_RESP_BODY_BYTES = 5L * 1024 * 1024
 
         /** 解析插件脚本目录：优先新版 script/，兼容旧版 operit/ 磁盘布局 */
         fun scriptDir(pluginDir: File): File {
@@ -357,26 +358,32 @@ function __scriptLoadEntry(entry) {
         invokeFrame: String,
         logTag: String,
     ): ToolResult {
-        val contextQ = QuickJSContext.create()
+        val engine = JsEngine.create(64)
+        // V8 exposes a thread-safe interrupt for scripts stuck in a CPU loop.
+        val timedOut = java.util.concurrent.atomic.AtomicBoolean(false)
+        val watchdogThread = Thread({
+            try {
+                Thread.sleep(SCRIPT_EXEC_TIMEOUT_MS)
+                timedOut.set(true)
+                Log.w(TAG, "$logTag timed out after ${SCRIPT_EXEC_TIMEOUT_MS}ms: $pluginId")
+                engine.terminate()
+            } catch (_: InterruptedException) {
+                // 正常执行完成，看门狗退出
+            }
+        }, "script-watchdog-$pluginId").apply { isDaemon = true }
         return try {
-            contextQ.setMemoryLimit(64 * 1024 * 1024)
-            contextQ.setMaxStackSize(16 * 1024 * 1024)
             val dataRoot = dataRoot(pluginId)
-            contextQ.globalObject.setProperty(
-                "__scriptToolsCall",
-                JSCallFunction { args ->
-                    val ns = args.getOrNull(0) as? String ?: ""
-                    val method = args.getOrNull(1) as? String ?: ""
-                    val argJson = args.getOrNull(2)?.toString() ?: "[]"
-                    handleToolsCall(dataRoot, ns, method, argJson)
-                },
-            )
-            contextQ.evaluate(TOOLPKG_SHIM)
-            contextQ.evaluate(TOOLS_SHIM)
+            engine.setGlobalFunction("__scriptToolsCall") { args ->
+                val ns = args.getOrNull(0) as? String ?: ""
+                val method = args.getOrNull(1) as? String ?: ""
+                val argJson = args.getOrNull(2)?.toString() ?: "[]"
+                handleToolsCall(dataRoot, ns, method, argJson)
+            }
+            engine.evaluate(TOOLPKG_SHIM)
+            engine.evaluate(TOOLS_SHIM)
             val sources = buildSources(scriptDir, pluginDir, files)
             val script = buildString {
-                append(ScriptJsTranspiler.RUN_GEN_RUNTIME)
-                append("\nvar __scriptSources = {\n")
+                append("var __scriptSources = {\n")
                 sources.forEach { (rel, code) ->
                     append(jsonEscaped(rel)).append(": function(exports, module, require, __dirname) {\n")
                     append(code)
@@ -387,13 +394,24 @@ function __scriptLoadEntry(entry) {
                 append("\n")
                 append(invokeFrame)
             }
-            val raw = contextQ.evaluate(script)?.toString()
-            parseResult(raw)
+            watchdogThread.start()
+            val raw = try {
+                engine.evaluate(script)?.toString()
+            } catch (e: Throwable) {
+                if (timedOut.get()) null else throw e
+            }
+            watchdogThread.interrupt()
+            if (timedOut.get()) {
+                ToolResult(false, "脚本执行超时（${SCRIPT_EXEC_TIMEOUT_MS / 1000}s）", null)
+            } else {
+                parseResult(raw)
+            }
         } catch (e: Throwable) {
+            watchdogThread.interrupt()
             Log.w(TAG, "$logTag failed: $pluginId", e)
             ToolResult(false, e.message ?: "脚本执行异常", null)
         } finally {
-            runCatching { contextQ.destroy() }
+            runCatching { engine.close() }
         }
     }
 
@@ -436,7 +454,7 @@ function __scriptLoadEntry(entry) {
             val rel = file.relativeTo(scriptDir).path.replace('\\', '/')
             if (result.containsKey(rel)) return@forEach
             val source = runCatching { file.readText() }.getOrNull() ?: return@forEach
-            result[rel] = ScriptJsTranspiler.transpile(source)
+                    result[rel] = source
         }
         // 包根 shared/ 共享目录：逻辑 key 为 "shared/<rel>"，兼容 ../shared/xxx require（loader 会 normalize）
         val sharedDir = File(pluginDir, "shared")
@@ -448,7 +466,7 @@ function __scriptLoadEntry(entry) {
                     val rel = "shared/" + file.relativeTo(sharedDir).path.replace('\\', '/')
                     if (result.containsKey(rel)) return@forEach
                     val source = runCatching { file.readText() }.getOrNull() ?: return@forEach
-                    result[rel] = ScriptJsTranspiler.transpile(source)
+            result[rel] = source
                 }
         }
         return result.toList()
@@ -581,10 +599,15 @@ function __scriptLoadEntry(entry) {
                     val builder = Request.Builder().url(url).post(body)
                     headers?.forEach { (k, v) -> builder.header(k, v) }
                     httpClient.newCall(builder.build()).execute().use { resp ->
+                        val bodyBytes = resp.body?.bytes()?.let {
+                            if (it.size > MAX_RESP_BODY_BYTES) it.copyOfRange(0, MAX_RESP_BODY_BYTES.toInt()) else it
+                        } ?: ByteArray(0)
+                        val truncated = (resp.body?.contentLength() ?: 0) > MAX_RESP_BODY_BYTES
                         buildJsonObject {
                             put("ok", true)
                             put("statusCode", resp.code)
-                            put("body", resp.body?.string().orEmpty())
+                            put("body", runCatching { String(bodyBytes, Charsets.UTF_8) }.getOrDefault(""))
+                            put("truncated", truncated)
                         }
                     }
                 }.getOrElse { e -> opErr("上传失败：${e.message ?: "未知错误"}") }
@@ -616,12 +639,17 @@ function __scriptLoadEntry(entry) {
                 builder.method(method.ifBlank { "POST" }, body.toRequestBody(media))
             }
             httpClient.newCall(builder.build()).execute().use { resp ->
-                val respBody = resp.body?.string().orEmpty()
+                val bodyBytes = resp.body?.bytes()?.let {
+                    if (it.size > MAX_RESP_BODY_BYTES) it.copyOfRange(0, MAX_RESP_BODY_BYTES.toInt()) else it
+                } ?: ByteArray(0)
+                val truncated = (resp.body?.contentLength() ?: 0) > MAX_RESP_BODY_BYTES
+                val respBody = runCatching { String(bodyBytes, Charsets.UTF_8) }.getOrDefault("")
                 val respHeaders = resp.headers.names().associateWith { resp.headers.values(it).joinToString(", ") }
                 buildJsonObject {
                     put("ok", true)
                     put("statusCode", resp.code)
                     put("body", respBody)
+                    put("truncated", truncated)
                     put("headers", JsonObject(respHeaders.mapValues { JsonPrimitive(it.value) }))
                 }
             }

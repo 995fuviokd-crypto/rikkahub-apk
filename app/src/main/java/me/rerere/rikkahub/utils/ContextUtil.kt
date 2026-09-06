@@ -123,7 +123,7 @@ fun Context.openUrl(url: String) {
             .build()
         intent.launchUrl(this, url.toUri())
     }.onFailure {
-        it.printStackTrace()
+        Log.e(TAG, "", it)
         Toast.makeText(this, "Failed to open URL: $url", Toast.LENGTH_SHORT).show()
     }
 }
@@ -276,7 +276,6 @@ fun Context.exportImage(
     var outputStream: OutputStream? = null
     try {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 10及以上使用MediaStore API
             val contentValues = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
                 put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
@@ -285,14 +284,13 @@ fun Context.exportImage(
             val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
             uri?.let {
                 outputStream = contentResolver.openOutputStream(it)
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream!!)
+                outputStream?.use { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) }
             }
         } else {
-            // Android 9及以下直接写入文件
             val imagesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
             val image = File(imagesDir, fileName)
             outputStream = FileOutputStream(image)
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+            outputStream?.use { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) }
 
             // 通知图库更新
             val mediaScanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
@@ -339,7 +337,7 @@ fun Context.exportImageFile(
             val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
             uri?.let {
                 outputStream = contentResolver.openOutputStream(it)
-                file.inputStream().copyTo(outputStream!!)
+                outputStream?.use { out -> file.inputStream().copyTo(out) }
             }
         } else {
             // Android 9及以下直接写入文件

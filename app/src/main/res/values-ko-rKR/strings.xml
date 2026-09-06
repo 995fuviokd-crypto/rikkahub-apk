@@ -85,7 +85,7 @@
   <string name="assistant_page_local_tools_ask_user_title">사용자에게 질문</string>
   <string name="assistant_page_local_tools_clipboard_desc">기기 클립보드에서 텍스트 읽기 또는 쓰기</string>
   <string name="assistant_page_local_tools_clipboard_title">클립보드</string>
-  <string name="assistant_page_local_tools_javascript_engine_desc">QuickJS 엔진으로 자바스크립트 코드를 실행하여 계산 및 스크립팅 수행</string>
+  <string name="assistant_page_local_tools_javascript_engine_desc">V8 엔진으로 자바스크립트 코드를 실행하여 계산 및 스크립팅 수행</string>
   <string name="assistant_page_local_tools_javascript_engine_title">자바스크립트 엔진</string>
   <string name="assistant_page_local_tools_time_info_desc">기기에서 현재 날짜, 요일, 시간, 시간대 정보 가져오기</string>
   <string name="assistant_page_local_tools_time_info_title">시간 정보</string>

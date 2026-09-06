@@ -218,8 +218,11 @@ object MemoryGating {
         return normalized
     }
 
-    fun dedupKey(text: String): String =
-        Regex("\\s+").replace(text.trim().lowercase(Locale.ROOT), " ")
+    fun dedupKey(text: String): String {
+        val normalized = text.trim().lowercase(Locale.ROOT)
+        val noPunctuation = Regex("[\\p{Punct}]").replace(normalized, "")
+        return Regex("\\s+").replace(noPunctuation, " ")
+    }
 
     fun ftsEscape(token: String): String = "\"" + token.replace("\"", " ") + "\""
 

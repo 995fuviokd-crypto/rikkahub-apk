@@ -118,9 +118,12 @@ interface MemoryDAO {
     @Query("SELECT COUNT(*) FROM memoryjournalentity WHERE processed = 0")
     suspend fun countUnprocessedJournal(): Int
 
+    @Query("UPDATE memoryjournalentity SET processed = 1 WHERE id IN (:ids)")
+    suspend fun markJournalProcessed(ids: List<Int>)
+
     @Query("DELETE FROM memoryjournalentity WHERE conversation_id = :conversationId")
     suspend fun deleteJournalOfConversation(conversationId: String)
 
-    @Query("DELETE FROM memoryjournalentity WHERE id IN (SELECT id FROM memoryjournalentity ORDER BY created_at ASC LIMIT :limit)")
-    suspend fun deleteOldestJournal(limit: Int)
+    @Query("DELETE FROM memoryjournalentity WHERE id IN (SELECT id FROM memoryjournalentity WHERE processed = 1 ORDER BY created_at ASC LIMIT :limit)")
+    suspend fun deleteOldestProcessedJournal(limit: Int)
 }

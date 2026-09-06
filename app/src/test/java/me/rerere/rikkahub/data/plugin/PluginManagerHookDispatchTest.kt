@@ -21,7 +21,7 @@ import org.robolectric.annotation.Config
 import java.io.File
 
 /**
- * dispatchHook 编排逻辑测试：通过覆写 ScriptRuntime.runHook 隔离 QuickJS，
+ * dispatchHook 编排逻辑测试：通过覆写 ScriptRuntime.runHook 隔离 V8 引擎，
  * 专测链式顺序、失败隔离、超时跳过与非对象返回防护。
  */
 @RunWith(RobolectricTestRunner::class)

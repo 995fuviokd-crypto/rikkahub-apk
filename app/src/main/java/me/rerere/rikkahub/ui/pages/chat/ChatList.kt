@@ -392,16 +392,27 @@ private fun ChatListNormal(
         modifier = Modifier
             .fillMaxSize(),
     ) {
-        // 自动滚动到底部
+        // 自动滚动到底部：仅在用户位于底部且正在生成时跟随新内容
         if (settings.displaySetting.enableAutoScroll) {
+            var wasAtBottom by remember { mutableStateOf(true) }
+
             LaunchedEffect(state) {
                 snapshotFlow { state.layoutInfo.visibleItemsInfo }.collect { visibleItemsInfo ->
-                    // 只有在「真正滚到底部」时才跟随新内容：canScrollForward 为 false 表示底部
-                    // 已没有可滚动的项，避免用户正在向上翻阅长消息时被 requestScrollToItem 突然拉回。
-                    // println("is bottom = ${visibleItemsInfo.isAtBottom()}, scroll = ${state.isScrollInProgress}, can_scroll = ${state.canScrollForward}, loading = $loading")
-                    if (!state.isScrollInProgress && !state.canScrollForward && loadingState) {
+                    val atBottom = visibleItemsInfo.isAtBottom()
+                    if (atBottom) {
+                        wasAtBottom = true
+                    }
+                    if (!state.isScrollInProgress && wasAtBottom && loadingState) {
                         state.requestScrollToItem(conversationUpdated.messageNodes.lastIndex + 10)
                     }
+                }
+            }
+
+            // 生成完成时，如果用户之前在底部，执行一次最终滚动确保停留在底部
+            LaunchedEffect(loadingState) {
+                if (!loadingState && wasAtBottom) {
+                    delay(100)
+                    state.requestScrollToItem(conversationUpdated.messageNodes.lastIndex + 10)
                 }
             }
         }

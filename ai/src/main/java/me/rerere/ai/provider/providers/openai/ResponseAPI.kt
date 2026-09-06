@@ -191,7 +191,7 @@ class ResponseAPI(
                     if (myGeneration != generation) return
                     var exception = t
 
-                    t?.printStackTrace()
+                    t?.let { Log.e(TAG, "", it) }
                     println("[onFailure] 发生错误: ${t?.javaClass?.name} ${t?.message} / $response")
 
                     val bodyRaw = response?.body?.stringSafe()
@@ -204,7 +204,7 @@ class ResponseAPI(
                         }
                     } catch (e: Throwable) {
                         Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                        e.printStackTrace()
+                        Log.e(TAG, "", e)
                     }
 
                     val code = response?.code ?: -1
@@ -482,7 +482,7 @@ class ResponseAPI(
                                                     put("type", "input_image")
                                                     put("image_url", encoded.base64)
                                                 }.onFailure {
-                                                    it.printStackTrace()
+                                                    Log.e(TAG, "", it)
                                                     put("type", "input_text")
                                                     put("text", "Error: Failed to encode image to base64")
                                                 }
@@ -570,7 +570,7 @@ class ResponseAPI(
                                         put("type", "input_image")
                                         put("image_url", encodedImage.base64)
                                     }.onFailure {
-                                        it.printStackTrace()
+                                        Log.e(TAG, "", it)
                                         put("type", "input_text")
                                         put("text", "Error: Failed to encode image to base64")
                                     }

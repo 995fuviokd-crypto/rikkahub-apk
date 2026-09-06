@@ -1,7 +1,5 @@
 package me.rerere.common.js
 
-import com.whl.quickjs.wrapper.JSCallFunction
-import com.whl.quickjs.wrapper.QuickJSContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
@@ -23,7 +21,7 @@ private data class HttpResponseDto(
 )
 
 // fetch() returns a Response object synchronously (not a Promise)
-// because this QuickJS wrapper doesn't support microtask scheduling.
+// V8 完整支持微任务队列，但此处仍沿用同步调用模式以保持兼容。
 private const val FETCH_POLYFILL = """
 globalThis.fetch = function(url, options) {
     options = options || {};
@@ -50,8 +48,8 @@ globalThis.fetch = function(url, options) {
 };
 """
 
-fun QuickJSContext.injectFetch(httpClient: OkHttpClient) {
-    globalObject.setProperty("__httpRequest", JSCallFunction { args ->
+fun JsEngine.injectFetch(httpClient: OkHttpClient) {
+    setGlobalFunction("__httpRequest") { args ->
         val url = args[0] as? String ?: error("url is required")
         val method = (args[1] as? String ?: "GET").uppercase()
         val headersJson = args[2] as? String
@@ -102,7 +100,7 @@ fun QuickJSContext.injectFetch(httpClient: OkHttpClient) {
                 body = responseBody,
             )
         )
-    })
+    }
 
     evaluate(FETCH_POLYFILL)
 }

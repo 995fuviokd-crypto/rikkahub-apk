@@ -21,6 +21,7 @@ import me.rerere.ai.ui.ServerToolMetadata
 import me.rerere.ai.ui.ServerToolProtocol
 import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.ai.ui.StreamChunkHandler
+import me.rerere.ai.provider.ProviderHttpClient
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.metadataAs
@@ -32,7 +33,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GoogleToolCombinationTest {
-    private val provider = GoogleProvider(OkHttpClient())
+    private val provider = GoogleProvider(ProviderHttpClient(OkHttpClient()))
 
     @Test
     fun `built-in and function tools enable server-side tool invocations`() {
@@ -169,15 +170,16 @@ class GoogleToolCombinationTest {
             "buildCompletionRequestBody",
             List::class.java,
             TextGenerationParams::class.java,
+            Map::class.java,
         )
         method.isAccessible = true
-        return method.invoke(provider, messages, params) as JsonObject
+        return method.invoke(provider, messages, params, emptyMap<String, String>()) as JsonObject
     }
 
     private fun invokeBuildContents(messages: List<UIMessage>): JsonArray {
-        val method = GoogleProvider::class.java.getDeclaredMethod("buildContents", List::class.java)
+        val method = GoogleProvider::class.java.getDeclaredMethod("buildContents", List::class.java, Map::class.java)
         method.isAccessible = true
-        return method.invoke(provider, messages) as JsonArray
+        return method.invoke(provider, messages, emptyMap<String, String>()) as JsonArray
     }
 
     private fun toolModel(tools: Set<BuiltInTools> = emptySet()) = Model(

@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.chat
 
 import android.content.Context
+import android.util.Log
 import android.graphics.Bitmap
 import android.net.Uri
 import android.widget.Toast
@@ -108,6 +109,8 @@ import java.time.LocalDateTime
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
 
+private const val TAG = "Export"
+
 @Composable
 fun ChatExportSheet(
     visible: Boolean,
@@ -214,7 +217,7 @@ fun ChatExportSheet(
                                                 options = imageExportOptions
                                             )
                                         }.onFailure {
-                                            it.printStackTrace()
+                                            Log.e(TAG, "", it)
                                             toaster.show(
                                                 message = "Failed to export image: ${it.message}",
                                                 type = ToastType.Error
@@ -373,7 +376,7 @@ private fun exportToMarkdown(
         shareFile(context, uri, "text/markdown")
 
     } catch (e: Exception) {
-        e.printStackTrace()
+        Log.e(TAG, "", e)
     }
 }
 
@@ -436,7 +439,7 @@ private suspend fun exportToImage(
         )
         shareFile(context, uri, "image/png")
     } catch (e: Exception) {
-        e.printStackTrace()
+        Log.e(TAG, "", e)
         withContext(Dispatchers.Main) {
             Toast.makeText(context, "Failed to export image: ${e.message}", Toast.LENGTH_SHORT).show()
         }
@@ -571,6 +574,10 @@ private fun ExportedChatMessage(
 
                                     is ThinkingStep.ServerToolStep -> {
                                         ChatMessageServerToolStep(tool = step.tool)
+                                    }
+
+                                    is ThinkingStep.InlineText -> {
+                                        // Inline text within thinking is exported as plain text
                                     }
                                 }
                             }

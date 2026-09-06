@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.richtext
 
 import android.graphics.BitmapFactory
+import android.util.Log
 import android.util.Base64
 import android.webkit.JavascriptInterface
 import androidx.activity.compose.LocalActivity
@@ -40,6 +41,8 @@ import me.rerere.rikkahub.utils.escapeHtml
 import me.rerere.rikkahub.utils.exportImage
 import me.rerere.rikkahub.utils.toCssHex
 
+private const val TAG = "Mermaid"
+
 @Composable
 fun Mermaid(
     code: String,
@@ -67,7 +70,7 @@ fun Mermaid(
                                 "mermaid_${System.currentTimeMillis()}.png"
                             )
                         } catch (e: Exception) {
-                            e.printStackTrace()
+                            Log.e(TAG, "", e)
                         }
                     }
                     toaster.show(
@@ -75,7 +78,7 @@ fun Mermaid(
                         type = ToastType.Success
                     )
                 }.onFailure {
-                    it.printStackTrace()
+                    Log.e(TAG, "", it)
                     toaster.show(
                         context.getString(R.string.mermaid_export_failed),
                         type = ToastType.Error

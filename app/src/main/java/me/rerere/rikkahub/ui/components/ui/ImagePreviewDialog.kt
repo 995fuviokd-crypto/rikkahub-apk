@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import android.util.Log
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,6 +29,8 @@ import me.rerere.hugeicons.stroke.Download01
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.ui.context.LocalToaster
 import org.koin.compose.koinInject
+
+private const val TAG = "ImagePreviewDialog"
 
 @Composable
 fun ImagePreviewDialog(
@@ -72,7 +75,7 @@ fun ImagePreviewDialog(
                                 filesManager.saveMessageImage(context, imgUrl)
                                 toaster.show(message = "已保存图片", type = ToastType.Success)
                             }.onFailure {
-                                it.printStackTrace()
+                                Log.e(TAG, "", it)
                                 toaster.show(
                                     message = it.toString(),
                                     type = ToastType.Error

@@ -10,6 +10,8 @@ import me.rerere.rikkahub.data.repository.GroupRepository
 import java.time.LocalDateTime
 import java.util.concurrent.ConcurrentHashMap
 
+private const val TAG = "GroupScheduler"
+
 /**
  * 任务中心定时调度器：每分钟检查所有配置了 cron 的群组，
  * 到达下一次触发时间则自动发起一次任务运行。

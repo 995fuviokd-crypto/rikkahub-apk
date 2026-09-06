@@ -150,26 +150,26 @@ class MemoryOps(
 
     private suspend fun trimJournalIfNeeded() {
         if (memoryDao.countUnprocessedJournal() <= JOURNAL_MAX_ROWS) return
-        memoryDao.deleteOldestJournal(JOURNAL_TRIM_BATCH)
+        memoryDao.deleteOldestProcessedJournal(JOURNAL_TRIM_BATCH)
     }
 
     private suspend fun findNearDuplicate(assistantId: String, content: String): MemoryEntity? {
         val queryVector = embedder.embed(content)
-        var best: MemoryEntity? = null
-        var bestScore = 0.0f
-        var count = 0
-        memoryDao.getScopedMemoriesOfAssistant(assistantId, MemoryScope.DURABLE)
-            .asSequence()
+        val candidates = memoryDao.getScopedMemoriesOfAssistant(assistantId, MemoryScope.DURABLE)
             .sortedByDescending { it.updatedAt }
             .take(MAX_NEAR_DUPLICATE_SCAN)
-            .forEach { existing ->
-                val score = embedder.similarity(queryVector, embedder.embed(existing.content))
-                if (score > bestScore) {
-                    bestScore = score
-                    best = existing
-                }
-                count++
+        if (candidates.isEmpty()) return null
+        val cachedEmbeddings = candidates.associate { it.id to embedder.embed("${it.summary.orEmpty()}\n${it.content}") }
+        var best: MemoryEntity? = null
+        var bestScore = 0.0f
+        candidates.forEach { existing ->
+            val existingVector = cachedEmbeddings[existing.id] ?: return@forEach
+            val score = embedder.similarity(queryVector, existingVector)
+            if (score > bestScore) {
+                bestScore = score
+                best = existing
             }
+        }
         return if (bestScore >= NEAR_DUPLICATE_THRESHOLD) best else null
     }
 }

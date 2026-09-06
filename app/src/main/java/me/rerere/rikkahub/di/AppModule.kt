@@ -180,4 +180,12 @@ val appModule = module {
             filesManager = get()
         )
     }
+
+    single {
+        me.rerere.rikkahub.data.files.PresetImportExportService(
+            context = get(),
+            settingsStore = get(),
+            skillManager = get(),
+        )
+    }
 }
